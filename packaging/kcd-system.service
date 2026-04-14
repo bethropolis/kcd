@@ -1,0 +1,34 @@
+[Unit]
+Description=kcd — Headless KDE Connect Daemon (User %i)
+After=network.target
+Documentation=https://github.com/bethropolis/kcd
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kcd daemon
+Restart=on-failure
+RestartSec=5
+User=%i
+Group=%i
+
+# Security Hardening
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=100M
+TasksMax=64
+
+# Writable paths
+ReadWritePaths=/home/%i/.local/state/kcd /home/%i/Downloads/kcd /home/%i/.config/kcd
+RuntimeDirectory=kcd-%i
+RuntimeDirectoryMode=0700
+
+# Network access required
+PrivateNetwork=false
+
+# Pass XDG_RUNTIME_DIR to enable dbus
+Environment="XDG_RUNTIME_DIR=/run/user/%U"
+
+[Install]
+WantedBy=default.target

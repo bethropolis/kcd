@@ -1,0 +1,15 @@
+// ─── kcd module — add "custom/kcd" to your modules-right (or wherever) ───────
+//
+// In your waybar/config.jsonc:
+//
+//   "modules-right": ["custom/kcd", "clock", ...]
+//
+
+  "custom/kcd": {
+    "exec": "~/.config/waybar/scripts/kcd-waybar.py",
+    "return-type": "json",
+    "format": "{}",
+    "on-click": "kcd ping $(kcd devices | grep -i paired | awk '{print $1}')",
+    "on-click-right": "alacritty -e kcd devices",
+    "restart-interval": 2
+  },

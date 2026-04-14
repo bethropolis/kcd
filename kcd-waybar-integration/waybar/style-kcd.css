@@ -1,0 +1,52 @@
+/* ─── kcd (KDE Connect daemon) Waybar module ──────────────────────────────── */
+/* Paste into your waybar/style.css                                            */
+/* Assumes a Catppuccin/dark palette — adjust variables to match your theme.   */
+
+#custom-kcd {
+    padding: 0 10px;
+    margin: 0 2px;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+
+    /* Base: inherit bar text color */
+    color: inherit;
+    background: transparent;
+}
+
+/* ── No device connected ──────────────────────────────────────────────────── */
+#custom-kcd.kcd-disconnected {
+    color: alpha(currentColor, 0.35);   /* dim/ghost when nothing is around */
+}
+
+/* ── Device connected, battery healthy ───────────────────────────────────── */
+#custom-kcd.kcd-connected {
+    color: #a6e3a1;   /* Catppuccin green */
+}
+
+/* ── Charging ─────────────────────────────────────────────────────────────── */
+#custom-kcd.kcd-charging {
+    color: #89dceb;   /* Catppuccin sky — distinct from plain green */
+    /* Optional: subtle animated glow while charging */
+    animation: kcd-pulse 2.5s ease-in-out infinite;
+}
+
+/* ── Low battery (<20%) ───────────────────────────────────────────────────── */
+#custom-kcd.kcd-low {
+    color: #f38ba8;   /* Catppuccin red */
+    animation: kcd-blink 1.2s step-start infinite;
+}
+
+/* ── Error state (daemon not found, etc.) ────────────────────────────────── */
+#custom-kcd.kcd-error {
+    color: #fab387;   /* Catppuccin peach */
+    opacity: 0.7;
+}
+
+/* ── Hover: always show full brightness regardless of state ──────────────── */
+#custom-kcd:hover {
+    background: alpha(white, 0.08);
+    color: #cdd6f4;   /* Catppuccin text */
+    animation: none;  /* stop blink/pulse on hover so tooltip is readable */
+}
+

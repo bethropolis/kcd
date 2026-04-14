@@ -1,0 +1,20 @@
+device_name = "kcd-desktop"
+device_type = "desktop"
+tcp_port = 1716
+enable_broadcast = true
+
+# The default socket path depends on XDG_RUNTIME_DIR
+# For example: /run/user/1000/kcd/kcd.sock
+# socket_path = "/run/user/1000/kcd/kcd.sock"
+
+[plugins]
+battery = true
+clipboard = true
+notification = true
+share = true
+runcommand = true
+mpris = true
+
+[commands]
+# Example commands
+uptime = "uptime"

@@ -1,0 +1,4 @@
+[kcd]
+title=KDE Connect (kcd)
+description=Headless KDE Connect Daemon
+ports=1716/udp|1716/tcp|1739:1764/tcp

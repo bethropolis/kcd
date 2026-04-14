@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>kcd</short>
+  <description>Headless KDE Connect Daemon</description>
+  <port protocol="udp" port="1716"/>
+  <port protocol="tcp" port="1716"/>
+  <port protocol="tcp" port="1739-1764"/>
+</service>

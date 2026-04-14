@@ -1,0 +1,29 @@
+[Unit]
+Description=kcd — Headless KDE Connect Daemon
+After=network.target
+Documentation=https://github.com/bethropolis/kcd
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/kcd daemon
+Restart=on-failure
+RestartSec=5
+
+# Security Hardening
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=100M
+TasksMax=64
+
+# Writable paths
+ReadWritePaths=%h/.local/state/kcd %h/Downloads/kcd %h/.config/kcd
+RuntimeDirectory=kcd
+RuntimeDirectoryMode=0700
+
+# Network access required
+PrivateNetwork=false
+
+[Install]
+WantedBy=default.target
