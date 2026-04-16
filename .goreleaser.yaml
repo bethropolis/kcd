@@ -1,0 +1,108 @@
+# .goreleaser.yaml for kcd
+version: 2
+
+project_name: kcd
+
+before:
+  hooks:
+    - go test -p 1 ./...
+    - go mod tidy
+
+builds:
+  - id: kcd
+    binary: kcd
+    main: ./cmd/kcd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - 7
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - packaging/kcd-user.service
+      - packaging/kcd-system.service
+      - packaging/kcd.example.toml
+      - packaging/ufw-kcd
+      - packaging/firewalld-kcd.xml
+      - README.md
+
+nfpms:
+  - id: kcd-package
+    package_name: kcd
+    vendor: kcd-project
+    homepage: https://github.com/bethropolis/kcd
+    maintainer: "maintainer@example.com"
+    description: Headless KDE Connect daemon
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+    contents:
+      - src: packaging/kcd-system.service
+        dst: /usr/lib/systemd/system/kcd@.service
+      - src: packaging/kcd-user.service
+        dst: /usr/share/doc/kcd/examples/kcd-user.service
+        type: doc
+      - src: packaging/kcd.example.toml
+        dst: /etc/kcd/kcd.example.toml
+        type: config
+      - src: packaging/ufw-kcd
+        dst: /etc/ufw/applications.d/kcd
+      - src: packaging/firewalld-kcd.xml
+        dst: /usr/lib/firewalld/services/kcd.xml
+
+dockers_v2:
+  - images:
+      - "ghcr.io/bethropolis/kcd"
+    tags:
+      - "{{ .Tag }}"
+      - "latest"
+    dockerfile: Dockerfile.goreleaser
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.description": "Headless KDE Connect daemon"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ .Tag }}-snapshot"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+    - title: Performance
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

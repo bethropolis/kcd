@@ -1,0 +1,4 @@
+FROM alpine:latest
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/kcd /usr/bin/kcd
+ENTRYPOINT ["/usr/bin/kcd"]
