@@ -3,13 +3,13 @@ package telephony
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/dbusutil"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
@@ -114,7 +114,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			return // ignore "talking" or unknown events for notifications
 		}
 
-		_ = exec.Command("notify-send", "-a", "KDE Connect", "-u", urgency, title, message).Run()
+		plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-u", urgency, title, message)
 	}()
 
 	return nil

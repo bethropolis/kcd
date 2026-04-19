@@ -172,7 +172,7 @@ func (p *SendNotificationPlugin) handleDBusMessage(msg *dbus.Message) {
 	for _, dev := range p.devices.List() {
 		if dev.IsConnected() {
 			if err := dev.Send(notifPkt); err != nil {
-				p.logger.Debug("sendnotification: send failed", zap.String("device", dev.ID()), zap.Error(err))
+				p.logger.Debug("sendnotification: send failed", zap.String("device_id", dev.ID()), zap.Error(err))
 			}
 		}
 	}

@@ -127,10 +127,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, tlsCfg, bus, logger))
 	}
 	if cfg.Plugins.RunCommand {
-		plugins.Register(&runcommand.RunCommandPlugin{Commands: cfg.Commands})
+		plugins.Register(runcommand.NewRunCommandPlugin(cfg.Commands, logger))
 	}
 	if cfg.Plugins.Ping {
-		plugins.Register(ping.NewPingPlugin(bus))
+		plugins.Register(ping.NewPingPlugin(bus, logger))
 	}
 	if cfg.Plugins.Telephony {
 		plugins.Register(telephony.NewTelephonyPluginWithOptions(bus, cfg.Plugins.PauseMusic, logger))

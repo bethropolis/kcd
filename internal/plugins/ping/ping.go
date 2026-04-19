@@ -3,20 +3,22 @@ package ping
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"go.uber.org/zap"
 )
 
 type PingPlugin struct {
-	bus *events.Bus
+	bus    *events.Bus
+	logger *zap.Logger
 }
 
-func NewPingPlugin(bus *events.Bus) *PingPlugin {
-	return &PingPlugin{bus: bus}
+func NewPingPlugin(bus *events.Bus, logger *zap.Logger) *PingPlugin {
+	return &PingPlugin{bus: bus, logger: logger.With(zap.String("plugin", "ping"))}
 }
 
 type PingBody struct {
@@ -44,9 +46,7 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 	}
 
 	// Do not block - spawn goroutine
-	go func() {
-		_ = exec.Command("notify-send", "-a", "KDE Connect", "-i", "smartphone", "Ping from "+dev.Name(), msg).Run()
-	}()
+	plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-i", "smartphone", "Ping from "+dev.Name(), msg)
 
 	return nil
 }

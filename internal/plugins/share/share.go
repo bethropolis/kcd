@@ -14,6 +14,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -91,9 +92,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
-		go func() {
-			_ = exec.Command("xdg-open", body.Url).Run()
-		}()
+		plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
 		return nil
 	}
 
@@ -217,7 +216,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	}
 
 	p.Logger.Info("share: sending transfer invitation",
-		zap.String("device", dev.Name()),
+		zap.String("device_id", dev.ID()),
 		zap.String("path", filePath),
 		zap.Int64("size", pkt.PayloadSize),
 		zap.Int("port", port),

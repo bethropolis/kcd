@@ -3,17 +3,23 @@ package runcommand
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"go.uber.org/zap"
 )
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {
 	// Commands maps keys to shell command strings.
 	Commands map[string]string
+	logger   *zap.Logger
+}
+
+func NewRunCommandPlugin(commands map[string]string, logger *zap.Logger) *RunCommandPlugin {
+	return &RunCommandPlugin{Commands: commands, logger: logger.With(zap.String("plugin", "runcommand"))}
 }
 
 // RequestBody represents a request from the phone.
@@ -76,15 +82,7 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		}
 
 		// Handlers must not block. Spawning goroutine.
-		go func() {
-			// Absolute rule: RunCommand uses exec.CommandContext with 10s timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			// Using sh -c to allow multiple arguments in a single string from config.
-			cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
-			_ = cmd.Run()
-		}()
+		plugin.RunCommandAsync(p.logger, "sh", "-c", cmdStr)
 	}
 
 	return nil

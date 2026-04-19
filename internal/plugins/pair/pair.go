@@ -102,18 +102,18 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 	switch state {
 	case device.StatePairRequested:
 		// We requested pairing, they accepted
-		p.logger.Info("pairing accepted by peer", zap.String("device", dev.Name()))
+		p.logger.Info("pairing accepted by peer", zap.String("device_id", dev.ID()))
 		p.pairingDone(dev)
 
 	case device.StatePairRequestedByPeer:
 		// Already have a pending request, ignore duplicate
-		p.logger.Debug("ignoring duplicate pair request", zap.String("device", dev.Name()))
+		p.logger.Debug("ignoring duplicate pair request", zap.String("device_id", dev.ID()))
 
 	case device.StatePaired:
 		// Already paired - this is normal behavior in KDE Connect.
 		// The peer sends pair:true as confirmation/keep-alive.
 		// Just acknowledge by sending pair:true back.
-		p.logger.Debug("received pair confirmation from already paired device", zap.String("device", dev.Name()))
+		p.logger.Debug("received pair confirmation from already paired device", zap.String("device_id", dev.ID()))
 		pkt, _ := protocol.NewPairPacket(protocol.PairAccept)
 		dev.Send(pkt)
 		return nil
@@ -126,7 +126,7 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 			diff := now - body.Timestamp
 			if diff < -AllowedTimestampDiff || diff > AllowedTimestampDiff {
 				p.logger.Warn("pair request timestamp out of range",
-					zap.String("device", dev.Name()),
+					zap.String("device_id", dev.ID()),
 					zap.Int64("timestamp", body.Timestamp),
 					zap.Int64("now", now))
 				// Send rejection
@@ -140,7 +140,7 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 			p.mu.Unlock()
 		}
 
-		p.logger.Info("incoming pair request", zap.String("device", dev.Name()))
+		p.logger.Info("incoming pair request", zap.String("device_id", dev.ID()))
 
 		var vKey string
 		peerCert := dev.PeerCert()
@@ -150,13 +150,13 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 				vKey = vKey[:16]
 			}
 			p.logger.Info("pairing verification code",
-				zap.String("device", dev.Name()),
+				zap.String("device_id", dev.ID()),
 				zap.String("code", vKey))
 		}
 
 		if p.autoAccept {
 			// Auto-accept mode: immediately accept
-			p.logger.Info("auto-accepting pair request", zap.String("device", dev.Name()))
+			p.logger.Info("auto-accepting pair request", zap.String("device_id", dev.ID()))
 			return p.AcceptPairing(dev)
 		}
 
@@ -178,24 +178,24 @@ func (p *PairPlugin) handleUnpairRequest(ctx context.Context, dev *device.Device
 	switch state {
 	case device.StatePairRequested:
 		// We requested, they rejected
-		p.logger.Info("pair request rejected by peer", zap.String("device", dev.Name()))
+		p.logger.Info("pair request rejected by peer", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 		p.emit(events.TypePairRejected, dev, "")
 
 	case device.StatePairRequestedByPeer:
 		// They requested, then cancelled
-		p.logger.Info("pair request cancelled by peer", zap.String("device", dev.Name()))
+		p.logger.Info("pair request cancelled by peer", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 		p.emit(events.TypePairRejected, dev, "")
 
 	case device.StatePaired:
 		// Unpair request
-		p.logger.Info("unpair request received", zap.String("device", dev.Name()))
+		p.logger.Info("unpair request received", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 
 	case device.StateUnpaired, device.StateUnknown:
 		// Already unpaired, ignore
-		p.logger.Debug("ignoring unpair request for unpaired device", zap.String("device", dev.Name()))
+		p.logger.Debug("ignoring unpair request for unpaired device", zap.String("device_id", dev.ID()))
 	}
 
 	// Clean up stored timestamp
@@ -230,7 +230,7 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 // RequestPairing initiates a pairing request to a device.
 func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 	if dev.State() == device.StatePaired {
-		p.logger.Warn("device already paired", zap.String("device", dev.Name()))
+		p.logger.Warn("device already paired", zap.String("device_id", dev.ID()))
 		return nil
 	}
 
@@ -261,12 +261,12 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 			vKey = vKey[:16]
 		}
 		p.logger.Info("pairing verification code",
-			zap.String("device", dev.Name()),
+			zap.String("device_id", dev.ID()),
 			zap.String("code", vKey))
 	}
 
 	dev.SetState(device.StatePairRequested)
-	p.logger.Info("pair request sent", zap.String("device", dev.Name()))
+	p.logger.Info("pair request sent", zap.String("device_id", dev.ID()))
 
 	if p.onStateChanged != nil {
 		p.onStateChanged()
@@ -293,7 +293,7 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("pair request rejected", zap.String("device", dev.Name()))
+	p.logger.Info("pair request rejected", zap.String("device_id", dev.ID()))
 	return nil
 }
 
@@ -315,7 +315,7 @@ func (p *PairPlugin) Unpair(dev *device.Device) error {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("device unpaired", zap.String("device", dev.Name()))
+	p.logger.Info("device unpaired", zap.String("device_id", dev.ID()))
 	return nil
 }
 
@@ -330,6 +330,6 @@ func (p *PairPlugin) pairingDone(dev *device.Device) {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("pairing complete", zap.String("device", dev.Name()))
+	p.logger.Info("pairing complete", zap.String("device_id", dev.ID()))
 	p.emit(events.TypePairAccepted, dev, "")
 }
