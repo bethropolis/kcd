@@ -17,9 +17,9 @@ import (
 
 // NotificationPlugin handles incoming notifications and displays them on the desktop.
 type NotificationPlugin struct {
-	bus             *events.Bus
-	notifIDs        sync.Map // maps body.ID (string) -> desktop notify-send ID (string)
-	canCloseNotifs  bool     // whether notify-send supports --print-id
+	bus            *events.Bus
+	notifIDs       sync.Map // maps body.ID (string) -> desktop notify-send ID (string)
+	canCloseNotifs bool     // whether notify-send supports --print-id
 }
 
 func NewNotificationPlugin(bus *events.Bus) *NotificationPlugin {

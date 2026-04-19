@@ -17,8 +17,8 @@ import (
 
 // SystemVolumePlugin handles volume control packets from the phone.
 type SystemVolumePlugin struct {
-	logger     *zap.Logger
-	backend    string // "wpctl" or "pactl"
+	logger  *zap.Logger
+	backend string // "wpctl" or "pactl"
 }
 
 func NewSystemVolumePlugin(logger *zap.Logger) *SystemVolumePlugin {
@@ -37,11 +37,11 @@ func NewSystemVolumePlugin(logger *zap.Logger) *SystemVolumePlugin {
 }
 
 type VolumeBody struct {
-	RequestSinks bool    `json:"requestSinks,omitempty"`
-	Name         string  `json:"name,omitempty"`
-	Volume       int     `json:"volume,omitempty"`
-	Muted        bool    `json:"muted,omitempty"`
-	MaxVolume    int     `json:"maxVolume,omitempty"`
+	RequestSinks bool   `json:"requestSinks,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Volume       int    `json:"volume,omitempty"`
+	Muted        bool   `json:"muted,omitempty"`
+	MaxVolume    int    `json:"maxVolume,omitempty"`
 }
 
 type SinkInfo struct {

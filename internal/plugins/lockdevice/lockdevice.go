@@ -32,9 +32,11 @@ type LockBody struct {
 	IsLocked      bool `json:"isLocked,omitempty"`
 }
 
-func (p *LockDevicePlugin) Name() string            { return "LockDevice" }
-func (p *LockDevicePlugin) Timeout() time.Duration  { return 5 * time.Second }
-func (p *LockDevicePlugin) IncomingTypes() []string { return []string{"kdeconnect.lock", "kdeconnect.lock.request"} }
+func (p *LockDevicePlugin) Name() string           { return "LockDevice" }
+func (p *LockDevicePlugin) Timeout() time.Duration { return 5 * time.Second }
+func (p *LockDevicePlugin) IncomingTypes() []string {
+	return []string{"kdeconnect.lock", "kdeconnect.lock.request"}
+}
 func (p *LockDevicePlugin) OutgoingTypes() []string { return []string{"kdeconnect.lock"} }
 
 func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {

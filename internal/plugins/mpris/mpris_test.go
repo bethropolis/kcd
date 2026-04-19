@@ -11,7 +11,7 @@ import (
 
 func TestMPRISPlugin_Metadata(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	
+
 	// We can't easily test D-Bus without a session bus,
 	// but we can test the plugin registration and packet types.
 	p, err := NewMPRISPlugin(logger)

@@ -180,7 +180,13 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 // downloadToFile dials a TLS side-channel and streams the payload to dest.
 func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, logger *zap.Logger) error {
 	addr := fmt.Sprintf("%s:%d", ip.String(), port)
-	dialer := &tls.Dialer{Config: tlsConfig}
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		},
+		Config: tlsConfig,
+	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("clipboard: dial %s: %w", addr, err)

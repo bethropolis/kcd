@@ -31,7 +31,7 @@ func TestSanitizeFilename(t *testing.T) {
 func TestEnsureUnique(t *testing.T) {
 	dir := t.TempDir()
 	name := "test.txt"
-	
+
 	p1, err := EnsureUnique(dir, name)
 	if err != nil {
 		t.Fatalf("EnsureUnique failed: %v", err)
@@ -39,10 +39,10 @@ func TestEnsureUnique(t *testing.T) {
 	if filepath.Base(p1) != "test.txt" {
 		t.Errorf("expected test.txt, got %s", p1)
 	}
-	
+
 	// Create the file
 	os.WriteFile(p1, []byte("hello"), 0644)
-	
+
 	p2, err := EnsureUnique(dir, name)
 	if err != nil {
 		t.Fatalf("EnsureUnique failed: %v", err)

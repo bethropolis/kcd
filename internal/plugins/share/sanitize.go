@@ -15,7 +15,7 @@ func SanitizeFilename(name string) string {
 	// 2. Get base name to strip directory paths
 	name = filepath.Base(name)
 
-	// 3. Explicitly remove any common path traversal or separators 
+	// 3. Explicitly remove any common path traversal or separators
 	name = strings.ReplaceAll(name, "/", "")
 	name = strings.ReplaceAll(name, "\\", "")
 	name = strings.ReplaceAll(name, "..", "")
@@ -47,7 +47,7 @@ func EnsureUnique(dir, name string) (string, error) {
 		name = fmt.Sprintf("%s_%d%s", base, counter, ext)
 		proposed = filepath.Join(dir, name)
 		counter++
-		
+
 		if counter > 1000 {
 			return "", fmt.Errorf("share: too many filename collisions for %s", name)
 		}

@@ -44,6 +44,7 @@ type ShareBody struct {
 	Text             string `json:"text,omitempty"`
 	Url              string `json:"url,omitempty"`
 }
+
 func (p *SharePlugin) Name() string { return "Share" }
 
 func (p *SharePlugin) Timeout() time.Duration { return 0 } // No timeout for file transfer setup

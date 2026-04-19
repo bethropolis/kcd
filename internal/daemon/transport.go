@@ -32,7 +32,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 		go broadcaster.Run(ctx, devices.AllPairedDevicesConnected)
 	}
 
-	// UDP Listener (onDeviceFound)
+	// UDP/mDNS Listener (onDeviceFound)
 	onDeviceFound := func(ip net.IP, tcpPort int, peerIdentity *protocol.Packet) {
 		var body protocol.IdentityBody
 		if err := json.Unmarshal(peerIdentity.Body, &body); err != nil {
@@ -43,23 +43,22 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 			return
 		}
 
-		// Check if already connected
 		if dev, ok := devices.Get(body.DeviceID); ok && dev.IsConnected() {
 			return
 		}
 
-		addr := fmt.Sprintf("%s:%d", ip, tcpPort)
-		logger.Debug("dialing discovered device", zap.String("device_id", body.DeviceID), zap.String("addr", addr))
+		// Spawn goroutine to prevent blocking the discovery listener
+		go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
+			addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
+			logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
 
-		// Use a goroutine to avoid blocking the UDP listener during slow TCP dials
-		go func(targetAddr string, targetID string, targetProto int) {
 			dialer := &net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second, // Crucial for detecting dead connections
 			}
-			conn, err := dialer.Dial("tcp", targetAddr)
+			conn, err := dialer.DialContext(ctx, "tcp", addr)
 			if err != nil {
-				logger.Debug("failed to dial peer", zap.String("device_id", targetID), zap.Error(err))
+				logger.Debug("failed to dial peer", zap.Error(err))
 				return
 			}
 
@@ -77,25 +76,27 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 			preTlsPkt, _ := protocol.NewPacket(protocol.TypeIdentity, preTlsId)
 
 			if err := transport.WritePlaintextPacket(conn, preTlsPkt); err != nil {
-				logger.Debug("failed to write pre-tls identity", zap.String("device_id", targetID), zap.Error(err))
 				conn.Close()
 				return
 			}
 
 			// KDE Connect inverts TLS roles: TCP client acts as TLS server
 			tlsConn := tls.Server(conn, cfg)
-			// Ensure TLS handshake also has a timeout
 			handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 				tlsConn.Close()
-				logger.Debug("tls handshake failed", zap.String("device_id", targetID), zap.Error(err))
+				logger.Debug("tls handshake failed", zap.Error(err))
 				return
 			}
 
 			transConn := transport.NewConn(tlsConn)
-			handleNewConnection(ctx, transConn, identity, devices, plugins, logger)
-		}(addr, body.DeviceID, body.ProtocolVersion)
+			// Ensure the connection is closed if handleNewConnection fails mid-setup
+			if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
+				logger.Debug("new connection setup failed", zap.Error(err))
+				transConn.Close()
+			}
+		}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 	}
 
 	udpListener := discovery.NewListener(1716, localDeviceID, onDeviceFound, logger)
@@ -122,21 +123,24 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 
 				preTlsPkt, newConn, err := transport.ReadPlaintextPacket(c)
 				if err != nil {
-					logger.Debug("tcp accept: read plaintext packet failed", zap.Error(err))
 					return
 				}
 				protocol.ReleasePacket(preTlsPkt)
 
-				// KDE Connect inverts TLS roles: TCP server acts as TLS client
 				tlsConn := tls.Client(newConn, cfg)
-				if err := tlsConn.Handshake(); err != nil {
-					logger.Debug("tcp accept: tls handshake failed", zap.Error(err))
+				handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 					return
 				}
 
 				transConn := transport.NewConn(tlsConn)
-				c = nil // prevent double close
-				handleNewConnection(ctx, transConn, identity, devices, plugins, logger)
+				c = nil // Prevent defer from closing the active connection
+
+				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
+					logger.Debug("new connection setup failed", zap.Error(err))
+					transConn.Close()
+				}
 			}(conn)
 		}
 	}()
@@ -144,75 +148,55 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 	<-ctx.Done()
 }
 
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, logger *zap.Logger) {
-	// Send our full identity (post-TLS for protocol v8)
+// Returning an error ensures the caller can close the connection if it fails mid-setup.
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, logger *zap.Logger) error {
 	if err := conn.WritePacket(identity); err != nil {
-		logger.Debug("failed to send identity", zap.Error(err))
-		return
+		return fmt.Errorf("failed to send identity: %w", err)
 	}
 
-	// Wait for peer identity (post-TLS for protocol v8)
 	peerPkt, err := conn.ReadPacket()
 	if err != nil {
-		logger.Debug("failed to read peer identity", zap.Error(err))
-		return
+		return fmt.Errorf("failed to read peer identity: %w", err)
 	}
 	defer protocol.ReleasePacket(peerPkt)
 
 	if peerPkt.Type != protocol.TypeIdentity {
-		logger.Debug("expected identity packet, got something else", zap.String("type", peerPkt.Type))
-		return
+		return fmt.Errorf("expected identity packet, got %s", peerPkt.Type)
 	}
 
 	var peerBody protocol.IdentityBody
 	if err := json.Unmarshal(peerPkt.Body, &peerBody); err != nil {
-		logger.Debug("failed to unmarshal peer identity", zap.Error(err))
-		return
+		return fmt.Errorf("failed to unmarshal peer identity: %w", err)
 	}
 
-	// Validate Peer Certificate
 	peerCert := conn.PeerCert()
 	if peerCert == nil {
-		logger.Debug("no peer certificate presented, dropping connection")
-		return
+		return fmt.Errorf("no peer certificate presented")
 	}
 
-	// KDE Connect requires certificate CN to match device ID
 	certCN := peerCert.Subject.CommonName
 	if certCN != peerBody.DeviceID {
-		logger.Warn("certificate CN doesn't match device ID, dropping connection",
-			zap.String("cert_cn", certCN),
-			zap.String("device_id", peerBody.DeviceID))
-		return
+		return fmt.Errorf("certificate CN (%s) doesn't match device ID (%s)", certCN, peerBody.DeviceID)
 	}
 
-	// Update or create device
 	dev, ok := devices.Get(peerBody.DeviceID)
 	safeDeviceName := protocol.SanitizeDeviceName(peerBody.DeviceName)
 	if !ok {
 		dev = device.NewDevice(peerBody.DeviceID, safeDeviceName, peerBody.DeviceType, logger)
 		devices.Add(dev)
 	} else {
-		// Update name if changed
 		dev.SetName(safeDeviceName)
 	}
 
-	// TLS Pinning: verify fingerprint for paired devices
 	certFP := cert.Fingerprint(peerCert)
 	if dev.State() == device.StatePaired && dev.CertFP != "" {
 		if dev.CertFP != certFP {
-			logger.Warn("certificate fingerprint mismatch! dropping connection (possible MITM)",
-				zap.String("device_id", peerBody.DeviceID),
-				zap.String("expected", dev.CertFP),
-				zap.String("got", certFP))
-			return
+			return fmt.Errorf("certificate fingerprint mismatch (possible MITM)")
 		}
 	} else {
-		// Store it temporarily so the pairing plugin can use it
 		dev.CertFP = certFP
 	}
 
-	// Update capabilities
 	dev.IncomingCaps = peerBody.IncomingCapabilities
 	dev.OutgoingCaps = peerBody.OutgoingCapabilities
 
@@ -234,4 +218,5 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	}
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)
+	return nil
 }

@@ -6,20 +6,20 @@ import "encoding/json"
 
 // Supported IPC command constants.
 const (
-	CmdDevices       = "devices"
-	CmdPair          = "pair"
-	CmdUnpair        = "unpair"
-	CmdPing          = "ping"
-	CmdBattery       = "battery"
-	CmdClipboardPush = "clipboard_push"
-	CmdRunList       = "run_list"
-	CmdRunExec       = "run_exec"
-	CmdShare         = "share"
-	CmdWatch         = "watch"
-	CmdSftpMount     = "sftp_mount"
-	CmdNotifyReply   = "notify_reply"
-	CmdCallMute      = "call_mute"
-	CmdFindMyPhone   = "findmyphone"
+	CmdDevices        = "devices"
+	CmdPair           = "pair"
+	CmdUnpair         = "unpair"
+	CmdPing           = "ping"
+	CmdBattery        = "battery"
+	CmdClipboardPush  = "clipboard_push"
+	CmdRunList        = "run_list"
+	CmdRunExec        = "run_exec"
+	CmdShare          = "share"
+	CmdWatch          = "watch"
+	CmdSftpMount      = "sftp_mount"
+	CmdNotifyReply    = "notify_reply"
+	CmdCallMute       = "call_mute"
+	CmdFindMyPhone    = "findmyphone"
 	CmdLock           = "lock"
 	CmdUnlock         = "unlock"
 	CmdSendSMS        = "send_sms"
@@ -62,6 +62,7 @@ type NotifyReplyPayload struct {
 	ReplyID  string `json:"replyId"`
 	Message  string `json:"message"`
 }
+
 // SMSPayload is used for CmdSendSMS.
 type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`

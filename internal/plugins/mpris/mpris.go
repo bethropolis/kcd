@@ -29,6 +29,7 @@ type MPRISPlugin struct {
 
 	activeSubscribers int
 	stopFunc          context.CancelFunc
+	signalChan        chan *dbus.Signal // Added to prevent DBus memory leaks
 
 	// Cache to map unique D-Bus names (e.g. :1.45) to well-known names (e.g. org.mpris.MediaPlayer2.spotify)
 	nameCacheMu sync.RWMutex
@@ -139,15 +140,15 @@ func (p *MPRISPlugin) Start(ctx context.Context) {
 	rule := "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/mpris/MediaPlayer2'"
 	p.conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule)
 
-	c := make(chan *dbus.Signal, 10)
-	p.conn.Signal(c)
+	p.signalChan = make(chan *dbus.Signal, 10)
+	p.conn.Signal(p.signalChan)
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case sig := <-c:
+			case sig := <-p.signalChan:
 				if sig == nil {
 					return
 				}
@@ -429,6 +430,12 @@ func (p *MPRISPlugin) Stop() {
 		p.logger.Info("stopping MPRIS D-Bus listener")
 		p.stopFunc()
 		p.stopFunc = nil
+
+		// Crucial: Tell godbus to stop sending to this channel to prevent blocking the D-Bus router
+		if p.signalChan != nil {
+			p.conn.RemoveSignal(p.signalChan)
+			p.signalChan = nil
+		}
 
 		// Unsubscribe from signals
 		p.conn.BusObject().Call("org.freedesktop.DBus.RemoveMatch", 0, "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged'")

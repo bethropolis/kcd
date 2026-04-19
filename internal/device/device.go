@@ -129,29 +129,35 @@ func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch fun
 // Disconnect terminates the connection and stops the loops.
 func (d *Device) Disconnect() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	d.lastSeen = time.Now()
 
-	if d.conn != nil {
-		d.logger.Info("device disconnected")
-		_ = d.conn.Close()
-		d.conn = nil
-
-		if d.onDisconnect != nil {
-			d.onDisconnect(d)
-		}
-
-		if d.bus != nil {
-			d.bus.Publish(events.TypeDeviceDisconnected, d.id, nil)
-		}
+	if d.conn == nil {
+		d.mu.Unlock()
+		return
 	}
+
+	d.logger.Info("device disconnected")
+	_ = d.conn.Close()
+	d.conn = nil
+
+	// Capture these to call outside the lock to prevent deadlocks!
+	onDisc := d.onDisconnect
+	bus := d.bus
 
 	d.closeOnce.Do(func() {
 		if d.done != nil {
 			close(d.done)
 		}
 	})
+	d.mu.Unlock()
+
+	// External calls must happen outside the mutex
+	if onDisc != nil {
+		onDisc(d)
+	}
+	if bus != nil {
+		bus.Publish(events.TypeDeviceDisconnected, d.id, nil)
+	}
 }
 
 // IsConnected returns whether the device currently has an active connection.
@@ -165,33 +171,37 @@ func (d *Device) IsConnected() bool {
 // This prevents old readLoops from terminating new connections.
 func (d *Device) disconnectConn(conn *transport.Conn) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	// Only disconnect if this conn is still the active one
 	if d.conn != conn {
+		d.mu.Unlock()
 		d.logger.Debug("ignoring disconnect from old connection")
 		return
 	}
 
 	d.lastSeen = time.Now()
-
 	d.logger.Info("device disconnected")
 	_ = d.conn.Close()
 	d.conn = nil
 
-	if d.onDisconnect != nil {
-		d.onDisconnect(d)
-	}
-
-	if d.bus != nil {
-		d.bus.Publish(events.TypeDeviceDisconnected, d.id, nil)
-	}
+	// Capture callbacks to execute outside the lock
+	onDisc := d.onDisconnect
+	bus := d.bus
 
 	d.closeOnce.Do(func() {
 		if d.done != nil {
 			close(d.done)
 		}
 	})
+	d.mu.Unlock()
+
+	// External calls must happen outside the mutex to prevent deadlocks
+	if onDisc != nil {
+		onDisc(d)
+	}
+	if bus != nil {
+		bus.Publish(events.TypeDeviceDisconnected, d.id, nil)
+	}
 }
 
 // readLoop reads packets from the network and routes them.

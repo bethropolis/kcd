@@ -31,15 +31,15 @@ type Config struct {
 
 // PluginConfig toggles individual plugins on or off.
 type PluginConfig struct {
-	Battery      bool `toml:"battery"`
-	Clipboard    bool `toml:"clipboard"`
-	Notification bool `toml:"notification"`
-	Share        bool `toml:"share"`
-	RunCommand   bool `toml:"runcommand"`
-	MPRIS        bool `toml:"mpris"`
-	Ping         bool `toml:"ping"`
-	Telephony    bool `toml:"telephony"`
-	Connectivity bool `toml:"connectivity"`
+	Battery           bool `toml:"battery"`
+	Clipboard         bool `toml:"clipboard"`
+	Notification      bool `toml:"notification"`
+	Share             bool `toml:"share"`
+	RunCommand        bool `toml:"runcommand"`
+	MPRIS             bool `toml:"mpris"`
+	Ping              bool `toml:"ping"`
+	Telephony         bool `toml:"telephony"`
+	Connectivity      bool `toml:"connectivity"`
 	Mousepad          bool `toml:"mousepad"`
 	SFTP              bool `toml:"sftp"`
 	FindMyPhone       bool `toml:"findmyphone"`
@@ -77,15 +77,15 @@ func Defaults() *Config {
 		EnableBroadcast: true,
 		LogLevel:        "info",
 		Plugins: PluginConfig{
-			Battery:      true,
-			Clipboard:    true,
-			Notification: true,
-			Share:        true,
-			RunCommand:   true,
-			MPRIS:        true,
-			Ping:         true,
-			Telephony:    true,
-			Connectivity: true,
+			Battery:           true,
+			Clipboard:         true,
+			Notification:      true,
+			Share:             true,
+			RunCommand:        true,
+			MPRIS:             true,
+			Ping:              true,
+			Telephony:         true,
+			Connectivity:      true,
 			Mousepad:          true,
 			SFTP:              true,
 			FindMyPhone:       true,

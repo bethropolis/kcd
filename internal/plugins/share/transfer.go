@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -39,6 +40,10 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 
 	// Use TLS dialer - KDE Connect uses encrypted side-channels
 	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		},
 		Config: tlsConfig,
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)

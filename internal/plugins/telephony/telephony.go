@@ -20,8 +20,8 @@ type TelephonyPlugin struct {
 	logger     *zap.Logger
 	pauseMusic bool
 
-	mu           sync.Mutex
-	dbusConn     *dbus.Conn
+	mu            sync.Mutex
+	dbusConn      *dbus.Conn
 	pausedPlayers []string
 }
 
@@ -52,7 +52,9 @@ type TelephonyBody struct {
 func (p *TelephonyPlugin) Name() string            { return "Telephony" }
 func (p *TelephonyPlugin) Timeout() time.Duration  { return 5 * time.Second }
 func (p *TelephonyPlugin) IncomingTypes() []string { return []string{"kdeconnect.telephony"} }
-func (p *TelephonyPlugin) OutgoingTypes() []string { return []string{"kdeconnect.telephony.request_mute"} }
+func (p *TelephonyPlugin) OutgoingTypes() []string {
+	return []string{"kdeconnect.telephony.request_mute"}
+}
 
 func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	var body TelephonyBody
