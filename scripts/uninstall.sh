@@ -36,6 +36,19 @@ if [ -f "$BIN_DIR/kcd.backup" ]; then
     rm "$BIN_DIR/kcd.backup"
 fi
 
+# Remove Nautilus extension
+NAUTILUS_EXT_DIR="$HOME/.local/share/nautilus-python/extensions"
+if [ -f "$NAUTILUS_EXT_DIR/nautilus-kcd.py" ]; then
+    echo "Removing Nautilus extension..."
+    rm "$NAUTILUS_EXT_DIR/nautilus-kcd.py"
+    if command -v nautilus >/dev/null 2>&1; then
+        if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            echo "Restarting Nautilus to unload extension..."
+            nautilus -q >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 # Ask about config/state
 echo "================================================================="
 read -p "Do you want to remove configuration and paired device state? [y/N] " -n 1 -r

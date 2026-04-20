@@ -429,6 +429,28 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		})
 	}
 
+	handler.Register(ipc.CmdConnect, func(req ipc.Request) ipc.Response {
+		var p ipc.ConnectPayload
+		if err := json.Unmarshal(req.Payload, &p); err != nil {
+			return ipc.Response{OK: false, Error: "invalid payload"}
+		}
+		addr := net.ParseIP(p.IP)
+		if addr == nil {
+			return ipc.Response{OK: false, Error: "invalid IP address"}
+		}
+
+		go func() {
+			incomingCaps, outgoingCaps := plugins.Capabilities()
+			identityPkt, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", 1716, incomingCaps, outgoingCaps)
+			if err != nil {
+				return
+			}
+			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger)
+		}()
+
+		return ipc.Response{OK: true}
+	})
+
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
 	// Start IPC in background

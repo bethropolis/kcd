@@ -89,7 +89,7 @@ def render() -> None:
     charging = primary["charging"]
 
     bat_icon = battery_icon(charge, charging)
-    text = f"{ICON_PHONE} {bat_icon} {charge}%"
+    text = f"{bat_icon} {charge}%"
 
     # CSS class
     if charging:

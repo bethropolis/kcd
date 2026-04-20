@@ -1,5 +1,5 @@
 # .goreleaser.yaml for kcd
-version: 2
+version: 1
 
 project_name: kcd
 

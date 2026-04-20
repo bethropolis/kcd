@@ -25,9 +25,8 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
-    echo "Warning: kcd is currently running."
-    echo "Please stop it before installing: systemctl --user stop kcd.service"
-    exit 1
+    echo "Stopping existing kcd.service..."
+    systemctl --user stop kcd.service || true
 fi
 
 # Backup existing
@@ -72,6 +71,24 @@ else
     echo "Config already exists at $CONFIG_DIR/kcd.toml (skipping)"
 fi
 
+# Nautilus extension
+NAUTILUS_EXT_DIR="$HOME/.local/share/nautilus-python/extensions"
+if [ -f "packaging/nautilus-kcd.py" ]; then
+    echo "Installing Nautilus extension to $NAUTILUS_EXT_DIR/"
+    mkdir -p "$NAUTILUS_EXT_DIR"
+    install -m 644 "packaging/nautilus-kcd.py" "$NAUTILUS_EXT_DIR/nautilus-kcd.py"
+    if command -v nautilus >/dev/null 2>&1; then
+        if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            echo "Restarting Nautilus to load extension..."
+            nautilus -q >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
+# Enable and start service
+echo "Enabling and starting kcd.service..."
+systemctl --user enable --now kcd.service || true
+
 echo "================================================================="
 echo "✓ Installation complete!"
 echo "================================================================="
@@ -79,6 +96,4 @@ echo "Next steps:"
 echo "1. Ensure $BIN_DIR is in your PATH."
 echo "2. Configure firewall if needed:"
 echo "   sudo ufw allow 1716/udp"
-echo "3. Enable and start the service:"
-echo "   systemctl --user enable --now kcd"
 echo "================================================================="

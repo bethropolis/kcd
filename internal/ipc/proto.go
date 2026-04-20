@@ -15,6 +15,7 @@ const (
 	CmdRunList        = "run_list"
 	CmdRunExec        = "run_exec"
 	CmdShare          = "share"
+	CmdConnect        = "connect"
 	CmdWatch          = "watch"
 	CmdSftpMount      = "sftp_mount"
 	CmdNotifyReply    = "notify_reply"
@@ -27,6 +28,10 @@ const (
 )
 
 // Request is sent from the client to the local daemon.
+type ConnectPayload struct {
+	IP string `json:"ip"`
+}
+
 type Request struct {
 	Command string          `json:"cmd"`
 	Payload json.RawMessage `json:"payload,omitempty"`

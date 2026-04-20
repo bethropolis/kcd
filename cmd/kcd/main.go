@@ -121,6 +121,25 @@ func main() {
 				},
 			},
 			{
+				Name:      "connect",
+				Usage:     "Manually connect to a device by IP address (bypasses UDP discovery)",
+				ArgsUsage: "<ip-address>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() < 1 {
+						return fmt.Errorf("missing IP address")
+					}
+					cl, err := getClient(c)
+					if err != nil {
+						return err
+					}
+					if err := cl.Connect(c.Args().First()); err != nil {
+						return err
+					}
+					fmt.Println("Connection request sent to daemon.")
+					return nil
+				},
+			},
+			{
 				Name:      "pair",
 				Usage:     "Initiate pairing with a remote device",
 				ArgsUsage: "<device-id>",
@@ -482,19 +501,37 @@ func main() {
 			{
 				Name:      "clipboard",
 				Usage:     "Sync local clipboard content to a device",
-				ArgsUsage: "<device-id>",
+				ArgsUsage: "[device-id]",
 				Action: func(c *cli.Context) error {
-					if c.NArg() < 1 {
-						return fmt.Errorf("missing device ID")
-					}
 					cl, err := getClient(c)
 					if err != nil {
 						return err
 					}
-					if err := cl.ClipboardPush(c.Args().First()); err != nil {
+
+					var targetID string
+					if c.NArg() >= 1 {
+						targetID = c.Args().First()
+					} else {
+						// Auto-find the first connected device
+						devs, err := cl.Devices()
+						if err != nil {
+							return err
+						}
+						for _, d := range devs {
+							if d.Connected {
+								targetID = d.ID
+								break
+							}
+						}
+						if targetID == "" {
+							return fmt.Errorf("no connected devices found")
+						}
+					}
+
+					if err := cl.ClipboardPush(targetID); err != nil {
 						return err
 					}
-					fmt.Println("Clipboard push requested")
+					fmt.Printf("Clipboard pushed to %s\n", targetID)
 					return nil
 				},
 			},

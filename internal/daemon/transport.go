@@ -17,6 +17,57 @@ import (
 	"go.uber.org/zap"
 )
 
+// DialDevice manually connects to a device at the given IP and port.
+func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+	addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
+	logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
+
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second, // Crucial for detecting dead connections
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		logger.Debug("failed to dial peer", zap.Error(err))
+		return
+	}
+
+	var myID protocol.IdentityBody
+	json.Unmarshal(identity.Body, &myID)
+	preTlsId := protocol.IdentityBody{
+		DeviceID:              myID.DeviceID,
+		DeviceName:            myID.DeviceName,
+		DeviceType:            myID.DeviceType,
+		ProtocolVersion:       myID.ProtocolVersion,
+		TCPPort:               myID.TCPPort,
+		TargetDeviceID:        targetID,
+		TargetProtocolVersion: targetProto,
+	}
+	preTlsPkt, _ := protocol.NewPacket(protocol.TypeIdentity, preTlsId)
+
+	if err := transport.WritePlaintextPacket(conn, preTlsPkt); err != nil {
+		conn.Close()
+		return
+	}
+
+	// KDE Connect inverts TLS roles: TCP client acts as TLS server
+	tlsConn := tls.Server(conn, cfg)
+	handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
+		tlsConn.Close()
+		logger.Debug("tls handshake failed", zap.Error(err))
+		return
+	}
+
+	transConn := transport.NewConn(tlsConn)
+	// Ensure the connection is closed if handleNewConnection fails mid-setup
+	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
+		logger.Debug("new connection setup failed", zap.Error(err))
+		transConn.Close()
+	}
+}
+
 func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	// TCP Listener
 	tcpListener, err := transport.Listen(":1716")
@@ -49,53 +100,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 
 		// Spawn goroutine to prevent blocking the discovery listener
 		go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-			addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
-			logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
-
-			dialer := &net.Dialer{
-				Timeout:   5 * time.Second,
-				KeepAlive: 30 * time.Second, // Crucial for detecting dead connections
-			}
-			conn, err := dialer.DialContext(ctx, "tcp", addr)
-			if err != nil {
-				logger.Debug("failed to dial peer", zap.Error(err))
-				return
-			}
-
-			var myID protocol.IdentityBody
-			json.Unmarshal(identity.Body, &myID)
-			preTlsId := protocol.IdentityBody{
-				DeviceID:              myID.DeviceID,
-				DeviceName:            myID.DeviceName,
-				DeviceType:            myID.DeviceType,
-				ProtocolVersion:       myID.ProtocolVersion,
-				TCPPort:               myID.TCPPort,
-				TargetDeviceID:        targetID,
-				TargetProtocolVersion: targetProto,
-			}
-			preTlsPkt, _ := protocol.NewPacket(protocol.TypeIdentity, preTlsId)
-
-			if err := transport.WritePlaintextPacket(conn, preTlsPkt); err != nil {
-				conn.Close()
-				return
-			}
-
-			// KDE Connect inverts TLS roles: TCP client acts as TLS server
-			tlsConn := tls.Server(conn, cfg)
-			handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-			if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
-				tlsConn.Close()
-				logger.Debug("tls handshake failed", zap.Error(err))
-				return
-			}
-
-			transConn := transport.NewConn(tlsConn)
-			// Ensure the connection is closed if handleNewConnection fails mid-setup
-			if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
-				logger.Debug("new connection setup failed", zap.Error(err))
-				transConn.Close()
-			}
+			DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
 		}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 	}
 

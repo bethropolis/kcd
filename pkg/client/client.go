@@ -71,6 +71,12 @@ func (c *Client) Call(cmd string, payload interface{}) (*ipc.Response, error) {
 	return &res, nil
 }
 
+// Connect requests the daemon to manually connect to a device by IP.
+func (c *Client) Connect(ip string) error {
+	_, err := c.Call(ipc.CmdConnect, ipc.ConnectPayload{IP: ip})
+	return err
+}
+
 // Devices queries the daemon for all known devices.
 func (c *Client) Devices() ([]device.DeviceInfo, error) {
 	res, err := c.Call(ipc.CmdDevices, nil)

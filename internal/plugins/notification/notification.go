@@ -131,15 +131,25 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	// Spawning a goroutine as Handlers must not block.
 	go func() {
 		var args []string
-		if p.canCloseNotifs && body.ID != "" {
-			// --print-id outputs the assigned notification ID to stdout.
-			args = []string{"-a", appName, "--print-id", body.Title, text}
-		} else {
-			args = []string{"-a", appName, body.Title, text}
+
+		// Attempt to map the App Name to a standard Linux icon (lowercased without spaces)
+		iconName := strings.ToLower(strings.ReplaceAll(appName, " ", "-"))
+		if iconName == "" {
+			iconName = "smartphone"
 		}
+
+		// Use dunst/mako/swaync stacking tags so notifications from the same app replace each other
+		// instead of spamming the screen.
+		groupHint := "string:x-dunst-stack-tag:kcd-" + appName
+
+		if p.canCloseNotifs && body.ID != "" {
+			args = []string{"-a", appName, "-i", iconName, "-h", groupHint, "--print-id", body.Title, text}
+		} else {
+			args = []string{"-a", appName, "-i", iconName, "-h", groupHint, body.Title, text}
+		}
+
 		out, err := exec.Command("notify-send", args...).Output()
 		if err == nil && p.canCloseNotifs && body.ID != "" {
-			// Store the returned desktop notification ID mapped to the phone's notification ID.
 			desktopID := strings.TrimSpace(string(out))
 			if desktopID != "" {
 				p.notifIDs.Store(body.ID, desktopID)

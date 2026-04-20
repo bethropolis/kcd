@@ -52,6 +52,25 @@ cd kcd
 ./scripts/install.sh
 ```
 
+## Connecting & Pairing Flow
+
+1. **Discovery:** `kcd` automatically discovers devices on your local network using UDP broadcast (Port 1716) and mDNS (Zeroconf).
+2. **Pairing:** Once discovered, run `kcd devices` to find the ID, then `kcd pair <device-id>`.
+3. **Accepting:** Accept the pairing request on your phone.
+4. **Manual Connection:** If your router blocks UDP broadcasts (common on university/corporate networks or Docker), you can manually connect to your phone's IP:
+   `kcd connect 192.168.1.50`
+
+## Keyboard Shortcuts
+Because `kcd` is completely headless, it is perfect for tiling window managers.
+Example Sway/Hyprland bindings:
+```bash
+# Push clipboard to the first connected phone
+bindsym Super+c exec kcd clipboard
+
+# Ring phone to find it
+bindsym Super+Shift+f exec kcd findmyphone $(kcd devices --json | jq -r '.[0].ID')
+```
+
 ## Firewall Setup
 
 KDE Connect requires these ports open:
@@ -133,6 +152,15 @@ kcd run exec <device-id> uptime
 ```
 
 ## Desktop Integration
+
+### Nautilus / GNOME Files Extension
+Send files to your devices directly from the file manager context menu.
+
+```bash
+mkdir -p ~/.local/share/nautilus-python/extensions
+cp packaging/nautilus-kcd.py ~/.local/share/nautilus-python/extensions/
+nautilus -q  # Restart Nautilus to load the extension
+```
 
 ### Waybar Battery Widget
 Monitor phone battery in your Waybar status bar:
