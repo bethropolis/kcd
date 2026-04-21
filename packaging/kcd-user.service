@@ -1,28 +1,51 @@
 [Unit]
 Description=kcd — Headless KDE Connect Daemon
-After=network.target
 Documentation=https://github.com/bethropolis/kcd
+# Wait for a network interface to be up before starting.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
+# sd_notify: systemd waits for the daemon to send READY=1 before marking
+# the unit as started. This ensures dependent services and the Wants= chain
+# work correctly. The daemon calls sd_notify(READY=1) after all subsystems
+# (TCP listener, IPC socket, discovery) are fully initialised.
+Type=notify
+NotifyAccess=main
+
+# %h expands to the user's home directory.
+# Matches the binary installed by scripts/install.sh.
 ExecStart=%h/.local/bin/kcd daemon
+
+# Graceful shutdown: send SIGTERM and give the daemon up to 10 s to finish
+# in-progress file transfers before SIGKILL.
+KillMode=mixed
+TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5
 
-# Security Hardening
+# ── Filesystem hardening ──────────────────────────────────────────────────────
+# The entire filesystem is read-only except for the paths listed below.
 ProtectSystem=strict
 ProtectHome=read-only
-PrivateTmp=true
-NoNewPrivileges=true
-MemoryMax=100M
-TasksMax=64
 
-# Writable paths
-ReadWritePaths=%h/.local/state/kcd %h/Downloads/kcd %h/.config/kcd
+# Writable paths the daemon actually needs.
+#   %h/.config/kcd      — kcd.toml, cert.pem, key.pem
+#   %h/.local/state/kcd — devices.json (persisted pairs)
+#   %h/Downloads/kcd    — received files (override via download_dir in config)
+ReadWritePaths=%h/.config/kcd %h/.local/state/kcd %h/Downloads/kcd
+
+# IPC socket directory, created automatically by systemd under $XDG_RUNTIME_DIR.
 RuntimeDirectory=kcd
 RuntimeDirectoryMode=0700
 
-# Network access required
+# ── Process hardening ─────────────────────────────────────────────────────────
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=128M
+TasksMax=64
+
+# kcd needs the real network stack for UDP broadcast and KDE Connect TCP.
 PrivateNetwork=false
 
 [Install]

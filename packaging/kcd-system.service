@@ -1,34 +1,57 @@
+# System-level kcd service template.
+# Runs the daemon as a named user, managed by root / a system administrator.
+#
+# Enable for a specific user:
+#   sudo systemctl enable --now kcd@alice
+#
+# For most desktop setups, the USER service (kcd-user.service) is preferred.
+# Use this system unit for headless servers or when you want kcd to start
+# before any user session (e.g. to keep the phone connected at all times).
+
 [Unit]
-Description=kcd — Headless KDE Connect Daemon (User %i)
-After=network.target
+Description=kcd — Headless KDE Connect Daemon (%i)
 Documentation=https://github.com/bethropolis/kcd
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-ExecStart=/usr/bin/kcd daemon
-Restart=on-failure
-RestartSec=5
+Type=notify
+NotifyAccess=main
+
+# %i is the instance name — the username passed to `systemctl enable kcd@<user>`.
 User=%i
 Group=%i
 
-# Security Hardening
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateTmp=true
-NoNewPrivileges=true
-MemoryMax=100M
-TasksMax=64
+ExecStart=/usr/bin/kcd daemon
 
-# Writable paths
-ReadWritePaths=/home/%i/.local/state/kcd /home/%i/Downloads/kcd /home/%i/.config/kcd
-RuntimeDirectory=kcd-%i
-RuntimeDirectoryMode=0700
+KillMode=mixed
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
 
-# Network access required
-PrivateNetwork=false
-
-# Pass XDG_RUNTIME_DIR to enable dbus
+# ── XDG paths ─────────────────────────────────────────────────────────────────
+# When running as a system service there is no login session, so XDG variables
+# must be set explicitly. Adjust UID to match the target user if needed.
+Environment="HOME=/home/%i"
+Environment="XDG_CONFIG_HOME=/home/%i/.config"
+Environment="XDG_STATE_HOME=/home/%i/.local/state"
+Environment="XDG_CACHE_HOME=/home/%i/.cache"
+# XDG_RUNTIME_DIR is user-session-specific; the daemon creates it if absent.
 Environment="XDG_RUNTIME_DIR=/run/user/%U"
 
+# ── Filesystem hardening ──────────────────────────────────────────────────────
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/%i/.config/kcd /home/%i/.local/state/kcd /home/%i/Downloads/kcd
+
+RuntimeDirectory=kcd
+RuntimeDirectoryMode=0700
+
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=128M
+TasksMax=64
+PrivateNetwork=false
+
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

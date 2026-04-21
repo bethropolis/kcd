@@ -33,3 +33,5 @@ go.work.sum
 bin/
 dist/
 /kcd
+/downloads
+

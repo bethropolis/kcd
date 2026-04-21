@@ -1,20 +1,137 @@
-device_name = "kcd-desktop"
-device_type = "desktop"
-tcp_port = 1716
-enable_broadcast = true
+# kcd configuration file
+# Copy this file to ~/.config/kcd/kcd.toml and edit to taste.
+# All settings are optional — safe defaults are applied automatically.
+# Reload requires a daemon restart: systemctl --user restart kcd
 
-# The default socket path depends on XDG_RUNTIME_DIR
-# For example: /run/user/1000/kcd/kcd.sock
+# ─── Identity ─────────────────────────────────────────────────────────────────
+
+# The name other devices see when discovering this machine.
+# Default: system hostname.
+# device_name = "my-desktop"
+
+# Device type advertised to the KDE Connect app.
+# One of: desktop, laptop, tablet, phone, tv
+# Default: "desktop"
+# device_type = "desktop"
+
+# ─── Network ──────────────────────────────────────────────────────────────────
+
+# TCP port for the KDE Connect control channel and UDP discovery.
+# Change only if another service is using 1716.
+# Default: 1716
+# tcp_port = 1716
+
+# Broadcast identity packets over UDP so nearby devices can find this machine.
+# Set to false once all devices are paired to reach 0.0% idle CPU.
+# Paired phones reconnect automatically via the last known IP.
+# Default: true
+# enable_broadcast = true
+
+# ─── Pairing ──────────────────────────────────────────────────────────────────
+
+# Automatically accept every incoming pair request without prompting.
+# Useful for headless servers and containers.
+# ⚠  Only enable this on trusted networks — any nearby device can pair silently.
+# Default: false
+# auto_accept_pairing = false
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+
+# Directory where files received from paired devices are saved.
+# Default: ~/Downloads/kcd
+# download_dir = "~/Downloads/kcd"
+
+# Unix socket used for IPC between the daemon and the kcd CLI.
+# Only change this if you run multiple daemon instances.
+# Default: $XDG_RUNTIME_DIR/kcd/kcd.sock  (e.g. /run/user/1000/kcd/kcd.sock)
 # socket_path = "/run/user/1000/kcd/kcd.sock"
 
+# TLS certificate and key generated on first run.
+# Default: $XDG_CONFIG_HOME/kcd/cert.pem and key.pem
+# cert_file = "~/.config/kcd/cert.pem"
+# key_file  = "~/.config/kcd/key.pem"
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+# Log verbosity level.
+# One of: debug, info, warn, error, quiet
+# Default: "info"
+# log_level = "info"
+
+# ─── Plugins ──────────────────────────────────────────────────────────────────
+# Each plugin can be individually enabled or disabled.
+# All plugins are enabled by default.
+
 [plugins]
+
+# Monitor the phone's battery charge and charging state.
 battery = true
+
+# Bi-directional clipboard sync.
+# Wayland: requires wl-copy / wl-paste (wl-clipboard package).
+# X11:     requires xclip.
 clipboard = true
+
+# Forward phone notifications to the desktop via notify-send.
+# Requires libnotify / a running notification daemon.
 notification = true
+
+# Receive files and URLs from the phone, and send files to it.
 share = true
+
+# Expose local shell commands to the phone.
+# Commands are defined in the [commands] section below.
 runcommand = true
+
+# Control desktop media players (Spotify, VLC, etc.) via D-Bus / MPRIS2.
+# Requires a D-Bus session bus. Disabled gracefully if unavailable.
 mpris = true
 
+# Pause music on incoming calls or when using the phone as a trackpad.
+pausemusic = true
+
+# Simple connectivity check — sends a "Ping!" notification to the phone.
+ping = true
+
+# Receive phone call and SMS notifications on the desktop.
+telephony = true
+
+# Phone signal strength and network type reporting.
+connectivity = true
+
+# Use the phone as a wireless trackpad and keyboard.
+# Wayland: requires ydotool (+ ydotoold running as a service).
+# X11:     requires xdotool.
+mousepad = true
+
+# Browse the phone's filesystem over SFTP.
+# Optional: requires sshfs for the `kcd sftp mount` command.
+sftp = true
+
+# Ring the phone to locate it.
+findmyphone = true
+
+# Lock / unlock the desktop session via loginctl.
+lockdevice = true
+
+# Control desktop audio volume from the phone via D-Bus / PulseAudio-PipeWire.
+systemvolume = true
+
+# Send desktop notifications to the phone.
+sendnotifications = true
+
+# Send SMS messages via a connected phone.
+# Note: receiving SMS threads is not yet supported.
+sms = true
+
+# ─── RunCommand: exposed commands ─────────────────────────────────────────────
+# Shell commands that the RunCommand plugin makes available to your phone.
+# Trigger them from the KDE Connect Android app → your device → Run command.
+# Keys are the display labels; values are the shell commands executed locally.
+
 [commands]
-# Example commands
-uptime = "uptime"
+uptime  = "uptime -p"
+lock    = "loginctl lock-session"
+suspend = "systemctl suspend"
+# reboot  = "systemctl reboot"
+# screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
