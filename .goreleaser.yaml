@@ -45,7 +45,8 @@ archives:
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else if eq .Arch "arm" }}armv7
       {{- else }}{{ .Arch }}{{ end }}
-    format: tar.gz
+    formats:
+      - tar.gz
     files:
       - README.md
       - LICENSE
