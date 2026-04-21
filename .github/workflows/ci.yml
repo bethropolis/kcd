@@ -37,7 +37,8 @@ jobs:
         run: go mod verify
 
       - name: Run tests
-        run: CGO_ENABLED=0 go test -p 1 -race -count=1 ./...
+        # Race detector (-race) requires cgo enabled. Only enable CGO for the test step.
+        run: CGO_ENABLED=1 go test -p 1 -race -count=1 ./...
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
