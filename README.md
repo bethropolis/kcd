@@ -1,215 +1,273 @@
 # kcd — Headless KDE Connect Daemon
 
-`kcd` is a lightweight, headless implementation of the KDE Connect protocol (v8) in Go. 
-
-It allows Linux servers, containers, or minimal desktop environments to interact with the KDE Connect ecosystem without a GUI or heavy D-Bus dependencies (except for optional media control).
+`kcd` is a lightweight, headless implementation of the [KDE Connect protocol v8](https://kdeconnect.kde.org/) written in Go. It lets Linux servers, containers, and minimal desktop environments participate in the KDE Connect ecosystem without a GUI, a full KDE installation, or heavy D-Bus dependencies.
 
 ## Features
 
-- **Discovery**: Automatic UDP broadcast and listener.
-- **Pairing**: Secure TLS identity exchange and fingerprinting.
-- **Battery**: Monitor remote device charge and status from your terminal.
-- **Notifications**: Forward phone notifications to your desktop via `notify-send`.
-- **Clipboard**: Bi-directional sync for Wayland (`wl-copy`) and X11 (`xclip`).
-- **Share**: Blazing fast file transfer via memory-efficient TCP side-channels.
-- **RunCommand**: Execute pre-configured local shell commands from your phone.
-- **MPRIS**: Control desktop media players (VLC, Spotify, etc.) from your device.
-- **CLI**: Simple and powerful command-line interface (`kcdctl`).
+| Plugin | What it does |
+|---|---|
+| **Battery** | Monitor remote device charge and charging state |
+| **Clipboard** | Bi-directional sync (Wayland via `wl-copy`, X11 via `xclip`) |
+| **Notifications** | Forward phone notifications to the desktop via `notify-send` |
+| **Share** | Receive files and URLs from the phone; send local files to it |
+| **RunCommand** | Execute pre-configured local shell commands triggered from your phone |
+| **MPRIS** | Control desktop media players (VLC, Spotify, etc.) via D-Bus |
+| **Mousepad** | Use the phone as a wireless trackpad and keyboard |
+| **Find My Phone** | Ring the phone to locate it |
+| **Telephony** | Get call and SMS notifications on the desktop |
+| **SMS** | Send SMS messages via the phone |
+| **SFTP** | Browse the phone's filesystem |
+| **Lock / Unlock** | Lock and unlock the desktop session |
+| **Ping** | Simple connectivity check |
+| **Connectivity** | Phone signal strength reporting |
+| **System Volume** | Remote volume control |
+| **Send Notification** | Push a notification from PC to phone |
+
+Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
+
+---
 
 ## Installation
 
-### Binary Releases (Recommended)
-Download the latest release from [GitHub Releases](https://github.com/bethropolis/kcd/releases).
 
-### Package Managers
-
-**Debian/Ubuntu (.deb):**
-```bash
-curl -LO https://github.com/bethropolis/kcd/releases/download/v1.0.0/kcd_1.0.0_amd64.deb
-sudo dpkg -i kcd_1.0.0_amd64.deb
-sudo ufw allow 1716/udp
-systemctl enable --now kcd@$USER
-```
-
-**Fedora/RHEL (.rpm):**
-```bash
-curl -LO https://github.com/bethropolis/kcd/releases/download/v1.0.0/kcd_1.0.0_x86_64.rpm
-sudo rpm -i kcd_1.0.0_x86_64.rpm
-sudo firewall-cmd --permanent --add-service=kcd
-systemctl enable --now kcd@$USER
-```
-
-**Docker:**
-```bash
-docker pull ghcr.io/bethropolis/kcd:latest
-docker run -d --name kcd --net=host -v ~/.config/kcd:/root/.config/kcd ghcr.io/bethropolis/kcd:latest
-```
-
-### From Source
+### From source (Recommended)
 ```bash
 git clone https://github.com/bethropolis/kcd.git
 cd kcd
 ./scripts/install.sh
 ```
 
-## Connecting & Pairing Flow
 
-1. **Discovery:** `kcd` automatically discovers devices on your local network using UDP broadcast (Port 1716) and mDNS (Zeroconf).
-2. **Pairing:** Once discovered, run `kcd devices` to find the ID, then `kcd pair <device-id>`.
-3. **Accepting:** Accept the pairing request on your phone.
-4. **Manual Connection:** If your router blocks UDP broadcasts (common on university/corporate networks or Docker), you can manually connect to your phone's IP:
-   `kcd connect 192.168.1.50`
+### Binary releases
 
-## Keyboard Shortcuts
-Because `kcd` is completely headless, it is perfect for tiling window managers.
-Example Sway/Hyprland bindings:
+Download the latest pre-built binary from [GitHub Releases](https://github.com/bethropolis/kcd/releases).
+
+
+---
+
+## Firewall
+
+KDE Connect requires three port ranges to be open on the local machine:
+
+| Port | Protocol | Direction | Purpose |
+|---|---|---|---|
+| 1716 | UDP | bidirectional | Device discovery broadcast |
+| 1716 | TCP | bidirectional | Encrypted control channel |
+| 1739–1764 | TCP | inbound | File transfer side-channels |
+
+### UFW (Ubuntu / Debian)
 ```bash
-# Push clipboard to the first connected phone
-bindsym Super+c exec kcd clipboard
-
-# Ring phone to find it
-bindsym Super+Shift+f exec kcd findmyphone $(kcd devices --json | jq -r '.[0].ID')
+sudo cp packaging/ufw-kcd /etc/ufw/applications.d/kcd
+sudo ufw allow kcd
 ```
 
-## Firewall Setup
-
-KDE Connect requires these ports open:
-
-**UDP 1716**: Device discovery (bidirectional)  
-**TCP 1716**: Control connections (bidirectional)  
-**TCP 1739-1764**: File transfer side-channels (inbound only)
-
-### UFW (Ubuntu/Debian)
+Or manually:
 ```bash
 sudo ufw allow 1716/udp
 sudo ufw allow 1716/tcp
 sudo ufw allow 1739:1764/tcp
 ```
 
-Or use the provided profile:
-```bash
-sudo cp packaging/ufw-kcd /etc/ufw/applications.d/kcd
-sudo ufw allow kcd
-```
-
-### firewalld (Fedora/RHEL)
-```bash
-sudo firewall-cmd --permanent --add-service=kdeconnect
-sudo firewall-cmd --reload
-```
-
-Or use the provided service definition:
+### firewalld (Fedora / RHEL)
 ```bash
 sudo cp packaging/firewalld-kcd.xml /etc/firewalld/services/kcd.xml
 sudo firewall-cmd --permanent --add-service=kcd
 sudo firewall-cmd --reload
 ```
 
-## ⚙️ Configuration
+---
 
-The daemon looks for configuration in `$XDG_CONFIG_HOME/kcd/kcd.toml` (usually `~/.config/kcd/kcd.toml`).
+## Quick Start
 
-See [packaging/kcd.example.toml](packaging/kcd.example.toml) for all available options including custom shell commands.
+### 1. Start the daemon
 
-## Usage
-
-### Starting the Daemon
-Manual start:
 ```bash
-kcd
-```
-Via systemd user unit (if installed manually from source):
-```bash
+# Run directly in the foreground
+kcd daemon
+
+# Or install and enable the systemd user unit
 cp packaging/kcd-user.service ~/.config/systemd/user/kcd.service
 systemctl --user daemon-reload
 systemctl --user enable --now kcd
 ```
 
-### Using the CLI
-List discovered devices:
+### 2. Discover your phone
+
+Open the KDE Connect app on your Android device and make sure it is on the same network. Then:
+
 ```bash
 kcd devices
 ```
 
-Pair with a device:
-```bash
-kcd pair <device-id>
+```
+DEVICE ID                            NAME              TYPE       STATE      CONNECTED
+---------------------------------------------------------------------------------------------------
+a1b2c3d4_e5f6_7890_abcd_ef1234567890 Pixel 8 Pro       phone      Unpaired   true
 ```
 
-Send a file:
+### 3. Pair
+
 ```bash
-kcd send file <device-id> /path/to/cat.jpg
+kcd pair a1b2c3d4_e5f6_7890_abcd_ef1234567890
 ```
 
-Sync clipboard to device:
+Accept the pairing request on your phone. You can watch for the confirmation:
+
 ```bash
-kcd clipboard push <device-id>
+kcd watch --events=pair.accepted
 ```
 
-Execute a remote command:
+### 4. Use it
+
 ```bash
-kcd run exec <device-id> uptime
+# Push your clipboard to the first connected phone
+kcd clipboard
+
+# Send a file
+kcd share <device-id> ~/Pictures/photo.jpg
+
+# Ring the phone
+kcd findmyphone <device-id>
+
+# Watch live events
+kcd watch
 ```
 
-## Desktop Integration
+---
 
-### Nautilus / GNOME Files Extension
-Send files to your devices directly from the file manager context menu.
+## Configuration
+
+The daemon reads `$XDG_CONFIG_HOME/kcd/kcd.toml` (typically `~/.config/kcd/kcd.toml`). All settings are optional — sensible defaults are applied automatically.
+
+```toml
+device_name = "my-desktop"
+device_type = "desktop"        # desktop | laptop | phone | tablet | tv
+tcp_port    = 1716
+log_level   = "info"           # debug | info | warn | error | quiet
+
+# Set to false once all devices are paired — reaches 0.0% idle CPU.
+enable_broadcast = true
+
+# Auto-accept pairing requests without manual confirmation (headless / server use).
+auto_accept_pairing = false
+
+# Directory where received files are saved.
+download_dir = "~/Downloads/kcd"
+
+[plugins]
+battery      = true
+clipboard    = true
+notification = true
+share        = true
+runcommand   = true
+mpris        = true
+ping         = true
+telephony    = true
+mousepad     = true
+sftp         = true
+findmyphone  = true
+lockdevice   = true
+sms          = true
+
+# Shell commands that the RunCommand plugin exposes to your phone.
+[commands]
+uptime   = "uptime"
+lock     = "loginctl lock-session"
+suspend  = "systemctl suspend"
+```
+
+See [`packaging/kcd.example.toml`](packaging/kcd.example.toml) for the full annotated reference.
+
+---
+
+## Desktop Integrations
+
+### Nautilus / GNOME Files
+
+Right-click any file in Nautilus to send it directly to a paired device:
 
 ```bash
 mkdir -p ~/.local/share/nautilus-python/extensions
 cp packaging/nautilus-kcd.py ~/.local/share/nautilus-python/extensions/
-nautilus -q  # Restart Nautilus to load the extension
+nautilus -q   # Restart Nautilus to load the extension
 ```
 
-### Waybar Battery Widget
-Monitor phone battery in your Waybar status bar:
+### Waybar (phone battery widget)
 
-**~/.config/waybar/config**
+Add to `~/.config/waybar/config`:
 ```json
 "custom/phone-battery": {
-    "exec": "kcd watch --events=battery | jq -r 'select(.type==\"battery.update\") | \"\(.payload.charge)%\" + (if .payload.charging then \" (charging)\" else \"\" end)'",
+    "exec": "kcd watch --events=battery.update | jq -r 'select(.type==\"battery.update\") | \"\(.payload.charge)%\" + (if .payload.charging then \" \" else \"\" end)'",
     "restart-interval": 0,
-    "format": "{}",
+    "format": "󰏚 {}",
     "return-type": ""
 }
 ```
 
-**~/.config/waybar/style.css**
-```css
-#custom-phone-battery {
-    color: #a6e3a1;
-    padding: 0 10px;
-}
+A ready-made config snippet and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
+
+### Tiling WM shortcuts (Sway / Hyprland)
+
+```bash
+# Push clipboard to the first connected phone
+bindsym Super+c exec kcd clipboard
+
+# Ring the phone
+bindsym Super+Shift+f exec kcd findmyphone $(kcd devices --json | jq -r '.[0].ID')
 ```
 
-### Custom Scripts
-Stream all events as JSON:
+### Custom event scripts
+
 ```bash
-kcd watch --events=battery,notification,device | while read -r event; do
-    echo "$event" | jq .
+kcd watch --json | while read -r event; do
+    type=$(echo "$event" | jq -r '.type')
+    case "$type" in
+        battery.update)
+            charge=$(echo "$event" | jq -r '.payload.charge')
+            notify-send "Phone battery" "${charge}%"
+            ;;
+        telephony.ringing)
+            echo "$event" | jq -r '.payload | "Call from \(.contactName // .phoneNumber)"'
+            ;;
+    esac
 done
 ```
 
+---
+
 ## Security
-- **TLS Everywhere**: All network traffic is encrypted via TLS.
-- **Fingerprinting**: Implicit authentication via certificate fingerprints (Self-signed).
-- **Sanitization**: Filenames in the Share plugin are strictly sanitized to prevent path traversal.
-- **Memory Safe**: Zero-allocation streaming for large files prevents OOM attacks.
 
-## Performance & Idle CPU
+- **TLS everywhere** — all traffic is encrypted. Plaintext is only used for the initial identity exchange before the TLS upgrade.
+- **Certificate fingerprinting** — trust is established by comparing the SHA-256 fingerprint of each peer's self-signed certificate during pairing. No CA required.
+- **Path sanitisation** — filenames received via the Share plugin are strictly sanitised to prevent path traversal attacks.
+- **Memory-safe transfers** — large file transfers stream directly to disk to prevent OOM conditions.
 
-`kcd` is optimized for extremely low resource usage. 
+---
 
-To achieve **0.0% idle CPU** after you have paired your devices:
-1. Open your configuration file (`~/.config/kcd/kcd.toml`)
-2. Add `enable_broadcast = false`
-3. Restart the daemon.
+## Performance
 
-*Note: With broadcasting disabled, your PC won't announce itself on the network. Your phone will still connect to the PC automatically since it remembers the IP address from pairing, but initial discovery of new devices will require you to enter the IP manually on your phone.*
+`kcd` is optimised for extremely low resource usage. After your devices are paired:
 
-## Roadmap
-- **Phase 5**: mDNS (Zeroconf) support for modern discovery, bypassing UDP broadcast restrictions on restricted networks and newer Android versions.
+1. Open `~/.config/kcd/kcd.toml`
+2. Set `enable_broadcast = false`
+3. Restart the daemon
+
+This reaches **0.0% idle CPU**. Your phone will still reconnect automatically (it remembers the IP from pairing); you only lose the ability to discover brand-new devices without entering an IP manually.
+
+---
+
+## Manual Connection
+
+On networks that block broadcast packets (corporate Wi-Fi, Docker bridges, university networks):
+
+```bash
+# Enter the PC's IP in the KDE Connect app: ⋮ → Add device by IP
+# Then on the PC:
+kcd connect 192.168.1.100
+```
+
+---
 
 ## License
+
 MIT

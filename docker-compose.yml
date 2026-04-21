@@ -1,0 +1,114 @@
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # kcd daemon
+  #
+  # IMPORTANT: network_mode: host is required for KDE Connect to work.
+  #   - UDP broadcast (discovery) only reaches devices on the same LAN when
+  #     the container shares the host network stack.
+  #   - mDNS (zeroconf) requires multicast, which is unavailable on bridge nets.
+  #   - Removing host networking will break device discovery entirely.
+  # ────────────────────────────────────────────────────────────────────────────
+  kcd:
+    image: ghcr.io/bethropolis/kcd:latest
+    # Uncomment to build locally instead:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     VERSION: dev
+    #     COMMIT: local
+    #     DATE: unknown
+    container_name: kcd
+
+    # Required for UDP broadcast and mDNS discovery to reach the LAN.
+    # Ports are irrelevant when using host networking — the host firewall applies.
+    network_mode: host
+
+    restart: unless-stopped
+
+    environment:
+      # Override these to change where kcd stores its files inside the container.
+      # The Dockerfile defaults are shown; you usually don't need to change them.
+      XDG_CONFIG_HOME: /config
+      XDG_STATE_HOME: /state
+      XDG_RUNTIME_DIR: /run
+      XDG_CACHE_HOME: /tmp
+
+      # Optional: set log level without editing kcd.toml
+      # KCD_LOG_LEVEL: debug
+
+    volumes:
+      # Config directory — holds kcd.toml, cert.pem, key.pem.
+      # Create kcd.toml here before first run (copy from packaging/kcd.example.toml).
+      - kcd-config:/config
+
+      # State directory — holds devices.json (paired device fingerprints).
+      # Persist this so you don't need to re-pair after container restarts.
+      - kcd-state:/state
+
+      # Download directory — received files land here.
+      # Map to a host path so you can access received files outside Docker.
+      - ${KCD_DOWNLOAD_DIR:-./downloads}:/data
+
+      # IPC socket — expose outside the container so the host CLI can talk to it.
+      # After: kcd --config /path/to/config devices   (or use the bind below)
+      - kcd-run:/run
+
+    # Resource limits — kcd is very lean at idle (0.0% CPU with broadcast off).
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
+    healthcheck:
+      test: ["/usr/bin/kcd", "devices"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # kcd-cli  (optional helper)
+  #
+  # Runs kcd subcommands against the daemon's Unix socket.
+  # Usage:
+  #   docker compose run --rm kcd-cli devices
+  #   docker compose run --rm kcd-cli pair <device-id>
+  #   docker compose run --rm kcd-cli watch
+  # ────────────────────────────────────────────────────────────────────────────
+  kcd-cli:
+    image: ghcr.io/bethropolis/kcd:latest
+    container_name: kcd-cli
+    profiles:
+      - cli           # Only started when explicitly requested
+    network_mode: host
+    volumes:
+      - kcd-config:/config
+      - kcd-run:/run
+    environment:
+      XDG_CONFIG_HOME: /config
+      XDG_RUNTIME_DIR: /run
+    entrypoint: ["/usr/bin/kcd"]
+    # Default: list devices. Override at `docker compose run` time.
+    command: ["devices"]
+    depends_on:
+      kcd:
+        condition: service_healthy
+
+volumes:
+  # Named volumes for daemon data — survive container recreation.
+  kcd-config:
+    driver: local
+  kcd-state:
+    driver: local
+  kcd-run:
+    driver: local
+    # tmpfs keeps the Unix socket in memory — cleaner than a bind mount.
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

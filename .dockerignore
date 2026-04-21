@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI / tooling
+.github
+.goreleaser.yaml
+.golangci.yml
+justfile
+
+# Docs
+*.md
+ARCHITECTURE.md
+CLI.md
+AGENTS.md
+
+# Build output
+bin/
+dist/
+
+# Dev / test artefacts
+*_test.go
+coverage.out
+*.prof
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Downloaded files
+downloads/
+
+# others
+packaging/
+kcd-waybar-integration/
+docs/
