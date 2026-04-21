@@ -6,29 +6,45 @@
 
 ## High-Level Overview
 
-```
-                  ┌─────────────────────────────────────────────┐
-                  │                  kcd daemon                  │
-                  │                                              │
- Android phone ──►│  Discovery  ──►  Transport  ──►  Device     │
-  (KDE Connect)   │  (UDP + mDNS)    (TLS/TCP)       Registry   │
-                  │                                      │       │
-                  │                               Plugin Router  │
-                  │                                      │       │
-                  │  battery  clipboard  share  mpris  ...│...   │
-                  │                                      │       │
-                  │                               Event Bus      │
-                  │                                      │       │
-                  │                             IPC Server       │
-                  └──────────────────────────────────┬──────────┘
-                                                     │ Unix socket
-                                              ┌──────▼──────┐
-                                              │  kcd <cmd>  │
-                                              │  (CLI client)│
-                                              └─────────────┘
-```
+```mermaid
+flowchart TD
+    Phone["📱 Android / iOS App<br/>(KDE Connect)"]
 
----
+    subgraph Daemon["kcd Daemon"]
+        direction TB
+        Discovery["🔍 Discovery<br/>(UDP + mDNS)"]
+        Transport["🔒 Transport<br/>(TCP/TLS)"]
+        Registry[("💾 Device Registry")]
+        Router{"🔀 Plugin Router"}
+
+        subgraph Plugins["Plugins"]
+            direction LR
+            P_Bat["🔋 Battery"]
+            P_Clip["📋 Clipboard"]
+            P_Share["📁 Share"]
+            P_Other["... others"]
+        end
+
+        EventBus[["📢 Event Bus<br/>(Pub/Sub)"]]
+        IPC["⚙️ IPC Server<br/>(Unix Socket)"]
+    end
+
+    CLI["💻 kcd CLI<br/>(kcdctl / watch)"]
+
+    Phone <-->|"UDP 1716"| Discovery
+    Phone <-->|"TCP 1716"| Transport
+    Discovery -.->|"Triggers dial"| Transport
+    Transport <-->|"JSON Packets"| Registry
+    Registry <--> Router
+    Router <--> Plugins
+    Plugins -->|"Publish"| EventBus
+    EventBus -->|"Stream"| IPC
+    IPC <--> CLI
+
+    style Daemon fill:#1e1e2e,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4
+    style Phone fill:#cba6f7,stroke:#11111b,color:#11111b
+    style CLI fill:#a6e3a1,stroke:#11111b,color:#11111b
+```
 
 ## 1. Discovery (`internal/discovery`)
 
@@ -111,17 +127,21 @@ A `Device` wraps an active TCP connection with:
 
 ### State machine
 
-```
-  Unpaired
-      │
-      ├─ local initiates ──► PairRequested
-      │                            │
-      │                      peer accepts ──► Paired
-      │
-      └─ peer initiates ──► PairRequestedByPeer
-                                   │
-                             local accepts ──► Paired
-                             local rejects ──► Unpaired
+```mermaid
+stateDiagram-v2
+    direction TB
+    
+    [*] --> Unpaired
+    
+    Unpaired --> PairRequested : Local initiates
+    PairRequested --> Paired : Peer accepts
+    PairRequested --> Unpaired : Peer rejects / timeout
+    
+    Unpaired --> PairRequestedByPeer : Peer initiates
+    PairRequestedByPeer --> Paired : Local accepts
+    PairRequestedByPeer --> Unpaired : Local rejects
+    
+    Paired --> Unpaired : Unpair
 ```
 
 ---
