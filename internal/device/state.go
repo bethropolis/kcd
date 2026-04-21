@@ -37,6 +37,41 @@ func (s PairingState) String() string {
 	}
 }
 
+// MarshalJSON serializes the state as a string for readability.
+func (s PairingState) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// UnmarshalJSON handles both string (PAIRED) and integer (3) formats.
+func (s *PairingState) UnmarshalJSON(data []byte) error {
+	var asInt int
+	if err := json.Unmarshal(data, &asInt); err == nil {
+		*s = PairingState(asInt)
+		return nil
+	}
+
+	var asStr string
+	if err := json.Unmarshal(data, &asStr); err != nil {
+		return err
+	}
+
+	switch asStr {
+	case "UNKNOWN":
+		*s = StateUnknown
+	case "PAIR_REQUESTED":
+		*s = StatePairRequested
+	case "PAIR_REQUESTED_BY_PEER":
+		*s = StatePairRequestedByPeer
+	case "PAIRED":
+		*s = StatePaired
+	case "UNPAIRED":
+		*s = StateUnpaired
+	default:
+		*s = StateUnknown
+	}
+	return nil
+}
+
 // DeviceInfo represents the persistent state of a device.
 type DeviceInfo struct {
 	ID        string       `json:"id"`

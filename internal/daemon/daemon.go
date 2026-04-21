@@ -291,7 +291,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			return ipc.Response{OK: true}
 		})
 		handler.Register(ipc.CmdSftpMountLocal, func(req ipc.Request) ipc.Response {
-			var p ipc.SftpMountLocalPayload
+			var p ipc.DevicePayload
 			if err := json.Unmarshal(req.Payload, &p); err != nil {
 				return ipc.Response{OK: false, Error: "invalid payload"}
 			}
@@ -299,10 +299,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			if !ok {
 				return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
 			}
-			if err := pl.(*sftp.SftpPlugin).MountLocally(context.Background(), p.DeviceID); err != nil {
+			dev, ok := devices.Get(p.DeviceID)
+			if !ok {
+				return ipc.Response{OK: false, Error: "device not found"}
+			}
+			browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev)
+			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
-			return ipc.Response{OK: true}
+			data, _ := json.Marshal(map[string]string{"path": browsePath})
+			return ipc.Response{OK: true, Data: data}
 		})
 	}
 

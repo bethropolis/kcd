@@ -157,9 +157,19 @@ func (c *Client) SftpMount(deviceID string) error {
 }
 
 // SftpMountLocal requests the daemon to physically mount the remote device via sshfs.
-func (c *Client) SftpMountLocal(deviceID string) error {
-	_, err := c.Call(ipc.CmdSftpMountLocal, ipc.SftpMountLocalPayload{DeviceID: deviceID})
-	return err
+// It returns the local path where the device is mounted.
+func (c *Client) SftpMountLocal(deviceID string) (string, error) {
+	res, err := c.Call(ipc.CmdSftpMountLocal, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return "", err
+	}
+	var data struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(res.Data, &data); err != nil {
+		return "", fmt.Errorf("decode path: %w", err)
+	}
+	return data.Path, nil
 }
 
 // NotifyReply requests the daemon to send a reply to an Android notification.

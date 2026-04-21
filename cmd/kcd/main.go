@@ -370,9 +370,11 @@ func main() {
 							if err != nil {
 								return err
 							}
-							if err := cl.SftpMountLocal(c.Args().First()); err != nil {
+							path, err := cl.SftpMountLocal(c.Args().First())
+							if err != nil {
 								return err
 							}
+							fmt.Printf("Mounted at: %s\n", path)
 							return nil
 						},
 					},

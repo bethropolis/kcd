@@ -47,9 +47,16 @@ def _notify(summary: str, body: str = "", icon: str = "kdeconnect") -> None:
 
 def _kcd(*args, timeout: int = 5) -> subprocess.CompletedProcess | None:
     """Run a kcd sub-command and return the CompletedProcess, or None on error."""
+    # Try searching in PATH first, then fall back to ~/.local/bin/kcd
+    cmd = "kcd"
+    if not any(os.access(os.path.join(p, cmd), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        local_bin = os.path.expanduser("~/.local/bin/kcd")
+        if os.path.exists(local_bin):
+            cmd = local_bin
+
     try:
         return subprocess.run(
-            ["kcd", *args],
+            [cmd, *args],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -81,7 +88,6 @@ def _uri_to_path(uri: str) -> str | None:
 
 class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
     """Adds a 'Send via KDE Connect' right-click menu to files in Nautilus."""
-
     # Cache devices for a short window so rapid right-clicks don't hammer kcd.
     _cache: list[dict] = []
     _cache_lock = threading.Lock()
@@ -126,15 +132,15 @@ class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
         if len(devices) == 1:
             # Single device — no submenu, activate directly.
             dev = devices[0]
-            top.set_property("label", f"Send to {dev['Name']}")
+            top.set_property("label", f"Send to {dev['name']}")
             top.connect("activate", self._on_send, paths, dev)
         else:
             submenu = Nautilus.Menu()
             top.set_submenu(submenu)
             for dev in devices:
                 item = Nautilus.MenuItem(
-                    name=f"Kcd::Device_{dev['ID']}",
-                    label=dev["Name"],
+                    name=f"Kcd::Device_{dev['id']}",
+                    label=dev["name"],
                     icon="phone",
                 )
                 item.connect("activate", self._on_send, paths, dev)
