@@ -370,6 +370,7 @@ func main() {
 							if err != nil {
 								return err
 							}
+							fmt.Println("Requesting SFTP credentials from phone (waiting up to 20s)…")
 							path, err := cl.SftpMountLocal(c.Args().First())
 							if err != nil {
 								return err

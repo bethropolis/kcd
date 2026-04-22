@@ -75,7 +75,3 @@ type SMSPayload struct {
 	Message     string `json:"message"`
 }
 
-// SftpMountLocalPayload is used for CmdSftpMountLocal.
-type SftpMountLocalPayload struct {
-	DeviceID string `json:"deviceId"`
-}

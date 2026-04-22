@@ -303,6 +303,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			if !ok {
 				return ipc.Response{OK: false, Error: "device not found"}
 			}
+			// RequestAndMount: sends the SFTP request to the phone, waits for
+			// credentials, mounts via sshfs, and opens xdg-open automatically.
 			browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev)
 			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}

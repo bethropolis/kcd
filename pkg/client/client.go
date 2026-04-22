@@ -156,8 +156,9 @@ func (c *Client) SftpMount(deviceID string) error {
 	return err
 }
 
-// SftpMountLocal requests the daemon to physically mount the remote device via sshfs.
-// It returns the local path where the device is mounted.
+// SftpMountLocal requests the daemon to request SFTP credentials from the
+// phone, wait for the response, mount via sshfs, and open the result in
+// the default file manager. Returns the local browse path on success.
 func (c *Client) SftpMountLocal(deviceID string) (string, error) {
 	res, err := c.Call(ipc.CmdSftpMountLocal, ipc.DevicePayload{DeviceID: deviceID})
 	if err != nil {
