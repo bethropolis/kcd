@@ -100,3 +100,29 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: check
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run integration tests
+        run: CGO_ENABLED=1 go test -tags integration -race -count=1 ./internal/integration/...

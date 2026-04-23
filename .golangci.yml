@@ -1,0 +1,38 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - bodyclose
+    - noctx
+    - unparam
+    - misspell
+    - gofmt
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    enable-all: true
+    disable:
+      - shadow      # too noisy for this codebase
+
+issues:
+  exclude-rules:
+    # Test files may use unexported identifiers freely.
+    - path: "_test\\.go"
+      linters:
+        - unparam
+        - unused
+    # Generated or packaging scripts are out of scope.
+    - path: "scripts/"
+      linters:
+        - all
+  max-issues-per-linter: 0
+  max-same-issues: 0
