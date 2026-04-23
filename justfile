@@ -37,3 +37,7 @@ test:
 # Run a dry-run release via goreleaser
 release-dry-run:
     goreleaser release --snapshot --clean
+
+# Run integration tests
+integration:
+    go test -tags integration -race -count=1 ./internal/integration/...
