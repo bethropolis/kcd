@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
-	"github.com/grandcat/zeroconf"
+	"github.com/libp2p/zeroconf/v2"
 	"go.uber.org/zap"
 )
 
@@ -211,12 +211,6 @@ func (l *Listener) Run(ctx context.Context) {
 }
 
 func (l *Listener) runMdnsDiscovery(ctx context.Context) {
-	resolver, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		l.logger.Warn("failed to create mDNS resolver", zap.Error(err))
-		return
-	}
-
 	entries := make(chan *zeroconf.ServiceEntry)
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		for entry := range results {
@@ -265,8 +259,7 @@ func (l *Listener) runMdnsDiscovery(ctx context.Context) {
 		}
 	}(entries)
 
-	err = resolver.Browse(ctx, "_kdeconnect._udp", "local.", entries)
-	if err != nil {
+	if err := zeroconf.Browse(ctx, "_kdeconnect._udp", "local.", entries); err != nil {
 		l.logger.Warn("failed to browse mDNS", zap.Error(err))
 	}
 }
