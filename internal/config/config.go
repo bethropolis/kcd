@@ -26,7 +26,9 @@ type Config struct {
 	LogLevel          string            `toml:"log_level"`           // "debug", "info", "warn", "error" (or "quiet")
 	AutoAcceptPairing bool              `toml:"auto_accept_pairing"` // Auto-accept incoming pair requests (headless mode)
 	Plugins           PluginConfig      `toml:"plugins"`
-	Commands          map[string]string `toml:"commands"` // key → shell command for RunCommand plugin
+	Commands          map[string]string  `toml:"commands"`
+	Notifications     NotificationConfig `toml:"notifications"`
+	ConfigPath        string             `toml:"-"` // populated at load time, never written to disk
 }
 
 // PluginConfig toggles individual plugins on or off.
@@ -116,6 +118,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	cfg.ConfigPath = path
 	return cfg, nil
 }
 
@@ -197,6 +200,23 @@ func DefaultConfigPath() string {
 	}
 	return filepath.Join(configHome, "kcd", "kcd.toml")
 }
+
+// DefaultSocketPath returns the default IPC socket path.
+func DefaultSocketPath() string {
+	uid := fmt.Sprintf("%d", os.Getuid())
+	rtDir := os.Getenv("XDG_RUNTIME_DIR")
+	if rtDir == "" {
+		rtDir = filepath.Join("/run/user", uid)
+	}
+	return filepath.Join(rtDir, "kcd", "kcd.sock")
+}
+
+// NotificationConfig controls per-app notification filtering.
+// Keys are Android app package names (e.g. "com.whatsapp").
+// Values are actions: "show" (default), "silent" (receive event but no desktop popup).
+// A special key "*" sets the default for all unmatched apps.
+// If no "*" key is present, unmatched apps default to "show".
+type NotificationConfig map[string]string
 
 // generateDeviceID produces a UUIDv4 with dashes replaced by underscores,
 // matching the KDE Connect deviceId convention.

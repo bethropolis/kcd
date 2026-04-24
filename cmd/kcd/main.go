@@ -7,11 +7,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/daemon"
+	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/doctor"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/pkg/client"
 	"github.com/urfave/cli/v2"
@@ -93,11 +96,19 @@ func main() {
 						Name:  "json",
 						Usage: "Output in JSON format",
 					},
+					&cli.BoolFlag{
+						Name:    "watch",
+						Aliases: []string{"w"},
+						Usage:   "Stream device changes in real time",
+					},
 				},
 				Action: func(c *cli.Context) error {
 					cl, err := getClient(c)
 					if err != nil {
 						return err
+					}
+					if c.Bool("watch") {
+						return watchDevices(c, cl)
 					}
 					devices, err := cl.Devices()
 					if err != nil {
@@ -108,15 +119,7 @@ func main() {
 						fmt.Println(string(data))
 						return nil
 					}
-					if len(devices) == 0 {
-						fmt.Println("No devices found.")
-						return nil
-					}
-					fmt.Printf("%-36s %-20s %-10s %-10s %s\n", "DEVICE ID", "NAME", "TYPE", "STATE", "CONNECTED")
-					fmt.Println("---------------------------------------------------------------------------------------------------")
-					for _, d := range devices {
-						fmt.Printf("%-36s %-20s %-10s %-10s %v\n", d.ID, d.Name, d.Type, d.State, d.Connected)
-					}
+					printDeviceTable(devices)
 					return nil
 				},
 			},
@@ -360,7 +363,7 @@ func main() {
 					},
 					{
 						Name:      "mount",
-						Usage:     "Physically mount the phone's filesystem via sshfs",
+						Usage:     "Request SFTP credentials from the phone, mount via sshfs, and open in file manager",
 						ArgsUsage: "<device-id>",
 						Action: func(c *cli.Context) error {
 							if c.NArg() < 1 {
@@ -376,6 +379,25 @@ func main() {
 								return err
 							}
 							fmt.Printf("Mounted at: %s\n", path)
+							return nil
+						},
+					},
+					{
+						Name:      "unmount",
+						Usage:     "Unmount a previously mounted phone filesystem",
+						ArgsUsage: "<device-id>",
+						Action: func(c *cli.Context) error {
+							if c.NArg() < 1 {
+								return fmt.Errorf("missing device ID")
+							}
+							cl, err := getClient(c)
+							if err != nil {
+								return err
+							}
+							if err := cl.SftpUnmount(c.Args().First()); err != nil {
+								return err
+							}
+							fmt.Println("Unmounted successfully.")
 							return nil
 						},
 					},
@@ -602,10 +624,116 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:  "doctor",
+				Usage: "Check runtime dependencies and configuration",
+				Action: func(c *cli.Context) error {
+					checks := doctor.Run()
+					useColor := os.Getenv("TERM") != "" && os.Getenv("NO_COLOR") == ""
+					green := ""
+					red := ""
+					reset := ""
+					if useColor {
+						green = "\033[32m"
+						red = "\033[31m"
+						reset = "\033[0m"
+					}
+					anyFailed := false
+					for _, ch := range checks {
+						if ch.Pass {
+							fmt.Printf("%s✓%s %s\n", green, reset, ch.Name)
+						} else {
+							fmt.Printf("%s✗%s %s — %s\n", red, reset, ch.Name, ch.Detail)
+							anyFailed = true
+						}
+					}
+					if anyFailed {
+						fmt.Println("\nSome checks failed.")
+						return cli.Exit("", 1)
+					}
+					fmt.Println("\nAll checks passed.")
+					return nil
+				},
+			},
+			{
+				Name:  "status",
+				Usage: "Show daemon status and runtime information",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
+				Action: func(c *cli.Context) error {
+					cl, err := getClient(c)
+					if err != nil {
+						return err
+					}
+					st, err := cl.Status()
+					if err != nil {
+						return err
+					}
+					if c.Bool("json") {
+						data, _ := json.MarshalIndent(st, "", "  ")
+						fmt.Println(string(data))
+						return nil
+					}
+					fmt.Printf("kcd %s — up %s\n", st.Version, st.UptimeHuman)
+					fmt.Printf("Socket:    %s\n", st.SocketPath)
+					fmt.Printf("Config:    %s\n", st.ConfigPath)
+					fmt.Printf("Devices:   %d known, %d connected\n", st.DeviceCount, st.ConnectedCount)
+					fmt.Printf("Plugins:   %s\n", strings.Join(st.Plugins, ", "))
+					return nil
+				},
+			},
 		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// printDeviceTable prints a human-readable device list table.
+func printDeviceTable(devices []device.DeviceInfo) {
+	if len(devices) == 0 {
+		fmt.Println("No devices found.")
+		return
+	}
+	fmt.Printf("%-36s %-20s %-10s %-10s %s\n", "DEVICE ID", "NAME", "TYPE", "STATE", "CONNECTED")
+	fmt.Println("---------------------------------------------------------------------------------------------------")
+	for _, d := range devices {
+		fmt.Printf("%-36s %-20s %-10s %-10s %v\n", d.ID, d.Name, d.Type, d.State, d.Connected)
+	}
+}
+
+// watchDevices prints the current device list then re-prints it on every
+// connect/disconnect/add/remove event.
+func watchDevices(c *cli.Context, cl *client.Client) error {
+	devs, err := cl.Devices()
+	if err != nil {
+		return err
+	}
+	printDeviceTable(devs)
+
+	ctx, cancel := context.WithCancel(c.Context)
+	defer cancel()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		cancel()
+	}()
+
+	filters := []string{"device.connected", "device.disconnected", "device.added", "device.removed"}
+	ch := make(chan events.Event, 8)
+	go func() {
+		for range ch {
+			devs, err := cl.Devices()
+			if err != nil {
+				continue
+			}
+			fmt.Print("\033[2J\033[H") // clear screen
+			printDeviceTable(devs)
+		}
+	}()
+
+	return cl.Watch(ctx, filters, ch)
 }
