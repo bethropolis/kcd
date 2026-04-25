@@ -160,17 +160,36 @@ func (c *Client) SftpMount(deviceID string) error {
 // phone, wait for the response, mount via sshfs, and open the result in
 // the default file manager. Returns the local browse path on success.
 func (c *Client) SftpMountLocal(deviceID string) (string, error) {
-	res, err := c.Call(ipc.CmdSftpMountLocal, ipc.DevicePayload{DeviceID: deviceID})
+	resp, err := c.Call(ipc.CmdSftpMountLocal, ipc.DevicePayload{DeviceID: deviceID})
 	if err != nil {
 		return "", err
 	}
-	var data struct {
+	var result struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(res.Data, &data); err != nil {
-		return "", fmt.Errorf("decode path: %w", err)
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &result)
 	}
-	return data.Path, nil
+	return result.Path, nil
+}
+
+// SftpUnmount cleanly unmounts a previously mounted phone filesystem.
+func (c *Client) SftpUnmount(deviceID string) error {
+	_, err := c.Call(ipc.CmdSftpUnmount, ipc.DevicePayload{DeviceID: deviceID})
+	return err
+}
+
+// Status returns runtime status information from the daemon.
+func (c *Client) Status() (*ipc.StatusResponse, error) {
+	res, err := c.Call(ipc.CmdStatus, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ipc.StatusResponse
+	if err := json.Unmarshal(res.Data, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // NotifyReply requests the daemon to send a reply to an Android notification.

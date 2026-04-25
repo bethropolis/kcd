@@ -24,7 +24,9 @@ const (
 	CmdLock           = "lock"
 	CmdUnlock         = "unlock"
 	CmdSendSMS        = "send_sms"
-	CmdSftpMountLocal = "sftp_mount_local"
+	CmdSftpMountLocal  = "sftp_mount_local"
+	CmdSftpUnmount     = "sftp_unmount"
+	CmdStatus          = "status"
 )
 
 // Request is sent from the client to the local daemon.
@@ -73,5 +75,17 @@ type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`
 	PhoneNumber string `json:"phoneNumber"`
 	Message     string `json:"message"`
+}
+
+// StatusResponse is returned by CmdStatus.
+type StatusResponse struct {
+	Version        string   `json:"version"`
+	StartedAt      string   `json:"startedAt"`
+	UptimeHuman    string   `json:"uptimeHuman"`
+	SocketPath     string   `json:"socketPath"`
+	ConfigPath     string   `json:"configPath"`
+	Plugins        []string `json:"plugins"`
+	DeviceCount    int      `json:"deviceCount"`
+	ConnectedCount int      `json:"connectedCount"`
 }
 
