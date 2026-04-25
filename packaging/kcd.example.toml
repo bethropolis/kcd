@@ -135,3 +135,15 @@ lock    = "loginctl lock-session"
 suspend = "systemctl suspend"
 # reboot  = "systemctl reboot"
 # screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
+
+# ─── Notification filters ─────────────────────────────────────────────────────
+# Control which phone app notifications appear on the desktop.
+# Keys are Android app package names. Values: "show" or "silent".
+# "silent" still emits a notification event (visible in kcd watch) but skips
+# the desktop popup.
+# The special key "*" sets the default for all unmatched apps.
+#
+# [notifications]
+# "com.whatsapp"       = "show"
+# "com.google.android.gm" = "silent"
+# "*"                  = "show"
