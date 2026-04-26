@@ -19,17 +19,19 @@ import (
 
 // SftpPlugin handles KDE Connect SFTP negotiation and optional sshfs mounting.
 type SftpPlugin struct {
-	bus      *events.Bus
-	logger   *zap.Logger
-	mu       sync.RWMutex
-	lastBody map[string]SftpBody
+	bus         *events.Bus
+	logger      *zap.Logger
+	mu          sync.RWMutex
+	lastBody    map[string]SftpBody
+	mountPoints map[string]string // deviceID -> local mountPoint path
 }
 
 func NewSftpPlugin(bus *events.Bus, logger *zap.Logger) *SftpPlugin {
 	return &SftpPlugin{
-		bus:      bus,
-		logger:   logger.With(zap.String("plugin", "sftp")),
-		lastBody: make(map[string]SftpBody),
+		bus:         bus,
+		logger:      logger.With(zap.String("plugin", "sftp")),
+		lastBody:    make(map[string]SftpBody),
+		mountPoints: make(map[string]string),
 	}
 }
 
@@ -195,6 +197,11 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		browsePath = filepath.Join(mountPoint, body.Path)
 	}
 
+	// Track the mount point so Unmount() can call fusermount.
+	p.mu.Lock()
+	p.mountPoints[deviceID] = mountPoint
+	p.mu.Unlock()
+
 	p.logger.Info("SFTP mounted",
 		zap.String("mount_point", mountPoint),
 		zap.String("browse_path", browsePath),
@@ -212,3 +219,46 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 
 func (p *SftpPlugin) OnConnect(_ device.Sender)    {}
 func (p *SftpPlugin) OnDisconnect(_ device.Sender) {}
+
+// Unmount cleanly unmounts a previously mounted SFTP filesystem using fusermount.
+// It removes the mount point directory after a successful unmount.
+// Returns an error if the device was never mounted or if fusermount fails.
+func (p *SftpPlugin) Unmount(deviceID string) error {
+	p.mu.Lock()
+	mountPoint, ok := p.mountPoints[deviceID]
+	if ok {
+		delete(p.mountPoints, deviceID)
+	}
+	p.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("no active SFTP mount for device %s", deviceID)
+	}
+
+	p.logger.Info("unmounting SFTP share", zap.String("mount_point", mountPoint))
+
+	// fusermount3 is the modern variant (Debian/Ubuntu); fall back to fusermount.
+	tool := "fusermount3"
+	if _, err := exec.LookPath(tool); err != nil {
+		tool = "fusermount"
+	}
+
+	if out, err := exec.Command(tool, "-u", mountPoint).CombinedOutput(); err != nil {
+		// Put the mount point back so the caller can retry.
+		p.mu.Lock()
+		p.mountPoints[deviceID] = mountPoint
+		p.mu.Unlock()
+		return fmt.Errorf("fusermount: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+
+	_ = os.Remove(mountPoint)
+	p.logger.Info("SFTP unmounted", zap.String("mount_point", mountPoint))
+	return nil
+}
+
+// MountedPath returns the local mount point for a device, or "" if not mounted.
+func (p *SftpPlugin) MountedPath(deviceID string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mountPoints[deviceID]
+}

@@ -3,6 +3,7 @@ package runcommand
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -13,7 +14,7 @@ import (
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {
-	// Commands maps keys to shell command strings.
+	Mu       sync.RWMutex      // exported so daemon.go can lock it during reload
 	Commands map[string]string
 	logger   *zap.Logger
 }
@@ -52,13 +53,12 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 	}
 
 	if body.RequestCommandList {
+		p.Mu.RLock()
+		cmds := p.Commands
+		p.Mu.RUnlock()
 		// KDE Connect expects an object where each entry is a command config.
-		// The phone app parses it to show a list of labels to the user.
-		// Format: {"commandList": "{\"key\": {\"name\": \"Name\", \"command\": \"/bin/sh\"}, ...}"}
-
-		// In our simple config, keys are labels.
 		list := make(map[string]map[string]string)
-		for label, cmd := range p.Commands {
+		for label, cmd := range cmds {
 			list[label] = map[string]string{
 				"name":    label,
 				"command": cmd,
@@ -76,11 +76,13 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 	}
 
 	if body.Key != "" {
-		cmdStr, ok := p.Commands[body.Key]
+		p.Mu.RLock()
+		cmds := p.Commands
+		p.Mu.RUnlock()
+		cmdStr, ok := cmds[body.Key]
 		if !ok {
 			return nil
 		}
-
 		// Handlers must not block. Spawning goroutine.
 		plugin.RunCommandAsync(p.logger, "sh", "-c", cmdStr)
 	}

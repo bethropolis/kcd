@@ -84,15 +84,17 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		p.mu.Unlock()
 		return nil
 	}
-	p.lastContent = body.Content
-	p.mu.Unlock()
-
+	// Guard lastTimestamp under the same lock as lastContent — they form a
+	// consistent pair and both fields are written from the TCP read goroutine.
 	if body.Timestamp > 0 {
 		if body.Timestamp < p.lastTimestamp {
+			p.mu.Unlock()
 			return nil
 		}
 		p.lastTimestamp = body.Timestamp
 	}
+	p.lastContent = body.Content
+	p.mu.Unlock()
 
 	// Spawning goroutine as Handlers must not block.
 	go func() {

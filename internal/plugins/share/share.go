@@ -75,7 +75,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		}
 		go func() {
 			var cmd *exec.Cmd
-			if strings.Contains(os.Getenv("WAYLAND_DISPLAY"), "") && os.Getenv("WAYLAND_DISPLAY") != "" {
+			if os.Getenv("WAYLAND_DISPLAY") != "" {
 				cmd = exec.Command("wl-copy")
 			} else {
 				cmd = exec.Command("xclip", "-selection", "clipboard")
