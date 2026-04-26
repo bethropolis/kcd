@@ -26,6 +26,7 @@ type Device struct {
 	CertFP string
 
 	lastSeen time.Time
+	lastIP   net.IP     // cached from last successful connection; survives Disconnect
 
 	conn      *transport.Conn
 	sendChan  chan *protocol.Packet // buffered 32
@@ -120,6 +121,14 @@ func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch fun
 
 	if d.onConnect != nil {
 		d.onConnect(d)
+	}
+
+	// Cache the remote IP before the loops start so it is available
+	// after Disconnect() sets d.conn to nil (used by auto-reconnect).
+	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		d.mu.Lock()
+		d.lastIP = tcpAddr.IP
+		d.mu.Unlock()
 	}
 
 	go d.readLoop(ctx, conn)
@@ -322,6 +331,15 @@ func (d *Device) RemoteIP() net.IP {
 		return tcpAddr.IP
 	}
 	return nil
+}
+
+// LastIP returns the IP address from the most recent successful connection.
+// Unlike RemoteIP, this persists after the connection drops — safe to use
+// from an OnDisconnect callback for auto-reconnect dialling.
+func (d *Device) LastIP() net.IP {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.lastIP
 }
 
 // PeerCert returns the validated certificate presented by the remote device.

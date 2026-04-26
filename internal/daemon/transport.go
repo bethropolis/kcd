@@ -62,7 +62,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 
 	transConn := transport.NewConn(tlsConn)
 	// Ensure the connection is closed if handleNewConnection fails mid-setup
-	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
+	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger); err != nil {
 		logger.Debug("new connection setup failed", zap.Error(err))
 		transConn.Close()
 	}
@@ -142,7 +142,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 				transConn := transport.NewConn(tlsConn)
 				c = nil // Prevent defer from closing the active connection
 
-				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, logger); err != nil {
+				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger); err != nil {
 					logger.Debug("new connection setup failed", zap.Error(err))
 					transConn.Close()
 				}
@@ -154,7 +154,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 }
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, logger *zap.Logger) error {
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger *zap.Logger) error {
 	if err := conn.WritePacket(identity); err != nil {
 		return fmt.Errorf("failed to send identity: %w", err)
 	}
@@ -220,8 +220,104 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 
 	onDisconnect := func(sender *device.Device) {
 		plugins.OnDisconnect(sender)
+		// Only attempt reconnection for paired devices whose last IP we know.
+		// Unpaired or manually-disconnected devices are left alone.
+		if sender.State() != device.StatePaired {
+			return
+		}
+		lastIP := sender.LastIP()
+		if lastIP == nil {
+			return
+		}
+		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger)
 	}
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)
 	return nil
+}
+
+// reconnectWithBackoff dials a paired device after it disconnects, using
+// exponential backoff up to 5 minutes between attempts. It stops as soon as:
+//   - the device reconnects (IsConnected becomes true), or
+//   - the daemon context is cancelled, or
+//   - the device is unpaired.
+//
+// A fresh connection coming in from the phone side (inbound TCP) will set
+// IsConnected, causing the loop to exit cleanly without a duplicate dial.
+func reconnectWithBackoff(
+	ctx context.Context,
+	dev *device.Device,
+	ip net.IP,
+	identity *protocol.Packet,
+	cfg *tls.Config,
+	devices *device.Registry,
+	plugins *plugin.Registry,
+	localDeviceID string,
+	logger *zap.Logger,
+) {
+	const maxBackoff = 5 * time.Minute
+	attempt := 0
+
+	logger.Info("starting auto-reconnect",
+		zap.String("device_id", dev.ID()),
+		zap.String("device_name", dev.Name()),
+		zap.String("ip", ip.String()),
+	)
+
+	for {
+		// Stop if the daemon is shutting down.
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Stop if the device was unpaired while we were waiting.
+		if dev.State() != device.StatePaired {
+			logger.Debug("auto-reconnect: device no longer paired, stopping",
+				zap.String("device_id", dev.ID()))
+			return
+		}
+
+		// Stop if the device already reconnected (inbound connection from phone).
+		if dev.IsConnected() {
+			logger.Debug("auto-reconnect: device already connected, stopping",
+				zap.String("device_id", dev.ID()))
+			return
+		}
+
+		backoff := device.ReconnectBackoff(attempt, maxBackoff)
+		logger.Debug("auto-reconnect: waiting before next attempt",
+			zap.String("device_id", dev.ID()),
+			zap.Int("attempt", attempt+1),
+			zap.Duration("backoff", backoff),
+		)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		// Re-check after the sleep — the phone may have connected inbound.
+		if dev.IsConnected() || dev.State() != device.StatePaired {
+			return
+		}
+
+		logger.Info("auto-reconnect: dialling",
+			zap.String("device_id", dev.ID()),
+			zap.String("ip", ip.String()),
+			zap.Int("attempt", attempt+1),
+		)
+
+		DialDevice(ctx, ip, 1716, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
+
+		if dev.IsConnected() {
+			logger.Info("auto-reconnect: succeeded",
+				zap.String("device_id", dev.ID()),
+				zap.Int("attempts", attempt+1),
+			)
+			return
+		}
+
+		attempt++
+	}
 }

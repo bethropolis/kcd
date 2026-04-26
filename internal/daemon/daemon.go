@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
@@ -33,33 +37,41 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/telephony"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
+
+// version is set via ldflags at build time.
+var version = "dev"
 
 // Run starts the core daemon lifecycle.
 func Run(ctx context.Context, cfg *config.Config) error {
-	var zapCfg zap.Config
+	startedAt := time.Now()
+
+	atomicLevel := zap.NewAtomicLevel()
 	switch cfg.LogLevel {
 	case "debug":
-		zapCfg = zap.NewDevelopmentConfig()
-		zapCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+		atomicLevel.SetLevel(zapcore.DebugLevel)
 	case "warn":
-		zapCfg = zap.NewProductionConfig()
-		zapCfg.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
+		atomicLevel.SetLevel(zapcore.WarnLevel)
 	case "error", "quiet":
-		zapCfg = zap.NewProductionConfig()
-		zapCfg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
-	case "info":
-		fallthrough
+		atomicLevel.SetLevel(zapcore.ErrorLevel)
 	default:
-		zapCfg = zap.NewProductionConfig()
-		zapCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+		atomicLevel.SetLevel(zapcore.InfoLevel)
 	}
+
+	var zapCfg zap.Config
+	if cfg.LogLevel == "debug" {
+		zapCfg = zap.NewDevelopmentConfig()
+	} else {
+		zapCfg = zap.NewProductionConfig()
+	}
+	zapCfg.Level = atomicLevel
 
 	logger, err := zapCfg.Build()
 	if err != nil {
 		return err
 	}
-	defer logger.Sync()
+	defer logger.Sync() //nolint:errcheck
 
 	logger.Info("kcd daemon initializing", zap.String("device_id", cfg.DeviceID))
 
@@ -115,10 +127,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.AutoAcceptPairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
 	if cfg.Plugins.Battery {
-		plugins.Register(&battery.BatteryPlugin{})
+		plugins.Register(battery.NewBatteryPlugin(bus, logger))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPlugin(bus))
+		plugins.Register(notification.NewNotificationPlugin(bus, tlsCfg, logger))
 	}
 	if cfg.Plugins.Clipboard {
 		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger))
@@ -160,7 +172,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		plugins.Register(lockdevice.NewLockDevicePlugin(logger))
 	}
 	if cfg.Plugins.SystemVolume {
-		plugins.Register(systemvolume.NewSystemVolumePlugin(logger))
+		plugins.Register(systemvolume.NewSystemVolumePlugin(bus, logger))
 	}
 	if cfg.Plugins.SendNotifications {
 		plugins.Register(sendnotification.NewSendNotificationPlugin(logger, devices))
@@ -171,6 +183,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// 4. IPC Server
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus)
+
+	// Apply notification filters from config.
+	if cfg.Plugins.Notification {
+		if notifPl, ok := plugins.GetByName("Notification"); ok {
+			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications)
+		}
+	}
 
 	// Register Plugin IPC handlers
 	if cfg.Plugins.Battery {
@@ -311,6 +330,20 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			}
 			data, _ := json.Marshal(map[string]string{"path": browsePath})
 			return ipc.Response{OK: true, Data: data}
+		})
+		handler.Register(ipc.CmdSftpUnmount, func(req ipc.Request) ipc.Response {
+			var p ipc.DevicePayload
+			if err := json.Unmarshal(req.Payload, &p); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+			pl, ok := plugins.GetByName("SFTP")
+			if !ok {
+				return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
+			}
+			if err := pl.(*sftp.SftpPlugin).Unmount(p.DeviceID); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
 		})
 	}
 
@@ -459,6 +492,40 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return ipc.Response{OK: true}
 	})
 
+	// CmdStatus — runtime info
+	handler.Register(ipc.CmdStatus, func(req ipc.Request) ipc.Response {
+		uptime := time.Since(startedAt)
+		h := int(uptime.Hours())
+		m := int(uptime.Minutes()) % 60
+		uptimeHuman := fmt.Sprintf("%dh %dm", h, m)
+
+		pluginNames := make([]string, 0)
+		for _, p := range plugins.All() {
+			pluginNames = append(pluginNames, p.Name())
+		}
+
+		total := 0
+		connected := 0
+		for _, d := range devices.List() {
+			total++
+			if d.IsConnected() {
+				connected++
+			}
+		}
+
+		data, _ := json.Marshal(ipc.StatusResponse{
+			Version:        version,
+			StartedAt:      startedAt.UTC().Format(time.RFC3339),
+			UptimeHuman:    uptimeHuman,
+			SocketPath:     cfg.SocketPath,
+			ConfigPath:     cfg.ConfigPath,
+			Plugins:        pluginNames,
+			DeviceCount:    total,
+			ConnectedCount: connected,
+		})
+		return ipc.Response{OK: true, Data: data}
+	})
+
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
 	// Start IPC in background
@@ -489,8 +556,59 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 
+	// Hot-reload on SIGHUP.
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sighupCh:
+				logger.Info("SIGHUP received, reloading config")
+				newCfg, err := config.Load(cfg.ConfigPath)
+				if err != nil {
+					logger.Error("config reload failed", zap.Error(err))
+					continue
+				}
+
+				// Reload RunCommand plugin commands.
+				if pl, ok := plugins.GetByName("RunCommand"); ok {
+					rc := pl.(*runcommand.RunCommandPlugin)
+					rc.Mu.Lock()
+					rc.Commands = newCfg.Commands
+					rc.Mu.Unlock()
+					logger.Info("reloaded commands", zap.Int("count", len(newCfg.Commands)))
+				}
+
+				// Reload notification filters.
+				if pl, ok := plugins.GetByName("Notification"); ok {
+					pl.(*notification.NotificationPlugin).SetFilters(newCfg.Notifications)
+					logger.Info("reloaded notification filters")
+				}
+
+				// Reload log level.
+				setLogLevel(atomicLevel, newCfg.LogLevel)
+			}
+		}
+	}()
+
 	<-ctx.Done()
 
 	logger.Info("kcd daemon shutting down")
 	return nil
+}
+
+// setLogLevel updates the atomic log level without restarting the daemon.
+func setLogLevel(al zap.AtomicLevel, level string) {
+	switch level {
+	case "debug":
+		al.SetLevel(zapcore.DebugLevel)
+	case "warn":
+		al.SetLevel(zapcore.WarnLevel)
+	case "error", "quiet":
+		al.SetLevel(zapcore.ErrorLevel)
+	default:
+		al.SetLevel(zapcore.InfoLevel)
+	}
 }
