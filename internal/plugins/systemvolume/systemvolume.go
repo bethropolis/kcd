@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -18,12 +19,14 @@ import (
 // SystemVolumePlugin handles volume control packets from the phone.
 type SystemVolumePlugin struct {
 	logger  *zap.Logger
+	bus     *events.Bus
 	backend string // "wpctl" or "pactl"
 }
 
-func NewSystemVolumePlugin(logger *zap.Logger) *SystemVolumePlugin {
+func NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin {
 	p := &SystemVolumePlugin{
 		logger: logger.With(zap.String("plugin", "systemvolume")),
+		bus:    bus,
 	}
 	// Detect available audio backend at init time.
 	if _, err := exec.LookPath("wpctl"); err == nil {
@@ -93,6 +96,14 @@ func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		}
 		if err := p.setVolume(body.Name, body.Volume, body.Muted); err != nil {
 			p.logger.Warn("systemvolume: failed to set volume", zap.Error(err))
+			return
+		}
+		if p.bus != nil {
+			p.bus.Publish(events.TypeVolumeUpdate, dev.ID(), map[string]any{
+				"name":   body.Name,
+				"volume": body.Volume,
+				"muted":  body.Muted,
+			})
 		}
 	}()
 

@@ -20,6 +20,7 @@ const (
 	TypePairAccepted         EventType = "pair.accepted"
 	TypePairRejected         EventType = "pair.rejected"
 	TypeBatteryUpdate        EventType = "battery.update"
+	TypeBatteryThreshold     EventType = "battery.threshold"
 	TypeNotification         EventType = "notification"
 	TypeShareProgress        EventType = "share.progress"
 	TypeShareComplete        EventType = "share.complete"
@@ -32,6 +33,7 @@ const (
 	TypeConnectivityUpdate   EventType = "connectivity.update"
 	TypeSftpMount            EventType = "sftp.mount"
 	TypeNotificationCanceled EventType = "notification.canceled"
+	TypeVolumeUpdate         EventType = "volume.update"
 )
 
 // Event represents a single occurrence of something interesting in the daemon.
