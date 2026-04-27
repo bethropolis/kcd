@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # kcd install script — installs from source into ~/.local/bin
 # Usage: ./scripts/install.sh [--no-service] [--no-nautilus]
-set -euo pipefail
+#
+# Failure-tolerant: individual step failures are warned about and skipped,
+# they do NOT abort the whole installation. Only a failed build is fatal.
 
 # ── Colour setup ──────────────────────────────────────────────────────────────
-# Emit colour only when stdout is an interactive terminal that supports it.
 if [[ -t 1 ]] && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD="$(tput bold)"
   RED="$(tput setaf 1)"
@@ -24,6 +25,15 @@ warn()    { printf "  ${YELLOW}⚠${RESET}  %s\n"     "$*" >&2; }
 error()   { printf "  ${RED}✗${RESET}  %s\n"        "$*" >&2; }
 step()    { printf "\n${BOLD}${CYAN}▶  %s${RESET}\n" "$*"; }
 die()     { error "$*"; exit 1; }
+
+# Runs a command, warns on failure but does NOT exit.
+try() {
+  if ! "$@" 2>/dev/null; then
+    warn "Command failed (non-fatal): $*"
+    return 1
+  fi
+  return 0
+}
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 printf "\n"
@@ -73,8 +83,9 @@ success "Go ${GO_VERSION} found"
 # ── Stop existing service ─────────────────────────────────────────────────────
 if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
   step "Stopping existing kcd service"
-  systemctl --user stop kcd.service
-  success "Service stopped"
+  if try systemctl --user stop kcd.service; then
+    success "Service stopped"
+  fi
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -96,14 +107,16 @@ if ! CGO_ENABLED=0 go build \
       -o bin/kcd \
       ./cmd/kcd; then
   # Restore backup if one exists
-  [[ -f "${BIN_DIR}/kcd.backup" ]] && mv "${BIN_DIR}/kcd.backup" "${BIN_DIR}/kcd" && warn "Restored previous binary from backup."
+  [[ -f "${BIN_DIR}/kcd.backup" ]] \
+    && mv "${BIN_DIR}/kcd.backup" "${BIN_DIR}/kcd" \
+    && warn "Restored previous binary from backup."
   die "Build failed."
 fi
 
-# Verify static linkage
+# Verify static linkage (non-fatal — some distro ldd wrappers behave oddly)
 if command -v ldd >/dev/null 2>&1; then
   if ldd bin/kcd 2>&1 | grep -qv "not a dynamic executable"; then
-    die "Binary is not statically linked. Check CGO_ENABLED=0."
+    warn "Binary may not be fully statically linked. Check CGO_ENABLED=0."
   fi
 fi
 success "Build succeeded ($(du -sh bin/kcd | cut -f1) static binary)"
@@ -114,12 +127,16 @@ step "Installing binary"
 mkdir -p "${BIN_DIR}"
 
 if [[ -f "${BIN_DIR}/kcd" ]]; then
-  cp "${BIN_DIR}/kcd" "${BIN_DIR}/kcd.backup"
-  info "Backed up previous binary → ${BIN_DIR}/kcd.backup"
+  if try cp "${BIN_DIR}/kcd" "${BIN_DIR}/kcd.backup"; then
+    info "Backed up previous binary → ${BIN_DIR}/kcd.backup"
+  fi
 fi
 
-install -m 755 bin/kcd "${BIN_DIR}/kcd"
-success "Installed → ${BIN_DIR}/kcd"
+if try install -m 755 bin/kcd "${BIN_DIR}/kcd"; then
+  success "Installed → ${BIN_DIR}/kcd"
+else
+  die "Could not install binary to ${BIN_DIR}/kcd."
+fi
 
 # Warn if the bin dir isn't in PATH
 if ! echo ":${PATH}:" | grep -q ":${BIN_DIR}:"; then
@@ -134,8 +151,11 @@ step "Installing configuration"
 mkdir -p "${CONFIG_DIR}"
 
 if [[ ! -f "${CONFIG_DIR}/kcd.toml" ]]; then
-  install -m 644 "${REPO_ROOT}/packaging/kcd.example.toml" "${CONFIG_DIR}/kcd.toml"
-  success "Default config installed → ${CONFIG_DIR}/kcd.toml"
+  if try install -m 644 "${REPO_ROOT}/packaging/kcd.example.toml" "${CONFIG_DIR}/kcd.toml"; then
+    success "Default config installed → ${CONFIG_DIR}/kcd.toml"
+  else
+    warn "Could not install default config — create ${CONFIG_DIR}/kcd.toml manually."
+  fi
 else
   info "Config already exists at ${CONFIG_DIR}/kcd.toml — skipping (won't overwrite)"
 fi
@@ -144,18 +164,40 @@ fi
 if [[ "${INSTALL_SERVICE}" == true ]]; then
   step "Installing systemd user service"
 
-  mkdir -p "${SYSTEMD_DIR}"
-  install -m 644 "${REPO_ROOT}/packaging/kcd-user.service" "${SYSTEMD_DIR}/kcd.service"
-  systemctl --user daemon-reload
-  systemctl --user enable --now kcd.service
+  _systemd_ok=true
 
-  # Wait briefly and check it actually started
-  sleep 2
-  if systemctl --user is-active --quiet kcd.service; then
-    success "kcd.service enabled and running"
-  else
-    warn "kcd.service is installed but failed to start."
-    printf "  Run ${BOLD}journalctl --user -u kcd -n 30${RESET} to see why.\n"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    warn "systemctl not found — skipping service install"
+    _systemd_ok=false
+  fi
+
+  if [[ "${_systemd_ok}" == true ]]; then
+    mkdir -p "${SYSTEMD_DIR}"
+
+    if ! try install -m 644 "${REPO_ROOT}/packaging/kcd-user.service" "${SYSTEMD_DIR}/kcd.service"; then
+      warn "Could not install service file — skipping service setup"
+      _systemd_ok=false
+    fi
+  fi
+
+  if [[ "${_systemd_ok}" == true ]]; then
+    try systemctl --user daemon-reload \
+      || warn "daemon-reload failed — service file may not be recognised yet"
+
+    try systemctl --user enable kcd.service \
+      || warn "Could not enable kcd.service — you may need to enable it manually"
+
+    try systemctl --user start kcd.service \
+      || warn "Could not start kcd.service — check 'journalctl --user -u kcd -n 30'"
+
+    # Wait briefly and check it actually started
+    sleep 2
+    if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
+      success "kcd.service enabled and running"
+    else
+      warn "kcd.service is installed but does not appear to be running."
+      printf "  Run ${BOLD}journalctl --user -u kcd -n 30${RESET} to see why.\n"
+    fi
   fi
 fi
 
@@ -164,17 +206,30 @@ if [[ "${INSTALL_NAUTILUS}" == true ]] && command -v nautilus >/dev/null 2>&1; t
   step "Installing Nautilus extension"
 
   mkdir -p "${NAUTILUS_EXT_DIR}"
-  install -m 644 "${REPO_ROOT}/packaging/nautilus-kcd.py" "${NAUTILUS_EXT_DIR}/nautilus-kcd.py"
-  success "Extension installed → ${NAUTILUS_EXT_DIR}/nautilus-kcd.py"
+  if try install -m 644 "${REPO_ROOT}/packaging/nautilus-kcd.py" "${NAUTILUS_EXT_DIR}/nautilus-kcd.py"; then
+    success "Extension installed → ${NAUTILUS_EXT_DIR}/nautilus-kcd.py"
+  else
+    warn "Could not install Nautilus extension"
+  fi
 
   if [[ -n "${DISPLAY:-}" ]] || [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-    nautilus -q >/dev/null 2>&1 || true
-    info "Nautilus restarted to load the extension"
+    try nautilus -q && info "Nautilus restarted to load the extension" \
+      || info "Nautilus restart failed — restart it manually to activate the extension"
   else
     info "No display detected — restart Nautilus manually to activate the extension"
   fi
 elif [[ "${INSTALL_NAUTILUS}" == true ]]; then
   info "Nautilus not found — skipping extension install"
+fi
+
+# ── Waybar refresh ────────────────────────────────────────────────────────────
+if command -v waybar >/dev/null 2>&1 && pgrep -x waybar >/dev/null 2>&1; then
+  step "Refreshing Waybar"
+  if try pkill -SIGUSR2 waybar; then
+    success "Waybar refreshed (SIGUSR2 sent)"
+  else
+    warn "Could not refresh Waybar — reload it manually if needed"
+  fi
 fi
 
 # ── Firewall reminder ─────────────────────────────────────────────────────────
