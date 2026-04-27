@@ -102,7 +102,7 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender) (st
 	}
 
 	// Subscribe BEFORE sending the request to guarantee we don't miss the response.
-	sub := p.bus.Subscribe(events.TypeSftpMount)
+	sub := p.bus.Subscribe(0, events.TypeSftpMount)
 	defer sub.Close()
 
 	if err := p.RequestMount(dev); err != nil {
@@ -181,6 +181,8 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		"-o", "reconnect",
 		"-o", "ServerAliveInterval=15",
 		"-o", "ServerAliveCountMax=3",
+		"-o", "auto_cache",
+		"-o", "kernel_cache",
 	}
 
 	cmd := exec.CommandContext(ctx, "sshfs", args...)
