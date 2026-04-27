@@ -20,8 +20,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// progressThrottle coalesces high-frequency progress callbacks into
-// at most one bus event per interval.
 type progressThrottle struct {
 	bus      *events.Bus
 	deviceID string
@@ -43,8 +41,6 @@ func newProgressThrottle(bus *events.Bus, deviceID, filename string, total int64
 	}
 }
 
-// Update records the latest byte count and publishes an event if the
-// throttle interval has elapsed since the last publish.
 func (t *progressThrottle) Update(current, _ int64) {
 	if t.bus == nil {
 		return
@@ -67,7 +63,6 @@ func (t *progressThrottle) Update(current, _ int64) {
 	})
 }
 
-// SharePlugin handles file transfers.
 type SharePlugin struct {
 	DownloadDir string
 	TLSConfig   *tls.Config
@@ -75,7 +70,6 @@ type SharePlugin struct {
 	bus         *events.Bus
 }
 
-// NewSharePlugin creates a new SharePlugin instance.
 func NewSharePlugin(downloadDir string, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin {
 	return &SharePlugin{
 		DownloadDir: downloadDir,
@@ -85,37 +79,35 @@ func NewSharePlugin(downloadDir string, tlsConfig *tls.Config, bus *events.Bus, 
 	}
 }
 
-// ShareBody represents the body of a kdeconnect.share.request packet.
+// ShareBody includes the missing Android metadata (LastModified/CreationTime)
 type ShareBody struct {
 	Filename         string `json:"filename"`
 	NumberOfFiles    int    `json:"numberOfFiles,omitempty"`
 	TotalPayloadSize int64  `json:"totalPayloadSize,omitempty"`
+	LastModified     int64  `json:"lastModified,omitempty"`
+	CreationTime     int64  `json:"creationTime,omitempty"`
 	Text             string `json:"text,omitempty"`
 	Url              string `json:"url,omitempty"`
 }
 
 func (p *SharePlugin) Name() string { return "Share" }
 
-func (p *SharePlugin) Timeout() time.Duration { return 0 } // No timeout for file transfer setup
+func (p *SharePlugin) Timeout() time.Duration { return 0 }
 
-// IncomingTypes returns the packet types this plugin handles.
 func (p *SharePlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.share.request"}
 }
 
-// OutgoingTypes returns the packet types this plugin may send.
 func (p *SharePlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.share.request"}
 }
 
-// Handle processes incoming share requests by initiating a side-channel transfer.
 func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	var body ShareBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return fmt.Errorf("share: parse body: %w", err)
 	}
 
-	// Text share (no payload, has "text" field)
 	if body.Text != "" && pkt.PayloadSize <= 0 {
 		p.Logger.Info("share: received text", zap.String("text", body.Text))
 		if p.bus != nil {
@@ -134,7 +126,6 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	// URL share (no payload, has "url" field)
 	if body.Url != "" && pkt.PayloadSize <= 0 {
 		p.Logger.Info("share: received url", zap.String("url", body.Url))
 		if p.bus != nil {
@@ -144,41 +135,30 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	// File share — requires payload
 	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
-		p.Logger.Debug("ignoring share request with no payload metadata")
 		return nil
 	}
 
-	// Security: Sanitize the filename to prevent path traversal per absolute rule.
 	safeName := SanitizeFilename(body.Filename)
-
-	// Ensure the download directory exists.
 	if err := os.MkdirAll(p.DownloadDir, 0755); err != nil {
 		return fmt.Errorf("share: critical - failed to create download dir %s: %w", p.DownloadDir, err)
 	}
 
-	// Security: Don't overwrite existing files; generate a unique name per absolute rule.
 	destPath, err := EnsureUnique(p.DownloadDir, safeName)
 	if err != nil {
 		return fmt.Errorf("share: collision handling: %w", err)
 	}
 
-	// We need the remote IP to dial the side-channel.
 	remoteIP := dev.RemoteIP()
 	if remoteIP == nil {
 		return fmt.Errorf("share: failed to resolve remote peer IP")
 	}
 
-	// Copy values we need before spawning goroutine.
-	// The packet will be released back to the pool after Handle() returns,
-	// so we must not reference pkt.* inside the goroutine.
 	payloadSize := pkt.PayloadSize
 	payloadPort := pkt.PayloadTransferInfo.Port
 
-	// Handle() must not block per absolute rule. Spawning goroutine for transfer.
 	go func() {
-		defer debug.FreeOSMemory() // Free memory after large file transfer per Phase 3 rules
+		defer debug.FreeOSMemory()
 
 		var onProgress func(int64, int64)
 		if p.bus != nil {
@@ -209,15 +189,13 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	return nil
 }
 
-// SendFile prepares and initiates an outbound file transfer.
 func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("share: open file: %w", err)
 	}
-	defer f.Close()
-
 	stat, err := f.Stat()
+	f.Close() // Close immediately; AcceptAndSend opens it again exactly when the phone connects.
 	if err != nil {
 		return fmt.Errorf("share: stat file: %w", err)
 	}
@@ -226,25 +204,62 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		return fmt.Errorf("share: directory transfer not supported yet")
 	}
 
-	// Start side-channel listener
+	// Bind to an available side-channel port (1739-1764)
+	ln, port, err := ListenSideChannel(ctx, p.TLSConfig)
+	if err != nil {
+		return err
+	}
+
 	var onProgress func(int64, int64)
 	if p.bus != nil {
 		throttle := newProgressThrottle(p.bus, dev.ID(), filepath.Base(filePath), stat.Size())
 		onProgress = throttle.Update
 	}
 
-	port, err := SendSideChannel(ctx, filePath, p.TLSConfig, dev.ID(), onProgress, p.Logger)
-	if err != nil {
-		return err
-	}
+	// Handle the transfer in the background so IPC returns instantly
+	go func() {
+		defer debug.FreeOSMemory()
 
-	// Construct share invite packet
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), onProgress, p.Logger)
+
+		if err != nil {
+			p.Logger.Error("share: send failed",
+				zap.String("device_id", dev.ID()),
+				zap.String("file", filepath.Base(filePath)),
+				zap.Int("port", port),
+				zap.Error(err),
+			)
+		} else {
+			p.Logger.Info("share: send complete",
+				zap.String("device_id", dev.ID()),
+				zap.String("file", filepath.Base(filePath)),
+			)
+		}
+
+		if p.bus != nil {
+			payload := map[string]interface{}{
+				"file":    filepath.Base(filePath),
+				"success": err == nil,
+			}
+			if err != nil {
+				payload["error"] = err.Error()
+			}
+			p.bus.Publish(events.TypeShareComplete, dev.ID(), payload)
+		}
+	}()
+
+	modTime := stat.ModTime().UnixMilli()
+
+	// Send invite packet with strict metadata
 	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
 		Filename:         filepath.Base(filePath),
 		NumberOfFiles:    1,
 		TotalPayloadSize: stat.Size(),
+		LastModified:     modTime,
+		CreationTime:     modTime,
 	})
 	if err != nil {
+		ln.Close()
 		return err
 	}
 
@@ -260,11 +275,8 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		zap.Int("port", port),
 	)
 
-	// All outgoing packets must go through Device.Send per absolute rule.
 	return dev.Send(pkt)
 }
 
-func (p *SharePlugin) OnConnect(dev device.Sender) {}
-
-func (p *SharePlugin) OnDisconnect(dev device.Sender) {
-}
+func (p *SharePlugin) OnConnect(dev device.Sender)    {}
+func (p *SharePlugin) OnDisconnect(dev device.Sender) {}

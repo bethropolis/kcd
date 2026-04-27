@@ -39,10 +39,13 @@ func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
 	defer cancel()
 
 	// 1. Start Sender
-	port, err := SendSideChannel(ctx, sourcePath, tlsConfig, "test_device_share", nil, logger)
+	ln, port, err := ListenSideChannel(ctx, tlsConfig)
 	if err != nil {
-		t.Fatalf("SendSideChannel failed: %v", err)
+		t.Fatalf("ListenSideChannel failed: %v", err)
 	}
+	go func() {
+		_ = AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", nil, logger)
+	}()
 
 	// 2. Run Receiver (dial loopback)
 	err = ReceiveSideChannel(ctx, net.ParseIP("127.0.0.1"), port, int64(len(content)), destPath, tlsConfig, nil, logger)

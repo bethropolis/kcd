@@ -7,7 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime/debug"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -28,9 +28,6 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// ReceiveSideChannel connects to the peer's TLS port and streams the payload to a local file.
-// It ensures no memory is buffered by using io.Copy with an io.LimitReader.
-// KDE Connect requires TLS for file transfers using the same certificates as the main connection.
 func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, onProgress func(int64, int64), logger *zap.Logger) error {
 	if size < 0 {
 		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
@@ -38,7 +35,6 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 
 	addr := fmt.Sprintf("%s:%d", ip.String(), port)
 
-	// Use TLS dialer - KDE Connect uses encrypted side-channels
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{
 			Timeout:   10 * time.Second,
@@ -58,7 +54,6 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 	}
 	defer f.Close()
 
-	// io.LimitReader prevents reading past the announced size per absolute rule.
 	limitReader := io.LimitReader(conn, size)
 
 	var r io.Reader = limitReader
@@ -79,100 +74,113 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 	return nil
 }
 
-// SendSideChannel starts a TLS listener on a random port and streams a file to the first connecting peer.
-// KDE Connect requires TLS for file transfers using the same certificates as the main connection.
-func SendSideChannel(ctx context.Context, filePath string, tlsConfig *tls.Config, expectedDeviceID string, onProgress func(int64, int64), logger *zap.Logger) (int, error) {
+// ListenSideChannel binds to an available TCP port in the KDE Connect side-channel range.
+func ListenSideChannel(ctx context.Context, tlsConfig *tls.Config) (net.Listener, int, error) {
+	lc := net.ListenConfig{KeepAlive: 30 * time.Second}
 	var ln net.Listener
-	const (
-		minPort = 1739
-		maxPort = 1764
-	)
-	for port := minPort; port <= maxPort; port++ {
-		var e error
-		ln, e = tls.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port), tlsConfig)
-		if e == nil {
-			break
+	var err error
+
+	for port := 1739; port <= 1764; port++ {
+		ln, err = lc.Listen(ctx, "tcp", fmt.Sprintf("0.0.0.0:%d", port))
+		if err == nil {
+			return ln, port, nil
 		}
 	}
-	if ln == nil {
-		return 0, fmt.Errorf("share: no available ports in range %d-%d", minPort, maxPort)
-	}
+	return nil, 0, fmt.Errorf("no available ports in range 1739-1764")
+}
 
-	port := ln.Addr().(*net.TCPAddr).Port
+// AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID string, onProgress func(int64, int64), logger *zap.Logger) error {
+	defer ln.Close()
 
-	// Process the transfer in a goroutine so we can return the port immediately
-	// for the share request packet.
+	addr := ln.Addr().String()
+
+	// Give Android up to 2 minutes to connect (the user might need to tap "Accept" on their phone)
+	acceptCtx, cancelAccept := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelAccept()
+
 	go func() {
-		defer debug.FreeOSMemory() // Free memory after large file transfer per Phase 3 rules
-		defer ln.Close()
-
-		// Wait for the single incoming connection with context support
-		type acceptResult struct {
-			conn net.Conn
-			err  error
-		}
-		resChan := make(chan acceptResult, 1)
-
-		go func() {
-			c, e := ln.Accept()
-			resChan <- acceptResult{c, e}
-		}()
-
-		var conn net.Conn
-		select {
-		case <-ctx.Done():
-			return
-		case res := <-resChan:
-			if res.err != nil {
-				logger.Error("share: side-channel accept failed", zap.Error(res.err))
-				return
-			}
-			conn = res.conn
-		}
-		defer conn.Close()
-
-		// Security: verify peer certificate common name matches expected device ID
-		tlsConn, ok := conn.(*tls.Conn)
-		if ok {
-			if err := tlsConn.HandshakeContext(ctx); err != nil {
-				logger.Warn("share: side-channel tls handshake failed", zap.Error(err))
-				return
-			}
-			state := tlsConn.ConnectionState()
-			if len(state.PeerCertificates) == 0 || state.PeerCertificates[0].Subject.CommonName != expectedDeviceID {
-				logger.Warn("share: side-channel rejected unauthorized client",
-					zap.String("expected_device_id", expectedDeviceID))
-				return
-			}
-		} else {
-			logger.Warn("share: side-channel connection is not TLS")
-			return
-		}
-
-		f, err := os.Open(filePath)
-		if err != nil {
-			logger.Error("share: failed to open source file", zap.String("path", filePath), zap.Error(err))
-			return
-		}
-		defer f.Close()
-
-		stat, _ := f.Stat()
-		size := stat.Size()
-
-		var r io.Reader = f
-		if onProgress != nil {
-			r = io.TeeReader(f, &progressWriter{total: size, callback: onProgress})
-		}
-
-		// Stream directly to connection per absolute rule.
-		n, err := io.Copy(conn, r)
-		if err != nil {
-			logger.Error("share: transfer error", zap.Error(err))
-			return
-		}
-
-		logger.Info("share: send complete", zap.String("path", filePath), zap.Int64("bytes", n), zap.Int64("total", size))
+		<-acceptCtx.Done()
+		ln.Close() // Unblocks Accept() if timeout is reached
 	}()
 
-	return port, nil
+	logger.Info("share: waiting for device to connect",
+		zap.String("listen_addr", addr),
+		zap.String("device_id", expectedDeviceID),
+		zap.String("file", filePath),
+	)
+
+	conn, err := ln.Accept()
+	if err != nil {
+		if acceptCtx.Err() != nil {
+			logger.Warn("share: timed out waiting for device to connect — is TCP 1739-1764 open in your firewall?",
+				zap.String("listen_addr", addr),
+				zap.String("device_id", expectedDeviceID),
+			)
+			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow 1739:1764/tcp)", addr)
+		}
+		return fmt.Errorf("accept failed: %w", err)
+	}
+	defer conn.Close()
+
+	logger.Info("share: device connected to side-channel, starting TLS handshake",
+		zap.String("remote_addr", conn.RemoteAddr().String()),
+	)
+
+	tlsConn := tls.Server(conn, tlsConfig)
+	if err := tlsConn.Handshake(); err != nil {
+		logger.Error("share: TLS handshake failed on side-channel",
+			zap.String("remote_addr", conn.RemoteAddr().String()),
+			zap.Error(err),
+		)
+		return fmt.Errorf("tls handshake failed: %w", err)
+	}
+
+	state := tlsConn.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		logger.Error("share: device presented no client certificate",
+			zap.String("remote_addr", conn.RemoteAddr().String()),
+			zap.String("expected_device", expectedDeviceID),
+		)
+		return fmt.Errorf("share: client presented no certificate (expected device %s)", expectedDeviceID)
+	}
+	// Android KDE Connect stores device IDs with hyphens in the cert CN
+	// (e.g. "9a5c23ea-7195-4da1-b766-282b7256a02d") but sends them with
+	// underscores in identity packets. Normalise before comparing.
+	certCN := state.PeerCertificates[0].Subject.CommonName
+	normCN := strings.ReplaceAll(certCN, "-", "_")
+	if normCN != expectedDeviceID {
+		logger.Error("share: cert CN mismatch — unexpected device connected to side-channel",
+			zap.String("expected_device", expectedDeviceID),
+			zap.String("cert_cn", certCN),
+		)
+		return fmt.Errorf("share: cert CN mismatch: expected device %s, got %s", expectedDeviceID, certCN)
+	}
+
+	logger.Info("share: TLS OK, streaming file",
+		zap.String("file", filePath),
+		zap.String("remote_addr", conn.RemoteAddr().String()),
+	)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	size := stat.Size()
+
+	var r io.Reader = f
+	if onProgress != nil {
+		r = io.TeeReader(f, &progressWriter{total: size, callback: onProgress})
+	}
+
+	n, err := io.Copy(tlsConn, r)
+	if err != nil {
+		return fmt.Errorf("stream error: %w", err)
+	}
+
+	logger.Info("share: send complete", zap.String("path", filePath), zap.Int64("bytes", n))
+	return nil
 }

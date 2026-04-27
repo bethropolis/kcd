@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -517,7 +518,13 @@ func main() {
 					if err != nil {
 						return err
 					}
-					if err := cl.ShareFile(c.Args().Get(0), c.Args().Get(1)); err != nil {
+					// Resolve to absolute path before sending to the daemon — the daemon
+					// runs from a different working directory so relative paths break.
+					absPath, err := filepath.Abs(c.Args().Get(1))
+					if err != nil {
+						return fmt.Errorf("invalid file path: %w", err)
+					}
+					if err := cl.ShareFile(c.Args().Get(0), absPath); err != nil {
 						return err
 					}
 					fmt.Println("File share requested")
