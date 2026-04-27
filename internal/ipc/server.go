@@ -171,7 +171,7 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 		filters = append(filters, events.EventType(e))
 	}
 
-	sub := bus.Subscribe(filters...)
+	sub := bus.Subscribe(events.WatchSubscriberCap, filters...)
 	defer sub.Close()
 
 	for ev := range sub.C {

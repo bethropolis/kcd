@@ -36,6 +36,16 @@ const (
 	TypeVolumeUpdate         EventType = "volume.update"
 )
 
+const (
+	// DefaultSubscriberCap is the channel buffer size for plugin-internal
+	// subscribers (battery test waits, sftp credential waits, etc.).
+	DefaultSubscriberCap = 64
+
+	// WatchSubscriberCap is the channel buffer for the kcd watch IPC stream.
+	// Larger to tolerate slow CLI consumers (jq, SSH, slow terminals).
+	WatchSubscriberCap = 256
+)
+
 // Event represents a single occurrence of something interesting in the daemon.
 type Event struct {
 	Type      EventType `json:"type"`
@@ -87,14 +97,18 @@ func NewBus(logger *zap.Logger) *Bus {
 }
 
 // Subscribe returns a new subscriber that receives events matching the filters.
+// capacity sets the channel buffer size; pass 0 or DefaultSubscriberCap for the standard 64-event buffer.
 // If filters is empty, it receives all events.
-func (b *Bus) Subscribe(filters ...EventType) *Subscriber {
+func (b *Bus) Subscribe(capacity int, filters ...EventType) *Subscriber {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	b.nextID++
 	id := b.nextID
-	ch := make(chan Event, 64)
+	if capacity <= 0 {
+		capacity = DefaultSubscriberCap
+	}
+	ch := make(chan Event, capacity)
 
 	sub := &Subscriber{
 		C:       ch,
@@ -139,7 +153,10 @@ func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
 			case sub.ch <- ev:
 			default:
 				// Drop event if channel is full
-				b.logger.Warn("subscriber channel full, dropping event", zap.Uint64("id", sub.id), zap.String("type", string(typ)))
+				b.logger.Warn("subscriber channel full, dropping event",
+					zap.Uint64("id", sub.id),
+					zap.String("type", string(typ)),
+					zap.String("device_id", deviceID))
 			}
 		}
 	}
