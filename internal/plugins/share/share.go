@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -18,6 +19,53 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
+
+// progressThrottle coalesces high-frequency progress callbacks into
+// at most one bus event per interval.
+type progressThrottle struct {
+	bus      *events.Bus
+	deviceID string
+	filename string
+	total    int64
+	interval time.Duration
+	mu       sync.Mutex
+	last     time.Time
+	pending  int64
+}
+
+func newProgressThrottle(bus *events.Bus, deviceID, filename string, total int64) *progressThrottle {
+	return &progressThrottle{
+		bus:      bus,
+		deviceID: deviceID,
+		filename: filename,
+		total:    total,
+		interval: 500 * time.Millisecond,
+	}
+}
+
+// Update records the latest byte count and publishes an event if the
+// throttle interval has elapsed since the last publish.
+func (t *progressThrottle) Update(current, _ int64) {
+	if t.bus == nil {
+		return
+	}
+	t.mu.Lock()
+	t.pending = current
+	now := time.Now()
+	if now.Sub(t.last) < t.interval {
+		t.mu.Unlock()
+		return
+	}
+	t.last = now
+	cur := t.pending
+	t.mu.Unlock()
+
+	t.bus.Publish(events.TypeShareProgress, t.deviceID, map[string]any{
+		"file":    t.filename,
+		"current": cur,
+		"total":   t.total,
+	})
+}
 
 // SharePlugin handles file transfers.
 type SharePlugin struct {
@@ -134,13 +182,8 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 
 		var onProgress func(int64, int64)
 		if p.bus != nil {
-			onProgress = func(current, total int64) {
-				p.bus.Publish(events.TypeShareProgress, dev.ID(), map[string]interface{}{
-					"file":    body.Filename,
-					"current": current,
-					"total":   total,
-				})
-			}
+			throttle := newProgressThrottle(p.bus, dev.ID(), body.Filename, payloadSize)
+			onProgress = throttle.Update
 		}
 
 		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, onProgress, p.Logger)
@@ -186,13 +229,8 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	// Start side-channel listener
 	var onProgress func(int64, int64)
 	if p.bus != nil {
-		onProgress = func(current, total int64) {
-			p.bus.Publish(events.TypeShareProgress, dev.ID(), map[string]interface{}{
-				"file":    filepath.Base(filePath),
-				"current": current,
-				"total":   total,
-			})
-		}
+		throttle := newProgressThrottle(p.bus, dev.ID(), filepath.Base(filePath), stat.Size())
+		onProgress = throttle.Update
 	}
 
 	port, err := SendSideChannel(ctx, filePath, p.TLSConfig, dev.ID(), onProgress, p.Logger)

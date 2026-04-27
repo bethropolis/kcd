@@ -45,7 +45,7 @@ func TestBatteryPlugin_Handle_ThresholdLow_EmitsEvent(t *testing.T) {
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
-	sub := bus.Subscribe(events.TypeBatteryThreshold)
+	sub := bus.Subscribe(0, events.TypeBatteryThreshold)
 	defer sub.Close()
 
 	pkt, _ := protocol.NewPacket("kdeconnect.battery", BatteryBody{
@@ -80,7 +80,7 @@ func TestBatteryPlugin_Handle_ThresholdFull_EmitsEvent(t *testing.T) {
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
-	sub := bus.Subscribe(events.TypeBatteryThreshold)
+	sub := bus.Subscribe(0, events.TypeBatteryThreshold)
 	defer sub.Close()
 
 	pkt, _ := protocol.NewPacket("kdeconnect.battery", BatteryBody{
@@ -106,7 +106,7 @@ func TestBatteryPlugin_Handle_NoThreshold_NoEvent(t *testing.T) {
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
-	sub := bus.Subscribe(events.TypeBatteryThreshold)
+	sub := bus.Subscribe(0, events.TypeBatteryThreshold)
 	defer sub.Close()
 
 	pkt, _ := protocol.NewPacket("kdeconnect.battery", BatteryBody{
