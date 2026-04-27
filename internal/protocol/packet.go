@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,18 +31,36 @@ type TransferInfo struct {
 	Port int `json:"port"`
 }
 
+// poolAcquires counts every call to AcquirePacket.
+// poolMisses counts calls where sync.Pool had no object and allocated fresh.
+// hits = acquires - misses.
+var (
+	poolAcquires atomic.Int64
+	poolMisses   atomic.Int64
+)
+
 // packetPool avoids per-packet heap allocations on the hot read path.
 var packetPool = sync.Pool{
 	New: func() any {
+		poolMisses.Add(1)
 		return &Packet{}
 	},
 }
 
 // AcquirePacket returns a zeroed Packet from the pool.
 func AcquirePacket() *Packet {
+	poolAcquires.Add(1)
 	p := packetPool.Get().(*Packet)
 	p.Reset()
 	return p
+}
+
+// PoolStats returns packet pool usage counters for diagnostic logging.
+// hits = acquires - misses.
+// A miss rate above ~20% under steady load may indicate pool pressure
+// from GC eviction.
+func PoolStats() (acquires, misses int64) {
+	return poolAcquires.Load(), poolMisses.Load()
 }
 
 // ReleasePacket returns a Packet to the pool after zeroing it.

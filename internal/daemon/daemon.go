@@ -596,6 +596,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	<-ctx.Done()
 
 	logger.Info("kcd daemon shutting down")
+
+	acquires, misses := protocol.PoolStats()
+	hits := acquires - misses
+	logger.Debug("packet pool stats",
+		zap.Int64("acquires", acquires),
+		zap.Int64("misses", misses),
+		zap.Int64("hits", hits),
+		zap.String("hit_rate", fmt.Sprintf("%.1f%%",
+			float64(hits)/max(float64(acquires), 1)*100,
+		)),
+	)
+
 	return nil
 }
 
