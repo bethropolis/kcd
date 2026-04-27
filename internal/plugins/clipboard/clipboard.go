@@ -26,8 +26,9 @@ type ClipboardPlugin struct {
 	tlsConfig     *tls.Config
 	logger        *zap.Logger
 	isWayland     bool
-	mu            sync.Mutex
-	lastContent   string
+	mu                sync.Mutex
+	lastContent       string // last content received from phone (inbound)
+	lastPushedContent string // last content sent to phone (outbound)
 }
 
 // NewClipboardPlugin creates a clipboard plugin.
@@ -222,16 +223,24 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 		return err
 	}
 
+	content := string(out)
+
 	p.mu.Lock()
-	if string(out) == p.lastContent {
+	// Skip if content matches what we last received from the phone (lastContent)
+	// OR what we last pushed outbound (lastPushedContent).
+	//
+	// lastContent guard: prevents sending the phone's own content back.
+	// lastPushedContent guard: prevents duplicate pushes when the local
+	// clipboard hasn't changed between two Push calls.
+	if content == p.lastContent || content == p.lastPushedContent {
 		p.mu.Unlock()
 		return nil
 	}
-	p.lastContent = string(out)
+	p.lastPushedContent = content
 	p.mu.Unlock()
 
 	pkt, err := protocol.NewPacket("kdeconnect.clipboard", ClipboardBody{
-		Content: string(out),
+		Content: content,
 	})
 	if err != nil {
 		return err
@@ -241,7 +250,15 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	return dev.Send(pkt)
 }
 
-func (p *ClipboardPlugin) OnConnect(dev device.Sender) {}
+func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
+	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", map[string]any{})
+	if err != nil {
+		p.logger.Debug("clipboard: OnConnect: failed to build packet", zap.Error(err))
+		return
+	}
+	// Best-effort — device may still be completing the TLS handshake.
+	_ = dev.Send(pkt)
+}
 
 func (p *ClipboardPlugin) OnDisconnect(dev device.Sender) {
 }
