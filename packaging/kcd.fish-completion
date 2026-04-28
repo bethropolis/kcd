@@ -1,12 +1,221 @@
-# kcd fish completion
-# Install:
-#   System:  sudo cp kcd.fish-completion /usr/share/fish/completions/kcd.fish
-#   User:    cp kcd.fish-completion ~/.config/fish/completions/kcd.fish
+# Fish shell completions for kcd — Headless KDE Connect Daemon
+# Install: cp kcd.fish ~/.config/fish/completions/kcd.fish
 
-function __kcd_complete
-    set -l args (commandline -poc)
-    set -e args[1]
-    kcd --generate-bash-completion $args 2>/dev/null
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Query the running daemon for paired/connected device IDs and names.
+# Falls back gracefully if the daemon isn't running.
+function __kcd_devices
+    kcd devices --json 2>/dev/null \
+        | string match -r '"id":"([^"]+)","name":"([^"]+)"' \
+        | awk 'NR%3==0{id=$0} NR%3==1{id=$0} NR%3==2{print prev"\t"$0} {prev=$0}' 2>/dev/null
+    # Simpler fallback: just print IDs one per line
+    kcd devices --json 2>/dev/null \
+        | python3 -c "
+import sys, json
+try:
+    devs = json.load(sys.stdin)
+    for d in devs:
+        print(d.get('id','') + '\t' + d.get('name','') + ' (' + d.get('state','') + ')')
+except:
+    pass
+" 2>/dev/null
 end
 
-complete -c kcd -f -a "(__kcd_complete)"
+# Return true when we are completing the first positional argument (device-id)
+# for a subcommand, i.e. exactly one token after the subcommand name.
+function __kcd_needs_device
+    set -l cmd (commandline -opc)
+    set -l n (count $cmd)
+    # cmd[1]=kcd, cmd[2]=subcommand, next token is arg1 → complete device
+    test $n -eq 2
+end
+
+# Return true when we are completing the Nth positional argument
+# (used for subcommands that need device-id then something else)
+function __kcd_at_arg
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq $argv[1]
+end
+
+# All top-level subcommands (for "don't complete subcommands twice" guards)
+set -l __kcd_cmds daemon devices connect pair unpair ping battery watch \
+    sftp reply call findmyphone lock unlock share clipboard run sms doctor status
+
+# ---------------------------------------------------------------------------
+# Disable file completion globally — we re-enable it only where needed
+# ---------------------------------------------------------------------------
+complete -c kcd -f
+
+# ---------------------------------------------------------------------------
+# Global flags (available before any subcommand)
+# ---------------------------------------------------------------------------
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -l config -d 'Path to config file' -r
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -l log-level -d 'Log level' -r \
+    -a 'debug\tVerbose info\twarn\tWarnings only\terror\tErrors only\tquiet\tSilent'
+
+# ---------------------------------------------------------------------------
+# Top-level subcommands
+# ---------------------------------------------------------------------------
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a daemon      -d 'Run the kcd daemon'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a devices     -d 'List all known and reachable devices'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a connect     -d 'Manually connect to a device by IP address'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a pair        -d 'Initiate pairing with a remote device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a unpair      -d 'Revoke trust and unpair from a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a ping        -d 'Send a ping notification to a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a battery     -d 'Fetch battery level and charging status'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a watch       -d 'Monitor real-time events from the daemon'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a sftp        -d 'Manage SFTP connections to a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a reply       -d 'Send a text reply to a smartphone notification'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a call        -d 'Manage phone calls'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a findmyphone -d 'Make the phone play a loud ringtone'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a lock        -d 'Lock the current desktop session'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a unlock      -d 'Unlock the current desktop session'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a share       -d 'Send a local file to a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a clipboard   -d 'Sync local clipboard content to a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a run         -d 'Execute and manage remote commands on the device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a sms         -d 'Send an SMS via a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a doctor      -d 'Check runtime dependencies and configuration'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a status      -d 'Show daemon status and runtime information'
+
+# ---------------------------------------------------------------------------
+# devices
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from devices" \
+    -l json  -d 'Output in JSON format'
+complete -c kcd -n "__fish_seen_subcommand_from devices" \
+    -l watch -s w -d 'Stream device changes in real time'
+
+# ---------------------------------------------------------------------------
+# connect  <ip-address>
+# ---------------------------------------------------------------------------
+# No special completions — IP addresses aren't discoverable
+
+# ---------------------------------------------------------------------------
+# pair / unpair / ping / battery / findmyphone / lock / unlock / clipboard
+#   — all take a single <device-id>
+# ---------------------------------------------------------------------------
+for _cmd in pair unpair ping battery findmyphone lock unlock clipboard
+    complete -c kcd -n "__fish_seen_subcommand_from $_cmd && __kcd_at_arg 2" \
+        -a '(__kcd_devices)' -d 'Device ID'
+end
+
+# ---------------------------------------------------------------------------
+# watch
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from watch" \
+    -l json -d 'Output raw NDJSON'
+complete -c kcd -n "__fish_seen_subcommand_from watch" \
+    -l events -s e -d 'Filter by event type' -r \
+    -a "device.added\t'Device discovered'
+device.removed\t'Device removed'
+device.connected\t'Device came online'
+device.disconnected\t'Device went offline'
+pair.requested\t'Incoming pair request'
+pair.accepted\t'Pairing accepted'
+pair.rejected\t'Pairing rejected'
+battery.update\t'Battery level changed'
+battery.threshold\t'Battery low/full threshold'
+notification\t'Incoming notification'
+notification.canceled\t'Notification dismissed'
+share.progress\t'File transfer progress'
+share.complete\t'File transfer finished'
+share.text\t'Text shared from phone'
+share.url\t'URL shared from phone'
+ping.received\t'Ping received'
+telephony.ringing\t'Incoming call'
+telephony.missed\t'Missed call'
+telephony.canceled\t'Call ended'
+connectivity.update\t'Cell signal changed'
+sftp.mount\t'SFTP filesystem mounted'
+volume.update\t'System volume changed'"
+
+# ---------------------------------------------------------------------------
+# sftp  request|mount|unmount  <device-id>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
+    -a request  -d 'Request SFTP connection details'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
+    -a mount    -d 'Mount phone filesystem via sshfs'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
+    -a unmount  -d 'Unmount a previously mounted phone filesystem'
+
+for _sub in request mount unmount
+    complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
+        -a '(__kcd_devices)' -d 'Device ID'
+end
+
+# ---------------------------------------------------------------------------
+# reply  <device-id> <reply-id> <message>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from reply && __kcd_at_arg 2" \
+    -a '(__kcd_devices)' -d 'Device ID'
+# reply-id and message are free-form — no completions
+
+# ---------------------------------------------------------------------------
+# call  mute  <device-id>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from call && not __fish_seen_subcommand_from mute" \
+    -a mute -d 'Silence an incoming call'
+complete -c kcd -n "__fish_seen_subcommand_from call && __fish_seen_subcommand_from mute && __kcd_at_arg 3" \
+    -a '(__kcd_devices)' -d 'Device ID'
+
+# ---------------------------------------------------------------------------
+# share  <device-id>  <file-path>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from share && __kcd_at_arg 2" \
+    -a '(__kcd_devices)' -d 'Device ID'
+# Re-enable file completions for the file-path argument (position 3)
+complete -c kcd -n "__fish_seen_subcommand_from share && __kcd_at_arg 3" \
+    -F -d 'File to send'
+
+# ---------------------------------------------------------------------------
+# run  list|exec  <device-id>  [command-key]
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from run && not __fish_seen_subcommand_from list exec" \
+    -a list -d 'List available remote commands'
+complete -c kcd -n "__fish_seen_subcommand_from run && not __fish_seen_subcommand_from list exec" \
+    -a exec -d 'Execute a remote command by key'
+
+complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_from list && __kcd_at_arg 3" \
+    -a '(__kcd_devices)' -d 'Device ID'
+complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_from exec && __kcd_at_arg 3" \
+    -a '(__kcd_devices)' -d 'Device ID'
+# command-key at position 4 is free-form
+
+# ---------------------------------------------------------------------------
+# sms  <device-id>  <phone-number>  <message>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from sms && __kcd_at_arg 2" \
+    -a '(__kcd_devices)' -d 'Device ID'
+# phone-number and message are free-form
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from status" \
+    -l json -d 'Output raw JSON'
