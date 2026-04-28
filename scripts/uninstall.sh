@@ -91,6 +91,23 @@ if [[ -f "${BIN_DIR}/kcd.backup" ]]; then
   success "Removed ${BIN_DIR}/kcd.backup"
 fi
 
+# ── Shell completions ──────────────────────────────────────────────────────────
+step "Shell completions"
+
+BASH_COMP="${HOME}/.local/share/bash-completion/completions/kcd"
+ZSH_COMP="${HOME}/.zfunc/_kcd"
+FISH_COMP="${HOME}/.config/fish/completions/kcd.fish"
+
+removed_any=false
+for f in "${BASH_COMP}" "${ZSH_COMP}" "${FISH_COMP}"; do
+  if [[ -f "$f" ]]; then
+    rm "$f"
+    success "Removed $f"
+    removed_any=true
+  fi
+done
+[[ "${removed_any}" == false ]] && skip "No completion files found"
+
 # ── Remove Nautilus extension ──────────────────────────────────────────────────
 step "Nautilus extension"
 

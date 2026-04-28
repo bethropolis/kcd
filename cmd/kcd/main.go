@@ -40,9 +40,10 @@ func getClient(c *cli.Context) (*client.Client, error) {
 
 func main() {
 	app := &cli.App{
-		Name:    "kcd",
-		Usage:   "KDE Connect daemon and client",
-		Version: fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
+		Name:                 "kcd",
+		Usage:                "KDE Connect daemon and client",
+		Version:              fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
+		EnableBashCompletion: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "config",

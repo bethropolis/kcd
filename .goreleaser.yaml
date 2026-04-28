@@ -58,6 +58,9 @@ archives:
       - packaging/nautilus-kcd.py
       - scripts/install.sh
       - scripts/uninstall.sh
+      - packaging/kcd.bash-completion
+      - packaging/kcd.zsh-completion
+      - packaging/kcd.fish-completion
 
 nfpms:
   - id: packages
@@ -102,6 +105,16 @@ nfpms:
         dst: /usr/share/doc/kcd/nautilus-kcd.py
       - src: README.md
         dst: /usr/share/doc/kcd/README.md
+      - src: packaging/kcd.bash-completion
+        dst: /etc/bash_completion.d/kcd
+        packager: deb
+      - src: packaging/kcd.bash-completion
+        dst: /etc/bash_completion.d/kcd
+        packager: rpm
+      - src: packaging/kcd.zsh-completion
+        dst: /usr/share/zsh/site-functions/_kcd
+      - src: packaging/kcd.fish-completion
+        dst: /usr/share/fish/completions/kcd.fish
     scripts:
       postinstall: scripts/postinstall.sh
       preremove: scripts/preremove.sh

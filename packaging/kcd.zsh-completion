@@ -1,0 +1,14 @@
+#compdef kcd
+# kcd zsh completion
+# Install:
+#   System:  sudo cp kcd.zsh-completion /usr/share/zsh/site-functions/_kcd
+#   User:    mkdir -p ~/.zfunc && cp kcd.zsh-completion ~/.zfunc/_kcd
+#            Add to ~/.zshrc: fpath=(~/.zfunc $fpath) && autoload -Uz compinit && compinit
+
+_kcd() {
+    local -a candidates
+    candidates=(${(f)"$(kcd --generate-bash-completion "${words[@]:1}" 2>/dev/null)"})
+    _describe 'command' candidates
+}
+
+_kcd "$@"

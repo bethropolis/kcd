@@ -232,6 +232,42 @@ if command -v waybar >/dev/null 2>&1 && pgrep -x waybar >/dev/null 2>&1; then
   fi
 fi
 
+# ── Shell completions ──────────────────────────────────────────────────────────
+step "Installing shell completions"
+
+BASH_COMP_DIR="${HOME}/.local/share/bash-completion/completions"
+ZSH_COMP_DIR="${HOME}/.zfunc"
+FISH_COMP_DIR="${HOME}/.config/fish/completions"
+
+if [[ -f "${REPO_ROOT}/packaging/kcd.bash-completion" ]]; then
+  if command -v bash >/dev/null 2>&1; then
+    mkdir -p "${BASH_COMP_DIR}"
+    install -m 644 "${REPO_ROOT}/packaging/kcd.bash-completion" \
+      "${BASH_COMP_DIR}/kcd"
+    success "Bash completion installed → ${BASH_COMP_DIR}/kcd"
+    info "Add to ~/.bashrc if not already present:"
+    printf "    source ~/.local/share/bash-completion/completions/kcd\n"
+  fi
+
+  if command -v zsh >/dev/null 2>&1; then
+    mkdir -p "${ZSH_COMP_DIR}"
+    install -m 644 "${REPO_ROOT}/packaging/kcd.zsh-completion" \
+      "${ZSH_COMP_DIR}/_kcd"
+    success "Zsh completion installed → ${ZSH_COMP_DIR}/_kcd"
+    info "Add to ~/.zshrc if not already present:"
+    printf "    fpath=(~/.zfunc \$fpath) && autoload -Uz compinit && compinit\n"
+  fi
+
+  if command -v fish >/dev/null 2>&1; then
+    mkdir -p "${FISH_COMP_DIR}"
+    install -m 644 "${REPO_ROOT}/packaging/kcd.fish-completion" \
+      "${FISH_COMP_DIR}/kcd.fish"
+    success "Fish completion installed → ${FISH_COMP_DIR}/kcd.fish"
+  fi
+else
+  info "Completion files not found — skipping"
+fi
+
 # ── Firewall reminder ─────────────────────────────────────────────────────────
 step "Firewall"
 

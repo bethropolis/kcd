@@ -22,7 +22,8 @@ func Run() []Check {
 	checks := []Check{}
 
 	// daemon running
-	checks = append(checks, checkDaemon())
+	daemonCheck := checkDaemon()
+	checks = append(checks, daemonCheck)
 
 	// notify-send
 	checks = append(checks, checkBin("notify-send", "notify-send", "install libnotify-bin"))
@@ -41,10 +42,10 @@ func Run() []Check {
 		"ydotool", "xdotool"))
 
 	// port 1716/udp open
-	checks = append(checks, checkUDPPort())
+	checks = append(checks, checkUDPPort(daemonCheck.Pass))
 
 	// port 1716/tcp open
-	checks = append(checks, checkTCPPort())
+	checks = append(checks, checkTCPPort(daemonCheck.Pass))
 
 	// config file readable
 	checks = append(checks, checkConfigFile())
@@ -81,7 +82,10 @@ func checkAny(name, hint string, bins ...string) Check {
 	return Check{Name: name, Detail: hint, Pass: false}
 }
 
-func checkUDPPort() Check {
+func checkUDPPort(daemonRunning bool) Check {
+	if daemonRunning {
+		return Check{Name: "port 1716/udp open", Pass: true}
+	}
 	l, err := net.ListenPacket("udp", ":1716")
 	if err != nil {
 		return Check{Name: "port 1716/udp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
@@ -90,7 +94,10 @@ func checkUDPPort() Check {
 	return Check{Name: "port 1716/udp open", Pass: true}
 }
 
-func checkTCPPort() Check {
+func checkTCPPort(daemonRunning bool) Check {
+	if daemonRunning {
+		return Check{Name: "port 1716/tcp open", Pass: true}
+	}
 	l, err := net.Listen("tcp", ":1716")
 	if err != nil {
 		return Check{Name: "port 1716/tcp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
