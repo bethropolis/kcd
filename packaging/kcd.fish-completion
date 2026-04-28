@@ -1,0 +1,12 @@
+# kcd fish completion
+# Install:
+#   System:  sudo cp kcd.fish-completion /usr/share/fish/completions/kcd.fish
+#   User:    cp kcd.fish-completion ~/.config/fish/completions/kcd.fish
+
+function __kcd_complete
+    set -l args (commandline -poc)
+    set -e args[1]
+    kcd --generate-bash-completion $args 2>/dev/null
+end
+
+complete -c kcd -f -a "(__kcd_complete)"

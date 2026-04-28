@@ -83,6 +83,21 @@ These structural constraints must hold at all times:
 
 ## Plugin System
 
+```
+⚠  CONSTRUCTORS: Every plugin now requires bus *events.Bus and
+logger *zap.Logger. Never use struct literals (&battery.BatteryPlugin{})
+— always call the constructor. The compiler will catch this but the
+error message may be confusing.
+```
+
+### Constructor Signature Reference
+
+| Plugin | Correct constructor signature |
+|---|---|
+| Battery | `battery.NewBatteryPlugin(bus *events.Bus, logger *zap.Logger) *BatteryPlugin` |
+| Notification | `notification.NewNotificationPlugin(bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin` |
+| SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin` |
+
 ### Interface
 
 ```go
@@ -232,6 +247,15 @@ Rules:
 - Filters: `bus.Subscribe(events.TypeBatteryUpdate, events.TypeNotification)` — empty filter = all events.
 - Always call `sub.Close()` when done to avoid goroutine leaks.
 
+```
+bus.Subscribe takes capacity as its first argument:
+  sub := bus.Subscribe(0, events.TypeBatteryUpdate)       // default cap (64)
+  sub := bus.Subscribe(events.WatchSubscriberCap, ...)    // 256, for watch streams
+
+Never pass filters as the first argument. The old zero-argument form no
+longer compiles after Phase 5-A.
+```
+
 ---
 
 ## Device State Machine
@@ -259,8 +283,8 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 
 | Area | Status |
 |---|---|
-| **SMS receive** | Not implemented. `SMSPlugin.IncomingTypes()` returns `[]string{}`. `kdeconnect.sms.messages` packets are not handled. Sending SMS works. |
-| **Mousepad keyboard** special keys | Most mapped in `mapSpecialKey()` but keys 15, 17–20 are absent from the KDE Connect spec and intentionally unhandled. |
+| **SMS receive** | Not implemented. `SMSPlugin.IncomingTypes()` returns `[]string{}`. Sending SMS works. This gap is known and accepted — no plans to implement. |
+| **Mousepad keyboard** special keys | Intentionally unhandled — absent from the KDE Connect spec. |
 
 ---
 
@@ -279,6 +303,10 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 | Cert fingerprint mismatch loop | Phone was reinstalled or cert regenerated | Delete the device entry from `devices.json`, re-pair |
 | MPRIS plugin disabled silently | D-Bus session bus not available | Expected — MPRIS logs a `Warn` and continues without it |
 | mDNS not advertising | `grandcat/zeroconf` registration error | Check for port conflicts on mDNS port 5353; log level debug shows the error |
+| Desktop notifications show no icon | `libnotify < 0.8.0` | Upgrade to libnotify ≥ 0.8 (Ubuntu 22.04+, Fedora 36+) |
+| `kcd sftp mount` shows "permission denied" | sshfs path misconfiguration | Ensure kcd version includes the chroot fix — mount root is `user@ip:` not `user@ip:/storage/emulated/0` |
+| Paired device never auto-reconnects | Broadcast disabled and no IP cached | Connect manually once (`kcd connect <ip>`) to prime `LastIP`; subsequent drops will auto-reconnect |
+| `battery.update` events never arrive | Old binary before Phase 2 fix | Battery plugin now requires `NewBatteryPlugin(bus, logger)` — rebuild |
 
 ---
 

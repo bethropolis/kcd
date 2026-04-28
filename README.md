@@ -12,11 +12,11 @@
 
 ## Features
 
-| Plugin | What it does |
+| Plugin / Feature | What it does |
 |---|---|
 | **Battery** | Monitor remote device charge and charging state |
 | **Clipboard** | Bi-directional sync (Wayland via `wl-copy`, X11 via `xclip`) |
-| **Notifications** | Forward phone notifications to the desktop via `notify-send` |
+| **Notifications** | Forward phone notifications to the desktop via `notify-send`<br>> Desktop notification icons require `libnotify ≥ 0.8.0` (Ubuntu 22.04+, Fedora 36+). Older versions receive text-only notifications. |
 | **Share** | Receive files and URLs from the phone; send local files to it |
 | **RunCommand** | Execute pre-configured local shell commands triggered from your phone |
 | **MPRIS** | Control desktop media players (VLC, Spotify, etc.) via D-Bus |
@@ -27,11 +27,13 @@
 | **SFTP** | Browse the phone's filesystem |
 | **Lock / Unlock** | Lock and unlock the desktop session |
 | **Ping** | Simple connectivity check |
-| **Connectivity** | Phone signal strength reporting |
-| **System Volume** | Remote volume control |
-| **Send Notification** | Push a notification from PC to phone |
+| **Connectivity** | Phone signal strength and network type reporting |
+| **System Volume** | Control desktop audio volume from the phone |
+| **Send Notification** | Push a notification from the PC to the phone |
+| **Auto-reconnect** | Paired devices reconnect automatically after dropping |
 
 Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
+> Paired devices reconnect automatically using the last known IP when broadcast is disabled (`enable_broadcast = false`), so the daemon reaches 0.0% idle CPU without losing reconnection ability.
 
 ---
 
@@ -128,6 +130,12 @@ kcd watch --events=pair.accepted
 ### 4. Use it
 
 ```bash
+# Check daemon health and dependencies
+kcd doctor
+
+# Show daemon uptime, version, connected devices, and plugins
+kcd status
+
 # Push your clipboard to the first connected phone
 kcd clipboard
 
@@ -139,6 +147,12 @@ kcd findmyphone <device-id>
 
 # Watch live events
 kcd watch
+
+# Watch device connect/disconnect live
+kcd devices --watch
+
+# Unmount a previously mounted phone filesystem
+kcd sftp unmount <device-id>
 ```
 
 ---
@@ -156,11 +170,14 @@ log_level   = "info"           # debug | info | warn | error | quiet
 # Set to false once all devices are paired — reaches 0.0% idle CPU.
 enable_broadcast = true
 
-# Auto-accept pairing requests without manual confirmation (headless / server use).
+# Auto-accept pairing requests without prompting (headless/server use).
+# ⚠  Only enable on trusted networks.
 auto_accept_pairing = false
 
 # Directory where received files are saved.
 download_dir = "~/Downloads/kcd"
+
+# Reload [commands] and log_level without restarting: kill -HUP $(pidof kcd)
 
 [plugins]
 battery      = true
@@ -182,6 +199,15 @@ sms          = true
 uptime   = "uptime"
 lock     = "loginctl lock-session"
 suspend  = "systemctl suspend"
+
+# Per-app notification filters.
+# Keys: Android package names. Values: "show" or "silent".
+# "silent" suppresses the desktop popup but still emits a watch event.
+# "*" sets the default for all unmatched apps.
+[notifications]
+# "com.whatsapp"          = "show"
+# "com.google.android.gm" = "silent"
+# "*"                     = "show"
 ```
 
 See [`packaging/kcd.example.toml`](packaging/kcd.example.toml) for the full annotated reference.
@@ -205,7 +231,7 @@ nautilus -q   # Restart Nautilus to load the extension
 Add to `~/.config/waybar/config`:
 ```json
 "custom/phone-battery": {
-    "exec": "kcd watch --events=battery.update | jq -r 'select(.type==\"battery.update\") | \"\(.payload.charge)%\" + (if .payload.charging then \" \" else \"\" end)'",
+    "exec": "kcd watch --events=battery.update | jq -r 'select(.type==\"battery.update\") | \"\\(.payload.charge)%\" + (if .payload.charging then \" \" else \"\" end)'",
     "restart-interval": 0,
     "format": "󰏚 {}",
     "return-type": ""
@@ -240,6 +266,37 @@ kcd watch --json | while read -r event; do
     esac
 done
 ```
+
+---
+
+## Events
+
+`kcd watch --json` streams NDJSON events. All events include `type`, `timestamp` (RFC3339), and `deviceId` fields.
+
+| Event type | Payload fields | Description |
+|---|---|---|
+| `device.added` | `name`, `type` | New device seen for the first time |
+| `device.removed` | — | Device unpaired and removed |
+| `device.connected` | `name`, `type` | TCP connection established |
+| `device.disconnected` | — | Connection dropped |
+| `pair.requested` | — | Phone sent a pairing request |
+| `pair.accepted` | — | Pairing completed on both sides |
+| `pair.rejected` | — | Pairing denied or cancelled |
+| `battery.update` | `charge`, `charging` | Battery reading received |
+| `battery.threshold` | `charge`, `charging`, `event` | Low (event=1) or full (event=2) |
+| `notification` | `appName`, `title`, `text`, `requestReplyId` | Phone notification forwarded |
+| `notification.canceled` | `id` | Phone dismissed a notification |
+| `share.progress` | `file`, `current`, `total` | File transfer in progress (~2/sec) |
+| `share.complete` | `file`, `path` | File transfer finished |
+| `share.text` | `text` | Plain text received |
+| `share.url` | `url` | URL received |
+| `ping.received` | — | Ping arrived |
+| `telephony.ringing` | `contactName`, `phoneNumber` | Incoming call |
+| `telephony.missed` | `contactName`, `phoneNumber` | Missed call |
+| `telephony.canceled` | — | Call ended |
+| `connectivity.update` | `signal`, `networkType` | Signal strength report |
+| `volume.update` | `name`, `volume`, `muted` | Desktop volume changed from phone |
+| `sftp.mount` | `uri`, `ip`, `port`, `user`, `password`, `path` | SFTP credentials received |
 
 ---
 
