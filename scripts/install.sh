@@ -61,6 +61,8 @@ done
 BIN_DIR="${HOME}/.local/bin"
 SYSTEMD_DIR="${HOME}/.config/systemd/user"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/kcd"
+STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/kcd"
+DOWNLOAD_DIR="${HOME}/Downloads/kcd"
 NAUTILUS_EXT_DIR="${HOME}/.local/share/nautilus-python/extensions"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -159,6 +161,10 @@ if [[ ! -f "${CONFIG_DIR}/kcd.toml" ]]; then
 else
   info "Config already exists at ${CONFIG_DIR}/kcd.toml — skipping (won't overwrite)"
 fi
+
+# Ensure state and download directories exist (required for systemd sandbox)
+[[ ! -d "${STATE_DIR}" ]] && mkdir -p "${STATE_DIR}"
+[[ ! -d "${DOWNLOAD_DIR}" ]] && mkdir -p "${DOWNLOAD_DIR}"
 
 # ── systemd user service ──────────────────────────────────────────────────────
 if [[ "${INSTALL_SERVICE}" == true ]]; then
