@@ -75,6 +75,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	logger.Info("kcd daemon initializing", zap.String("device_id", cfg.DeviceID))
 
+	if err := cfg.Validate(); err != nil {
+		logger.Fatal("invalid configuration", zap.Error(err))
+	}
+
 	// 1. TLS Certs (CN must match device ID for KDE Connect verification)
 	certPair, err := cert.LoadOrGenerate(cfg.CertFile, cfg.KeyFile, cfg.DeviceID)
 	if err != nil {
@@ -124,25 +128,25 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		localCert, _ = x509.ParseCertificate(certPair.Certificate[0])
 	}
 
-	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.AutoAcceptPairing, saveDevices, bus, logger)
+	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.AutoAcceptPairing, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
 	if cfg.Plugins.Battery {
-		plugins.Register(battery.NewBatteryPlugin(bus, logger))
+		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPlugin(bus, tlsCfg, logger))
+		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger))
 	}
 	if cfg.Plugins.Clipboard {
 		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger))
 	}
 	if cfg.Plugins.Share {
-		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, tlsCfg, bus, logger))
+		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger))
 	}
 	if cfg.Plugins.RunCommand {
 		plugins.Register(runcommand.NewRunCommandPlugin(cfg.Commands, logger))
 	}
 	if cfg.Plugins.Ping {
-		plugins.Register(ping.NewPingPlugin(bus, logger))
+		plugins.Register(ping.NewPingPlugin(cfg.Ping, bus, logger))
 	}
 	if cfg.Plugins.Telephony {
 		plugins.Register(telephony.NewTelephonyPluginWithOptions(bus, cfg.Plugins.PauseMusic, logger))
@@ -160,10 +164,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 	if cfg.Plugins.Mousepad {
-		plugins.Register(mousepad.NewMousepadPlugin(logger))
+		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
 	}
 	if cfg.Plugins.SFTP {
-		plugins.Register(sftp.NewSftpPlugin(bus, logger))
+		plugins.Register(sftp.NewSftpPlugin(cfg.SFTP, bus, logger))
 	}
 	if cfg.Plugins.FindMyPhone {
 		plugins.Register(&findmyphone.FindMyPhonePlugin{})
