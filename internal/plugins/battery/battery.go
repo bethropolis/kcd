@@ -3,12 +3,12 @@ package battery
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -22,13 +22,15 @@ const (
 
 // BatteryPlugin handles incoming battery state updates.
 type BatteryPlugin struct {
+	cfg    config.BatteryConfig
 	bus    *events.Bus
 	logger *zap.Logger
 }
 
 // NewBatteryPlugin creates a BatteryPlugin.
-func NewBatteryPlugin(bus *events.Bus, logger *zap.Logger) *BatteryPlugin {
+func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger) *BatteryPlugin {
 	return &BatteryPlugin{
+		cfg:    cfg,
 		bus:    bus,
 		logger: logger.With(zap.String("plugin", "battery")),
 	}
@@ -60,41 +62,45 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 	// Handle threshold events — these warrant a desktop notification in addition
 	// to the standard battery.update event.
 	if body.ThresholdEvent != thresholdNone {
-		go p.handleThreshold(dev.ID(), body)
+		p.handleThreshold(dev, body)
 	}
 
 	return nil
 }
 
-func (p *BatteryPlugin) handleThreshold(deviceID string, body BatteryBody) {
-	var title, message, urgency string
+func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
+	var message, urgency string
 
 	switch body.ThresholdEvent {
 	case thresholdLow:
-		title = "🪫 Battery Low"
-		message = fmt.Sprintf("Phone battery is at %d%%", body.CurrentCharge)
-		urgency = "critical"
+		if !p.cfg.NotifyLow {
+			break
+		}
+		message = p.cfg.LowMessage
+		urgency = p.cfg.LowUrgency
 	case thresholdFull:
-		title = "🔋 Fully Charged"
-		message = fmt.Sprintf("Phone battery is at %d%%", body.CurrentCharge)
-		urgency = "normal"
+		if !p.cfg.NotifyFull {
+			break
+		}
+		message = p.cfg.FullMessage
+		urgency = p.cfg.FullUrgency
 	default:
 		return
 	}
 
-	// Desktop notification.
-	if err := exec.Command("notify-send",
-		"-a", "KDE Connect",
-		"-u", urgency,
-		"-i", "battery",
-		title, message,
-	).Run(); err != nil {
-		p.logger.Debug("battery threshold: notify-send failed", zap.Error(err))
+	if message != "" {
+		// Desktop notification.
+		plugin.RunCommandAsync(p.logger, "notify-send",
+			"-a", "KDE Connect",
+			"-u", urgency,
+			"-i", "battery",
+			dev.Name(), message,
+		)
 	}
 
 	// Emit event so watch / scripts can react.
 	if p.bus != nil {
-		p.bus.Publish(events.TypeBatteryThreshold, deviceID, map[string]any{
+		p.bus.Publish(events.TypeBatteryThreshold, dev.ID(), map[string]any{
 			"charge":   body.CurrentCharge,
 			"charging": body.IsCharging,
 			"event":    body.ThresholdEvent,

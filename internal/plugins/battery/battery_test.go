@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -15,7 +16,9 @@ func newPlugin(t *testing.T) (*BatteryPlugin, *events.Bus) {
 	t.Helper()
 	logger := zaptest.NewLogger(t)
 	bus := events.NewBus(logger)
-	return NewBatteryPlugin(bus, logger), bus
+	cfg := config.BatteryConfig{}
+	cfg.Defaults()
+	return NewBatteryPlugin(cfg, bus, logger), bus
 }
 
 func TestBatteryPlugin_Handle_UpdatesDevice(t *testing.T) {
