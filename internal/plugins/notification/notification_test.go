@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -14,8 +15,10 @@ func newPlugin(t *testing.T) *NotificationPlugin {
 	t.Helper()
 	logger := zaptest.NewLogger(t)
 	bus := events.NewBus(logger)
+	cfg := config.NotificationPluginConfig{}
+	cfg.Defaults()
 	// tlsConfig is nil — icon fetching is skipped in unit tests.
-	p := NewNotificationPlugin(bus, nil, logger)
+	p := NewNotificationPlugin(cfg, bus, nil, logger)
 	t.Cleanup(p.Close)
 	return p
 }

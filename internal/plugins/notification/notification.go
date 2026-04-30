@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type NotificationPlugin struct {
 	logger         *zap.Logger
 	notifIDs       sync.Map           // maps body.ID (string) -> desktop notify-send ID (string)
 	iconDir        string             // temp dir for cached notification icons
+	cfg            config.NotificationPluginConfig
 	canCloseNotifs bool               // whether notify-send supports --print-id
 	mu             sync.RWMutex
 	filters        config.NotificationConfig
@@ -37,8 +39,9 @@ type NotificationPlugin struct {
 // NewNotificationPlugin creates a NotificationPlugin.
 // tlsConfig is used to fetch notification icon payloads over the KDE Connect
 // side-channel; pass nil to disable icon fetching.
-func NewNotificationPlugin(bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin {
+func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin {
 	p := &NotificationPlugin{
+		cfg:       cfg,
 		bus:       bus,
 		tlsConfig: tlsConfig,
 		logger:    logger.With(zap.String("plugin", "notification")),
@@ -52,7 +55,8 @@ func NewNotificationPlugin(bus *events.Bus, tlsConfig *tls.Config, logger *zap.L
 
 	// Create a persistent temp directory for icon files so they survive
 	// long enough for the notification daemon to read them.
-	if dir, err := os.MkdirTemp("", "kcd-notif-icons-*"); err == nil {
+	baseDir := cfg.IconCacheDir
+	if dir, err := os.MkdirTemp(baseDir, "kcd-notif-icons-*"); err == nil {
 		p.iconDir = dir
 	}
 
@@ -164,7 +168,10 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 
 	// Truncate text to keep notifications readable.
 	text := body.Text
-	if len(text) > 512 {
+	if p.cfg.MaxBodyLength > 0 && len(text) > p.cfg.MaxBodyLength {
+		text = text[:p.cfg.MaxBodyLength] + "…"
+	} else if p.cfg.MaxBodyLength == 0 && len(text) > 512 {
+		// Maintain the old default limit if no config is set
 		text = text[:512] + "…"
 	}
 
@@ -216,7 +223,7 @@ func (p *NotificationPlugin) fetchIcon(
 	size int64,
 	hasIcon bool,
 ) string {
-	if !hasIcon || p.tlsConfig == nil || p.iconDir == "" {
+	if !hasIcon || !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
 		// Fall back to icon name derived from app name.
 		return ""
 	}
@@ -272,12 +279,20 @@ func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, i
 	// Dunst / mako / swaync: stack notifications from the same app so they
 	// replace each other instead of flooding the screen.
 	groupHint := "string:x-dunst-stack-tag:kcd-" + appName
-
-	var args []string
+	
+	args := []string{"-a", appName}
+	if p.cfg.Urgency != "" {
+		args = append(args, "-u", p.cfg.Urgency)
+	}
+	if p.cfg.ExpireMS >= 0 {
+		args = append(args, "-t", strconv.Itoa(p.cfg.ExpireMS))
+	}
+	args = append(args, "-i", iconArg, "-h", groupHint)
+	
 	if p.canCloseNotifs && id != "" {
-		args = []string{"-a", appName, "-i", iconArg, "-h", groupHint, "--print-id", title, text}
+		args = append(args, "--print-id", title, text)
 	} else {
-		args = []string{"-a", appName, "-i", iconArg, "-h", groupHint, title, text}
+		args = append(args, title, text)
 	}
 
 	out, err := exec.Command("notify-send", args...).Output()
