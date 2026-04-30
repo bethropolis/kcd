@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"go.uber.org/zap"
 )
 
@@ -75,28 +76,28 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 }
 
 // ListenSideChannel binds to an available TCP port in the KDE Connect side-channel range.
-func ListenSideChannel(ctx context.Context, tlsConfig *tls.Config) (net.Listener, int, error) {
+func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *tls.Config) (net.Listener, int, error) {
 	lc := net.ListenConfig{KeepAlive: 30 * time.Second}
 	var ln net.Listener
 	var err error
 
-	for port := 1739; port <= 1764; port++ {
+	for port := cfg.PortMin; port <= cfg.PortMax; port++ {
 		ln, err = lc.Listen(ctx, "tcp", fmt.Sprintf("0.0.0.0:%d", port))
 		if err == nil {
 			return ln, port, nil
 		}
 	}
-	return nil, 0, fmt.Errorf("no available ports in range 1739-1764")
+	return nil, 0, fmt.Errorf("no available ports in range %d-%d", cfg.PortMin, cfg.PortMax)
 }
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID string, onProgress func(int64, int64), logger *zap.Logger) error {
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
 
-	// Give Android up to 2 minutes to connect (the user might need to tap "Accept" on their phone)
-	acceptCtx, cancelAccept := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Give Android some time to connect (the user might need to tap "Accept" on their phone)
+	acceptCtx, cancelAccept := context.WithTimeout(context.Background(), timeout)
 	defer cancelAccept()
 
 	go func() {

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -65,14 +66,16 @@ func (t *progressThrottle) Update(current, _ int64) {
 
 type SharePlugin struct {
 	DownloadDir string
+	cfg         config.ShareConfig
 	TLSConfig   *tls.Config
 	Logger      *zap.Logger
 	bus         *events.Bus
 }
 
-func NewSharePlugin(downloadDir string, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin {
+func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin {
 	return &SharePlugin{
 		DownloadDir: downloadDir,
+		cfg:         cfg,
 		TLSConfig:   tlsConfig,
 		Logger:      logger.With(zap.String("plugin", "share")),
 		bus:         bus,
@@ -145,6 +148,10 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	destPath, err := EnsureUnique(p.DownloadDir, safeName)
+	if p.cfg.Overwrite {
+		destPath = filepath.Join(p.DownloadDir, safeName)
+		err = nil
+	}
 	if err != nil {
 		return fmt.Errorf("share: collision handling: %w", err)
 	}
@@ -183,6 +190,13 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 					"success": true,
 				})
 			}
+			if p.cfg.AutoOpen {
+				cmd := p.cfg.OpenCommand
+				if cmd == "" {
+					cmd = "xdg-open"
+				}
+				plugin.RunCommandAsync(p.Logger, cmd, destPath)
+			}
 		}
 	}()
 
@@ -204,8 +218,8 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		return fmt.Errorf("share: directory transfer not supported yet")
 	}
 
-	// Bind to an available side-channel port (1739-1764)
-	ln, port, err := ListenSideChannel(ctx, p.TLSConfig)
+	// Bind to an available side-channel port (using config range)
+	ln, port, err := ListenSideChannel(ctx, p.cfg, p.TLSConfig)
 	if err != nil {
 		return err
 	}
@@ -220,7 +234,11 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	go func() {
 		defer debug.FreeOSMemory()
 
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), onProgress, p.Logger)
+		timeout := time.Duration(p.cfg.AcceptTimeoutSecs) * time.Second
+		if timeout == 0 {
+			timeout = 2 * time.Minute
+		}
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), timeout, onProgress, p.Logger)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",

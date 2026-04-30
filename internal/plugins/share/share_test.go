@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
+	"github.com/bethropolis/kcd/internal/config"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -39,12 +40,14 @@ func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
 	defer cancel()
 
 	// 1. Start Sender
-	ln, port, err := ListenSideChannel(ctx, tlsConfig)
+	cfg := config.ShareConfig{}
+	cfg.Defaults()
+	ln, port, err := ListenSideChannel(ctx, cfg, tlsConfig)
 	if err != nil {
 		t.Fatalf("ListenSideChannel failed: %v", err)
 	}
 	go func() {
-		_ = AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", nil, logger)
+		_ = AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", 2*time.Second, func(c, t int64) {}, logger)
 	}()
 
 	// 2. Run Receiver (dial loopback)
