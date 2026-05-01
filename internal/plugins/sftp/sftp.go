@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -19,6 +21,7 @@ import (
 
 // SftpPlugin handles KDE Connect SFTP negotiation and optional sshfs mounting.
 type SftpPlugin struct {
+	cfg         config.SFTPConfig
 	bus         *events.Bus
 	logger      *zap.Logger
 	mu          sync.RWMutex
@@ -26,8 +29,9 @@ type SftpPlugin struct {
 	mountPoints map[string]string // deviceID -> local mountPoint path
 }
 
-func NewSftpPlugin(bus *events.Bus, logger *zap.Logger) *SftpPlugin {
+func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin {
 	return &SftpPlugin{
+		cfg:         cfg,
 		bus:         bus,
 		logger:      logger.With(zap.String("plugin", "sftp")),
 		lastBody:    make(map[string]SftpBody),
@@ -111,7 +115,10 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender) (st
 
 	p.logger.Info("SFTP request sent, waiting for phone response", zap.String("device", dev.ID()))
 
-	const timeout = 20 * time.Second
+	timeout := time.Duration(p.cfg.CredentialsTimeoutSecs) * time.Second
+	if timeout == 0 {
+		timeout = 20 * time.Second
+	}
 	deadline, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -152,7 +159,11 @@ func (p *SftpPlugin) MountLocally(ctx context.Context, deviceID string) (string,
 
 // mountWithBody performs the sshfs mount and returns the local browse path.
 func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body SftpBody) (string, error) {
-	mountPoint := filepath.Join(os.TempDir(), "kcd-sftp-"+deviceID)
+	baseDir := p.cfg.MountDir
+	if baseDir == "" {
+		baseDir = os.TempDir()
+	}
+	mountPoint := filepath.Join(baseDir, "kcd-sftp-"+deviceID)
 	if err := os.MkdirAll(mountPoint, 0700); err != nil {
 		return "", fmt.Errorf("create mount point %s: %w", mountPoint, err)
 	}
@@ -179,10 +190,16 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "reconnect",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=3",
+		"-o", "ServerAliveInterval=" + strconv.Itoa(p.cfg.KeepaliveIntervalSecs),
+		"-o", "ServerAliveCountMax=" + strconv.Itoa(p.cfg.KeepaliveCount),
 		"-o", "auto_cache",
 		"-o", "kernel_cache",
+	}
+
+	if len(p.cfg.ExtraSshfsOpts) > 0 {
+		for _, opt := range p.cfg.ExtraSshfsOpts {
+			args = append(args, "-o", opt)
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, "sshfs", args...)
@@ -210,11 +227,17 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 	)
 
 	// Open in the default file manager (best effort, non-blocking).
-	go func() {
-		if err := exec.Command("xdg-open", browsePath).Start(); err != nil {
-			p.logger.Debug("xdg-open failed", zap.Error(err))
-		}
-	}()
+	if p.cfg.AutoOpen {
+		go func() {
+			cmd := p.cfg.OpenCommand
+			if cmd == "" {
+				cmd = "xdg-open"
+			}
+			if err := exec.Command(cmd, browsePath).Start(); err != nil {
+				p.logger.Debug("auto-open failed", zap.String("command", cmd), zap.Error(err))
+			}
+		}()
+	}
 
 	return browsePath, nil
 }
