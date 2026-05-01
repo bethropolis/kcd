@@ -155,7 +155,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		plugins.Register(mpris.NewMPRISPlugin(logger))
+		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, logger))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
