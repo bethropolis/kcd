@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -15,8 +16,6 @@ import (
 )
 
 const (
-	// PairingTimeout is how long we wait for a pairing response
-	PairingTimeout = 30 * time.Second
 	// AllowedTimestampDiff is the maximum allowed time difference for pairing timestamps (30 min)
 	AllowedTimestampDiff = 1800
 )
@@ -29,17 +28,19 @@ type PairPlugin struct {
 	onStateChanged func() // callback to persist state
 	logger         *zap.Logger
 	bus            *events.Bus
+	cfg            config.PairingConfig
 
 	mu               sync.Mutex
 	pairingTimestamp map[string]int64 // deviceID -> timestamp from pair request
 }
 
 // NewPairPlugin creates a new pairing plugin.
-func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin {
+func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin {
 	return &PairPlugin{
 		devices:          devices,
 		localCert:        localCert,
 		autoAccept:       autoAccept,
+		cfg:              cfg,
 		onStateChanged:   onStateChanged,
 		logger:           logger.Named("pair"),
 		bus:              bus,

@@ -8,25 +8,37 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
 
 type MousepadPlugin struct {
-	logger    *zap.Logger
-	isWayland bool
-	moveCh    chan MousepadBody // capacity 1, older frames dropped
-	eventCh   chan MousepadBody // capacity 64, clicks + keys
+	logger      *zap.Logger
+	cfg         config.MousepadConfig
+	useYdotool  bool
+	moveCh      chan MousepadBody // capacity 1, older frames dropped
+	eventCh     chan MousepadBody // capacity 64, clicks + keys
 }
 
-func NewMousepadPlugin(logger *zap.Logger) *MousepadPlugin {
+func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin {
 	p := &MousepadPlugin{
-		logger:    logger.With(zap.String("plugin", "mousepad")),
-		isWayland: os.Getenv("WAYLAND_DISPLAY") != "",
-		moveCh:    make(chan MousepadBody, 1),
-		eventCh:   make(chan MousepadBody, 64),
+		logger: logger.With(zap.String("plugin", "mousepad")),
+		cfg:    cfg,
+		moveCh: make(chan MousepadBody, 1),
+		eventCh: make(chan MousepadBody, 64),
 	}
+
+	switch cfg.Backend {
+	case "ydotool":
+		p.useYdotool = true
+	case "xdotool":
+		p.useYdotool = false
+	default: // auto
+		p.useYdotool = os.Getenv("WAYLAND_DISPLAY") != ""
+	}
+
 	go p.worker()
 	return p
 }
@@ -91,7 +103,7 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 		return
 	}
 	if body.Scroll {
-		if p.isWayland {
+		if p.useYdotool {
 			if body.Dy > 0 {
 				p.runCmd("ydotool", "mousescroll", "--", "0", "1")
 			} else if body.Dy < 0 {
@@ -105,7 +117,7 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 			}
 		}
 	} else {
-		if p.isWayland {
+		if p.useYdotool {
 			dx := strconv.FormatFloat(body.Dx, 'f', 0, 64)
 			dy := strconv.FormatFloat(body.Dy, 'f', 0, 64)
 			p.runCmd("ydotool", "mousemove", "-x", dx, "-y", dy)
@@ -120,28 +132,28 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 // handleEvent handles clicks and key events.
 func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 	if body.SingleClick {
-		if p.isWayland {
+		if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC0")
 		} else {
 			p.runCmd("xdotool", "click", "1")
 		}
 	}
 	if body.RightClick {
-		if p.isWayland {
+		if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC1")
 		} else {
 			p.runCmd("xdotool", "click", "3")
 		}
 	}
 	if body.MiddleClick {
-		if p.isWayland {
+		if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC2")
 		} else {
 			p.runCmd("xdotool", "click", "2")
 		}
 	}
 	if body.Key != "" {
-		if p.isWayland {
+		if p.useYdotool {
 			p.runCmd("wtype", body.Key)
 		} else {
 			p.runCmd("xdotool", "type", "--", body.Key)
@@ -150,7 +162,7 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 	if body.SpecialKey != 0 {
 		keyName := mapSpecialKey(body.SpecialKey)
 		if keyName != "" {
-			if p.isWayland {
+			if p.useYdotool {
 				p.runCmd("wtype", "-k", keyName)
 			} else {
 				p.runCmd("xdotool", "key", keyName)

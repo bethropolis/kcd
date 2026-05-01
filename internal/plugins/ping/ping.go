@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -13,12 +14,17 @@ import (
 )
 
 type PingPlugin struct {
+	cfg    config.PingConfig
 	bus    *events.Bus
 	logger *zap.Logger
 }
 
-func NewPingPlugin(bus *events.Bus, logger *zap.Logger) *PingPlugin {
-	return &PingPlugin{bus: bus, logger: logger.With(zap.String("plugin", "ping"))}
+func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger) *PingPlugin {
+	return &PingPlugin{
+		cfg:    cfg,
+		bus:    bus,
+		logger: logger.With(zap.String("plugin", "ping")),
+	}
 }
 
 type PingBody struct {
@@ -36,7 +42,10 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 
 	msg := body.Message
 	if msg == "" {
-		msg = "Ping!"
+		msg = p.cfg.DefaultMessage
+		if msg == "" {
+			msg = "Ping!"
+		}
 	}
 
 	if p.bus != nil {
@@ -46,7 +55,11 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 	}
 
 	// Do not block - spawn goroutine
-	plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-i", "smartphone", "Ping from "+dev.Name(), msg)
+	plugin.RunCommandAsync(p.logger, "notify-send",
+		"-a", p.cfg.AppName,
+		"-i", p.cfg.Icon,
+		"Ping from "+dev.Name(), msg,
+	)
 
 	return nil
 }
