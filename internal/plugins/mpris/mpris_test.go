@@ -14,11 +14,7 @@ func TestMPRISPlugin_Metadata(t *testing.T) {
 
 	// We can't easily test D-Bus without a session bus,
 	// but we can test the plugin registration and packet types.
-	p, err := NewMPRISPlugin(logger)
-	if err != nil {
-		t.Skip("D-Bus not available, skipping MPRIS integration test")
-		return
-	}
+	p := NewMPRISPlugin(logger)
 
 	if p.Name() != "MPRIS" {
 		t.Errorf("expected name MPRIS, got %s", p.Name())

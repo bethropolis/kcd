@@ -11,7 +11,6 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
 )
 
@@ -21,7 +20,6 @@ type TelephonyPlugin struct {
 	pauseMusic bool
 
 	mu            sync.Mutex
-	dbusConn      *dbus.Conn
 	pausedPlayers []string
 }
 
@@ -30,16 +28,11 @@ func NewTelephonyPlugin(bus *events.Bus) *TelephonyPlugin {
 }
 
 func NewTelephonyPluginWithOptions(bus *events.Bus, pauseMusic bool, logger *zap.Logger) *TelephonyPlugin {
-	p := &TelephonyPlugin{bus: bus, pauseMusic: pauseMusic, logger: logger.With(zap.String("plugin", "telephony"))}
-	if pauseMusic {
-		conn, err := dbus.SessionBus()
-		if err != nil {
-			p.logger.Warn("telephony: failed to connect to session D-Bus for pause music", zap.Error(err))
-		} else {
-			p.dbusConn = conn
-		}
+	return &TelephonyPlugin{
+		bus:        bus,
+		pauseMusic: pauseMusic,
+		logger:     logger.With(zap.String("plugin", "telephony")),
 	}
-	return p
 }
 
 type TelephonyBody struct {
@@ -72,19 +65,19 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 
 	go func() {
 		// Pause Music integration: pause on call start, resume on cancel.
-		if p.pauseMusic && p.dbusConn != nil {
+		if p.pauseMusic {
 			if body.IsCancel {
 				p.mu.Lock()
 				paused := p.pausedPlayers
 				p.pausedPlayers = nil
 				p.mu.Unlock()
 				if len(paused) > 0 {
-					dbusutil.PlayMPRIS(p.dbusConn, paused, p.logger)
+					dbusutil.PlayMPRIS(paused, p.logger)
 				}
 			} else if body.Event == "ringing" || body.Event == "talking" {
 				p.mu.Lock()
 				if len(p.pausedPlayers) == 0 {
-					p.pausedPlayers = dbusutil.PauseMPRIS(p.dbusConn, p.logger)
+					p.pausedPlayers = dbusutil.PauseMPRIS(p.logger)
 				}
 				p.mu.Unlock()
 			}

@@ -41,6 +41,9 @@ func Run() []Check {
 		"install ydotool (Wayland) or xdotool (X11)",
 		"ydotool", "xdotool"))
 
+	// playerctl
+	checks = append(checks, checkBin("playerctl", "playerctl", "install playerctl for MPRIS media control"))
+
 	// port 1716/udp open
 	checks = append(checks, checkUDPPort(daemonCheck.Pass))
 

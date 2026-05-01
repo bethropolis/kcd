@@ -155,13 +155,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		m, err := mpris.NewMPRISPlugin(logger)
-		if err != nil {
-			logger.Warn("mpris plugin failed to initialize (D-Bus error)", zap.Error(err))
-		} else {
-			plugins.Register(m)
-			// Start is fully lazy - it will only connect when a device with MPRIS capabilities sends a packet
-		}
+		plugins.Register(mpris.NewMPRISPlugin(logger))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
