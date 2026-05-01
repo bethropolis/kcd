@@ -16,12 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// outputFormat is the playerctl --format template.
-// All fields are pipe-separated on one line; missing fields become empty strings.
-const outputFormat = "{{playerName}}|{{status}}|{{title}}|{{artist}}|{{album}}|{{mpris:artUrl}}|{{mpris:length}}|{{position}}|{{volume}}|{{f_can_go_next}}|{{f_can_go_prev}}|{{f_can_pause}}|{{f_can_play}}|{{f_can_seek}}"
+// outputFormat uses a multi-character delimiter to avoid splitting on titles containing pipes.
+const outputFormat = "{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}|||{{mpris:length}}|||{{position}}|||{{volume}}|||{{f_can_go_next}}|||{{f_can_go_prev}}|||{{f_can_pause}}|||{{f_can_play}}|||{{f_can_seek}}"
 
 // MPRISPlugin controls desktop media players via playerctl.
-// It does not use D-Bus directly — playerctl handles all bus wiring.
 type MPRISPlugin struct {
 	logger  *zap.Logger
 	mu      sync.RWMutex
@@ -73,6 +71,12 @@ type NowPlaying struct {
 
 // Handle processes incoming packets from the phone.
 func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+	// Check if playerctl is available
+	if _, err := exec.LookPath("playerctl"); err != nil {
+		p.logger.Warn("playerctl not found, MPRIS plugin disabled")
+		return nil
+	}
+
 	// Register device on first packet
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
@@ -128,9 +132,11 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		if seek == nil {
 			return
 		}
-		// playerctl seek takes seconds (float); phone sends microseconds
+		// playerctl position takes seconds (float); phone sends microseconds for Seek
+		// Wait: KDE Connect Seek is relative, playerctl position is absolute.
+		// For relative seek, playerctl uses 'seek'.
 		secs := float64(*seek) / 1_000_000.0
-		args = []string{"-p", player, "seek", fmt.Sprintf("%+.6f", secs)}
+		args = []string{"-p", player, "position", fmt.Sprintf("%+.6f", secs)}
 
 	case "SetPosition":
 		if setPos == nil {
@@ -237,8 +243,9 @@ func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
 		if line == "" {
 			continue
 		}
-		// The format starts with {{playerName}}
-		parts := strings.Split(line, "|")
+		
+		// Extract player name from the start of the line (using N=2 to avoid split on subsequent fields)
+		parts := strings.SplitN(line, "|||", 2)
 		if len(parts) < 2 {
 			continue
 		}
@@ -270,7 +277,8 @@ func playerState(playerName string) (*NowPlaying, error) {
 }
 
 func parseOutput(playerName, line string) (*NowPlaying, error) {
-	parts := strings.Split(line, "|")
+	// Use ||| to avoid splitting on titles with pipes
+	parts := strings.Split(line, "|||")
 	if len(parts) < 9 {
 		return nil, fmt.Errorf("unexpected playerctl output: %q", line)
 	}
@@ -317,7 +325,6 @@ func parseBool(s string) bool {
 func listPlayers() ([]string, error) {
 	out, err := exec.Command("playerctl", "--list-all").Output()
 	if err != nil {
-		// No players open — not an error
 		return nil, nil
 	}
 	var players []string

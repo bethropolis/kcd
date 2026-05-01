@@ -3,10 +3,11 @@ package telephony
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/bethropolis/kcd/internal/dbusutil"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -21,10 +22,6 @@ type TelephonyPlugin struct {
 
 	mu            sync.Mutex
 	pausedPlayers []string
-}
-
-func NewTelephonyPlugin(bus *events.Bus) *TelephonyPlugin {
-	return &TelephonyPlugin{bus: bus}
 }
 
 func NewTelephonyPluginWithOptions(bus *events.Bus, pauseMusic bool, logger *zap.Logger) *TelephonyPlugin {
@@ -64,22 +61,35 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	}
 
 	go func() {
-		// Pause Music integration: pause on call start, resume on cancel.
+		// Pause music via playerctl
 		if p.pauseMusic {
-			if body.IsCancel {
-				p.mu.Lock()
-				paused := p.pausedPlayers
-				p.pausedPlayers = nil
-				p.mu.Unlock()
-				if len(paused) > 0 {
-					dbusutil.PlayMPRIS(paused, p.logger)
+			if _, err := exec.LookPath("playerctl"); err == nil {
+				if body.IsCancel {
+					p.mu.Lock()
+					paused := p.pausedPlayers
+					p.pausedPlayers = nil
+					p.mu.Unlock()
+					for _, player := range paused {
+						_ = exec.Command("playerctl", "-p", player, "play").Run()
+					}
+				} else if body.Event == "ringing" || body.Event == "talking" {
+					p.mu.Lock()
+					if len(p.pausedPlayers) == 0 {
+						// Find playing players and pause them
+						out, _ := exec.Command("playerctl", "-a", "status", "-f", "{{playerName}} {{status}}").Output()
+						lines := strings.Split(string(out), "\n")
+						for _, line := range lines {
+							parts := strings.Fields(line)
+							if len(parts) >= 2 && parts[1] == "Playing" {
+								player := parts[0]
+								if err := exec.Command("playerctl", "-p", player, "pause").Run(); err == nil {
+									p.pausedPlayers = append(p.pausedPlayers, player)
+								}
+							}
+						}
+					}
+					p.mu.Unlock()
 				}
-			} else if body.Event == "ringing" || body.Event == "talking" {
-				p.mu.Lock()
-				if len(p.pausedPlayers) == 0 {
-					p.pausedPlayers = dbusutil.PauseMPRIS(p.logger)
-				}
-				p.mu.Unlock()
 			}
 		}
 
@@ -89,7 +99,6 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 
 		var title, message, urgency string
 		urgency = "normal"
-
 		caller := body.ContactName
 		if caller == "" {
 			caller = body.PhoneNumber
@@ -104,7 +113,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			title = "❌ Missed Call"
 			message = "Missed call from " + caller
 		default:
-			return // ignore "talking" or unknown events for notifications
+			return
 		}
 
 		plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-u", urgency, title, message)
@@ -113,10 +122,6 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	return nil
 }
 
-func (p *TelephonyPlugin) OnConnect(dev device.Sender)    {}
-func (p *TelephonyPlugin) OnDisconnect(dev device.Sender) {}
-
-// Mute sends a mute request to the remote device to silence an incoming call.
 func (p *TelephonyPlugin) Mute(dev device.Sender) error {
 	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{"action": "mute"})
 	if err != nil {
@@ -124,3 +129,6 @@ func (p *TelephonyPlugin) Mute(dev device.Sender) error {
 	}
 	return dev.Send(pkt)
 }
+
+func (p *TelephonyPlugin) OnConnect(dev device.Sender)    {}
+func (p *TelephonyPlugin) OnDisconnect(dev device.Sender) {}
