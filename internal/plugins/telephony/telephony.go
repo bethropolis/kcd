@@ -70,19 +70,19 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 					p.pausedPlayers = nil
 					p.mu.Unlock()
 					for _, player := range paused {
-						_ = exec.Command("playerctl", "-p", player, "play").Run()
+						_ = plugin.NewPlayerctlCmd(nil, "-p", player, "play").Run()
 					}
 				} else if body.Event == "ringing" || body.Event == "talking" {
 					p.mu.Lock()
 					if len(p.pausedPlayers) == 0 {
 						// Find playing players and pause them
-						out, _ := exec.Command("playerctl", "-a", "status", "-f", "{{playerName}} {{status}}").Output()
+						out, _ := plugin.NewPlayerctlCmd(nil, "-a", "status", "-f", "{{playerName}} {{status}}").Output()
 						lines := strings.Split(string(out), "\n")
 						for _, line := range lines {
 							parts := strings.Fields(line)
 							if len(parts) >= 2 && parts[1] == "Playing" {
 								player := parts[0]
-								if err := exec.Command("playerctl", "-p", player, "pause").Run(); err == nil {
+								if err := plugin.NewPlayerctlCmd(nil, "-p", player, "pause").Run(); err == nil {
 									p.pausedPlayers = append(p.pausedPlayers, player)
 								}
 							}

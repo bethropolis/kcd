@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
@@ -132,9 +133,6 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		if seek == nil {
 			return
 		}
-		// playerctl position takes seconds (float); phone sends microseconds for Seek
-		// Wait: KDE Connect Seek is relative, playerctl position is absolute.
-		// For relative seek, playerctl uses 'seek'.
 		secs := float64(*seek) / 1_000_000.0
 		args = []string{"-p", player, "position", fmt.Sprintf("%+.6f", secs)}
 
@@ -156,7 +154,7 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		return
 	}
 
-	if err := exec.Command("playerctl", args...).Run(); err != nil {
+	if err := plugin.NewPlayerctlCmd(nil, args...).Run(); err != nil {
 		p.logger.Debug("mpris: action failed",
 			zap.String("player", player),
 			zap.String("action", action),
@@ -183,6 +181,20 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 	if err != nil {
 		return err
 	}
+
+	// Make sure we also broadcast current states when requested (added per review.md)
+	go func() {
+		out, _ := plugin.NewPlayerctlCmd(nil, "-a", "metadata", "--format", outputFormat).Output()
+		for _, line := range strings.Split(string(out), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				parts := strings.SplitN(line, "|||", 2)
+				if np, err := parseOutput(parts[0], line); err == nil {
+					p.broadcast(np)
+				}
+			}
+		}
+	}()
+
 	return dev.Send(pkt)
 }
 
@@ -222,12 +234,7 @@ func (p *MPRISPlugin) startWatcher(ctx context.Context) {
 }
 
 func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "playerctl",
-		"--all-players",
-		"--follow",
-		"metadata",
-		"--format", outputFormat,
-	)
+	cmd := plugin.NewPlayerctlCmd(ctx, "--all-players", "--follow", "metadata", "--format", outputFormat)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -243,8 +250,7 @@ func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
 		if line == "" {
 			continue
 		}
-		
-		// Extract player name from the start of the line (using N=2 to avoid split on subsequent fields)
+
 		parts := strings.SplitN(line, "|||", 2)
 		if len(parts) < 2 {
 			continue
@@ -265,11 +271,7 @@ func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
 }
 
 func playerState(playerName string) (*NowPlaying, error) {
-	out, err := exec.Command("playerctl",
-		"-p", playerName,
-		"metadata",
-		"--format", outputFormat,
-	).Output()
+	out, err := plugin.NewPlayerctlCmd(nil, "-p", playerName, "metadata", "--format", outputFormat).Output()
 	if err != nil {
 		return nil, fmt.Errorf("playerctl metadata: %w", err)
 	}
@@ -277,7 +279,6 @@ func playerState(playerName string) (*NowPlaying, error) {
 }
 
 func parseOutput(playerName, line string) (*NowPlaying, error) {
-	// Use ||| to avoid splitting on titles with pipes
 	parts := strings.Split(line, "|||")
 	if len(parts) < 9 {
 		return nil, fmt.Errorf("unexpected playerctl output: %q", line)
@@ -323,7 +324,7 @@ func parseBool(s string) bool {
 }
 
 func listPlayers() ([]string, error) {
-	out, err := exec.Command("playerctl", "--list-all").Output()
+	out, err := plugin.NewPlayerctlCmd(nil, "--list-all").Output()
 	if err != nil {
 		return nil, nil
 	}
