@@ -112,7 +112,6 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
-          go-version: 1.25
 
   integration-test:
     name: Integration Tests

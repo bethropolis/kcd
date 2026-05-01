@@ -34,13 +34,25 @@ type MPRISPlugin struct {
 
 	watchCancel context.CancelFunc
 	watching    bool
+
+	// cache for tracking track changes to avoid over-requesting album art
+	lastTracks map[string]trackIdentity
+}
+
+type trackIdentity struct {
+	title     string
+	artist    string
+	album     string
+	rawArtUrl string
+	timestamp int64
 }
 
 func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	return &MPRISPlugin{
-		tlsConfig: tlsConfig,
-		logger:    logger.With(zap.String("plugin", "mpris")),
-		devices:   make(map[string]device.Sender),
+		tlsConfig:  tlsConfig,
+		logger:     logger.With(zap.String("plugin", "mpris")),
+		devices:    make(map[string]device.Sender),
+		lastTracks: make(map[string]trackIdentity),
 	}
 }
 
@@ -101,6 +113,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			watchCtx, cancel := context.WithCancel(context.Background())
 			p.watchCancel = cancel
 			p.startWatcher(watchCtx)
+			go p.watchPlayerList(watchCtx)
 		}
 	}
 	p.mu.Unlock()
@@ -128,7 +141,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	// 3. Phone explicitly requested current state to update its UI
 	if body.RequestNowPlaying || body.RequestVolume {
 		go func() {
-			if state, err := playerState(body.Player); err == nil {
+			if state, err := p.playerState(body.Player); err == nil {
 				p.broadcast(state)
 			}
 		}()
@@ -141,6 +154,45 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	return nil
+}
+
+// watchPlayerList polls for active players and removes closed ones from the UI.
+func (p *MPRISPlugin) watchPlayerList(ctx context.Context) {
+	var lastPlayers string
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			players, err := listPlayers()
+			if err != nil {
+				continue
+			}
+			current := strings.Join(players, ",")
+			if current != lastPlayers {
+				lastPlayers = current
+
+				if players == nil {
+					players = []string{}
+				}
+				pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
+					"playerList":             players,
+					"supportAlbumArtPayload": true,
+				})
+
+				p.mu.RLock()
+				for _, dev := range p.devices {
+					if dev.IsConnected() {
+						_ = dev.Send(pkt)
+					}
+				}
+				p.mu.RUnlock()
+			}
+		}
+	}
 }
 
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
@@ -195,7 +247,7 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	}
 
 	// Immediately read and broadcast the new state so the phone UI updates
-	if state, err := playerState(player); err == nil {
+	if state, err := p.playerState(player); err == nil {
 		p.broadcast(state)
 	}
 }
@@ -217,7 +269,7 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 	// Broadast current states one by one
 	go func() {
 		for _, player := range players {
-			if state, err := playerState(player); err == nil {
+			if state, err := p.playerState(player); err == nil {
 				p.broadcast(state)
 			}
 		}
@@ -242,7 +294,13 @@ func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 }
 
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
-	filePath := strings.TrimPrefix(artUrl, "file://")
+	// Strip the cache-buster timestamp before opening the local file
+	cleanUrl := artUrl
+	if idx := strings.LastIndex(cleanUrl, "?t="); idx != -1 {
+		cleanUrl = cleanUrl[:idx]
+	}
+
+	filePath := strings.TrimPrefix(cleanUrl, "file://")
 	if unescaped, err := url.PathUnescape(filePath); err == nil {
 		filePath = unescaped
 	}
@@ -268,7 +326,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 
 	go func() {
-		// Use a 10s timeout for the image transfer
+		// 10-second timeout prevents port exhaustion if the phone ignores the art
 		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), 10*time.Second, nil, p.logger)
 	}()
 
@@ -328,7 +386,7 @@ func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
 		}
 		playerName := parts[0]
 
-		np, err := parseOutput(playerName, line)
+		np, err := p.parseOutput(playerName, line)
 		if err != nil {
 			p.logger.Debug("mpris: parse error", zap.Error(err))
 			continue
@@ -341,12 +399,12 @@ func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
 	return scanner.Err()
 }
 
-func playerState(playerName string) (*NowPlaying, error) {
+func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
 	out, err := plugin.NewPlayerctlCmd(nil, "-p", playerName, "metadata", "--format", outputFormat).Output()
 	if err != nil {
 		return nil, fmt.Errorf("playerctl metadata: %w", err)
 	}
-	np, err := parseOutput(playerName, strings.TrimSpace(string(out)))
+	np, err := p.parseOutput(playerName, strings.TrimSpace(string(out)))
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +420,7 @@ func playerState(playerName string) (*NowPlaying, error) {
 	return np, nil
 }
 
-func parseOutput(playerName, line string) (*NowPlaying, error) {
+func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) {
 	// Clean up playerctl output
 	line = strings.ReplaceAll(line, "<no value>", "")
 
@@ -375,14 +433,42 @@ func parseOutput(playerName, line string) (*NowPlaying, error) {
 	pos, _ := strconv.ParseInt(parts[7], 10, 64)
 	volF, _ := strconv.ParseFloat(parts[8], 64)
 
+	title := parts[2]
+	artist := parts[3]
+	album := parts[4]
+	rawArtUrl := parts[5]
+
+	// Determine if the track identity has changed
+	p.mu.Lock()
+	last, exists := p.lastTracks[playerName]
+	
+	// If track identity changed, update the timestamp
+	if !exists || last.title != title || last.artist != artist || last.album != album || last.rawArtUrl != rawArtUrl {
+		last = trackIdentity{
+			title:     title,
+			artist:    artist,
+			album:     album,
+			rawArtUrl: rawArtUrl,
+			timestamp: time.Now().UnixNano(),
+		}
+		p.lastTracks[playerName] = last
+	}
+	p.mu.Unlock()
+
+	artUrl := rawArtUrl
+	// Cache-buster: only add timestamp if it's a local file and we have a timestamp
+	if strings.HasPrefix(artUrl, "file://") {
+		artUrl = fmt.Sprintf("%s?t=%d", artUrl, last.timestamp)
+	}
+
 	np := &NowPlaying{
 		Player:         parts[0],
 		PlaybackStatus: parts[1],
 		IsPlaying:      parts[1] == "Playing",
-		Title:          parts[2],
-		Artist:         parts[3],
-		Album:          parts[4],
-		AlbumArtUrl:    parts[5],
+		Title:          title,
+		Artist:         artist,
+		Album:          album,
+		AlbumArtUrl:    artUrl,
 		Length:         length / 1000,
 		Pos:            pos / 1000,
 		Volume:         int(volF * 100),
