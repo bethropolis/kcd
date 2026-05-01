@@ -94,8 +94,13 @@ error message may be confusing.
 
 | Plugin | Correct constructor signature |
 |---|---|
-| Battery | `battery.NewBatteryPlugin(bus *events.Bus, logger *zap.Logger) *BatteryPlugin` |
-| Notification | `notification.NewNotificationPlugin(bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin` |
+| Battery | `battery.NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger) *BatteryPlugin` |
+| Notification | `notification.NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin` |
+| Share | `share.NewSharePlugin(cfg config.ShareConfig, tlsConfig *tls.Config, logger *zap.Logger) *SharePlugin` |
+| SFTP | `sftp.NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin` |
+| Ping | `ping.NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger) *PingPlugin` |
+| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin` |
+| Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin` |
 | SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin` |
 
 ### Interface
@@ -164,6 +169,8 @@ type PluginConfig struct {
 ```
 
 Default it to `true` in `Defaults()`.
+
+If the plugin needs specific settings beyond a boolean toggle, add a new struct to `internal/config/config.go` (e.g. `type MyPluginConfig struct { ... }`) and include it in the main `Config` struct.
 
 **4. Add IPC command constant in `internal/ipc/proto.go`**
 

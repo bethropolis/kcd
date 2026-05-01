@@ -180,34 +180,38 @@ download_dir = "~/Downloads/kcd"
 # Reload [commands] and log_level without restarting: kill -HUP $(pidof kcd)
 
 [plugins]
-battery      = true
-clipboard    = true
-notification = true
-share        = true
-runcommand   = true
-mpris        = true
-ping         = true
-telephony    = true
-mousepad     = true
-sftp         = true
-findmyphone  = true
-lockdevice   = true
-sms          = true
+# battery      = true
+# clipboard    = true
+# ... (see example config for full list)
 
-# Shell commands that the RunCommand plugin exposes to your phone.
+# ─── Detailed Plugin Configuration ────────────────────────────────────────────
+# Each plugin has its own section for fine-tuning behavior.
+
+[battery]
+# notify_low   = true
+# notify_full  = true
+# low_urgency  = "critical"
+
+[notification_plugin]
+# fetch_icons  = true
+# expire_ms    = -1
+
+[share]
+# auto_open    = false
+# open_command = "xdg-open"
+
+[sftp]
+# auto_open    = true
+# mount_dir    = "/home/user/mnt"
+
 [commands]
 uptime   = "uptime"
 lock     = "loginctl lock-session"
-suspend  = "systemctl suspend"
 
-# Per-app notification filters.
-# Keys: Android package names. Values: "show" or "silent".
-# "silent" suppresses the desktop popup but still emits a watch event.
-# "*" sets the default for all unmatched apps.
 [notifications]
-# "com.whatsapp"          = "show"
-# "com.google.android.gm" = "silent"
-# "*"                     = "show"
+# "*" = "show"
+
+# See packaging/kcd.example.toml for the full annotated reference of all settings.
 ```
 
 See [`packaging/kcd.example.toml`](packaging/kcd.example.toml) for the full annotated reference.

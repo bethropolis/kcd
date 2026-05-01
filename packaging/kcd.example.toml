@@ -147,3 +147,60 @@ suspend = "systemctl suspend"
 # "com.whatsapp"       = "show"
 # "com.google.android.gm" = "silent"
 # "*"                  = "show"
+
+# ─── Battery: notifications and thresholds ────────────────────────────────────
+
+[battery]
+# notify_low = true
+# notify_full = true
+# low_urgency = "critical"      # low, normal, critical
+# full_urgency = "normal"      # low, normal, critical
+# low_message = "Battery low"
+# full_message = "Battery fully charged"
+
+# ─── Notification: desktop popup settings ────────────────────────────────────
+
+[notification_plugin]
+# urgency = ""                  # default: libnotify choice
+# fetch_icons = true            # download app icons from the phone
+# icon_cache_dir = ""           # persistent path for icons, defaults to temp
+# max_body_length = 0           # 0 = no limit (truncates with … if set)
+# expire_ms = -1                # notification timeout in milliseconds, -1 = default
+
+# ─── Share: file transfer settings ────────────────────────────────────────────
+
+[share]
+# port_min = 1739               # start of TCP port range for transfers
+# port_max = 1764               # end of TCP port range for transfers
+# accept_timeout_secs = 120     # how long to wait for phone to connect
+# auto_open = false             # automatically open received files
+# open_command = "xdg-open"     # command used for auto_open
+# overwrite = false             # overwrite files with same name instead of renaming
+
+# ─── SFTP: remote filesystem mounting ────────────────────────────────────────
+
+[sftp]
+# mount_dir = ""                # parent directory for mounts, defaults to temp
+# credentials_timeout_secs = 20 # how long to wait for phone credentials
+# keepalive_interval_secs = 15  # sshfs ServerAliveInterval
+# keepalive_count = 3           # sshfs ServerAliveCountMax
+# auto_open = true              # automatically open mount in file manager
+# open_command = "xdg-open"     # command used for auto_open
+# extra_sshfs_opts = []         # list of strings, e.g. ["follow_symlinks", "allow_other"]
+
+# ─── Ping: connectivity check ────────────────────────────────────────────────
+
+[ping]
+# app_name = "KDE Connect"
+# icon = "smartphone"
+# default_message = ""          # used if the phone sends an empty ping message
+
+# ─── Pairing: protocol settings ──────────────────────────────────────────────
+
+[pairing]
+# timeout_secs = 30             # how long to wait for a pairing response
+
+# ─── Mousepad: remote input settings ─────────────────────────────────────────
+
+[mousepad]
+# backend = "auto"              # auto, ydotool, xdotool
