@@ -452,16 +452,32 @@ func main() {
 			{
 				Name:      "findmyphone",
 				Usage:     "Make the phone play a loud ringtone",
-				ArgsUsage: "<device-id>",
+				ArgsUsage: "[device-id]",
 				Action: func(c *cli.Context) error {
-					if c.NArg() < 1 {
-						return fmt.Errorf("missing device ID")
-					}
 					cl, err := getClient(c)
 					if err != nil {
 						return err
 					}
-					if err := cl.FindMyPhone(c.Args().First()); err != nil {
+
+					targetID := c.Args().First()
+					if targetID == "" {
+						// Auto-select the first connected device
+						devs, err := cl.Devices()
+						if err != nil {
+							return err
+						}
+						for _, d := range devs {
+							if d.Connected {
+								targetID = d.ID
+								break
+							}
+						}
+						if targetID == "" {
+							return fmt.Errorf("no connected devices found")
+						}
+					}
+
+					if err := cl.FindMyPhone(targetID); err != nil {
 						return err
 					}
 					fmt.Println("Ring request sent")
