@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +24,8 @@ import (
 )
 
 // outputFormat uses a multi-character delimiter to avoid splitting on titles containing pipes.
-const outputFormat = "{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}|||{{mpris:length}}|||{{position}}|||{{volume}}"
+// We include capabilities (canPlay, canPause, etc.) and the track URL for better compatibility.
+const outputFormat = "{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}|||{{mpris:length}}|||{{position}}|||{{volume}}|||{{canPlay}}|||{{canPause}}|||{{canGoNext}}|||{{canGoPrevious}}|||{{canSeek}}|||{{xesam:url}}"
 
 // MPRISPlugin controls desktop media players via playerctl.
 type MPRISPlugin struct {
@@ -81,7 +83,8 @@ type NowPlaying struct {
 	Artist         string `json:"artist"`
 	Album          string `json:"album"`
 	AlbumArtUrl    string `json:"albumArtUrl"`
-	Length         int64  `json:"length,omitempty"` // ms
+	Url            string `json:"url,omitempty"`
+	Length         int64  `json:"length"`           // ms, -1 for unknown
 	Pos            int64  `json:"pos,omitempty"`    // ms
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume,omitempty"` // 0-100
@@ -425,11 +428,14 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 	line = strings.ReplaceAll(line, "<no value>", "")
 
 	parts := strings.Split(line, "|||")
-	if len(parts) < 9 {
+	if len(parts) < 15 {
 		return nil, fmt.Errorf("unexpected playerctl output: %q", line)
 	}
 
-	length, _ := strconv.ParseInt(parts[6], 10, 64)
+	length, err := strconv.ParseInt(parts[6], 10, 64)
+	if err != nil || length == 0 {
+		length = -1
+	}
 	pos, _ := strconv.ParseInt(parts[7], 10, 64)
 	volF, _ := strconv.ParseFloat(parts[8], 64)
 
@@ -437,12 +443,23 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 	artist := parts[3]
 	album := parts[4]
 	rawArtUrl := parts[5]
+	trackUrl := parts[14]
 
-	// Determine if the track identity has changed
+	// Metadata Fallback: If title is empty but we have a local URL, use filename
+	if title == "" && strings.HasPrefix(trackUrl, "file://") {
+		cleanUrl := strings.TrimPrefix(trackUrl, "file://")
+		if unescaped, err := url.PathUnescape(cleanUrl); err == nil {
+			title = filepath.Base(unescaped)
+			if album == "" {
+				album = filepath.Base(filepath.Dir(unescaped))
+			}
+		}
+	}
+
+	// Determine if the track identity has changed for cache-busting
 	p.mu.Lock()
 	last, exists := p.lastTracks[playerName]
 	
-	// If track identity changed, update the timestamp
 	if !exists || last.title != title || last.artist != artist || last.album != album || last.rawArtUrl != rawArtUrl {
 		last = trackIdentity{
 			title:     title,
@@ -456,28 +473,28 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 	p.mu.Unlock()
 
 	artUrl := rawArtUrl
-	// Cache-buster: only add timestamp if it's a local file and we have a timestamp
 	if strings.HasPrefix(artUrl, "file://") {
 		artUrl = fmt.Sprintf("%s?t=%d", artUrl, last.timestamp)
 	}
 
 	np := &NowPlaying{
-		Player:         parts[0],
+		Player:         playerName,
 		PlaybackStatus: parts[1],
 		IsPlaying:      parts[1] == "Playing",
 		Title:          title,
 		Artist:         artist,
 		Album:          album,
 		AlbumArtUrl:    artUrl,
+		Url:            trackUrl,
 		Length:         length / 1000,
 		Pos:            pos / 1000,
 		Volume:         int(volF * 100),
 		CanControl:     true,
-		CanGoNext:      true,
-		CanGoPrevious:  true,
-		CanPause:       true,
-		CanPlay:        true,
-		CanSeek:        true,
+		CanGoNext:      parts[11] == "true",
+		CanGoPrevious:  parts[12] == "true",
+		CanPause:       parts[10] == "true",
+		CanPlay:        parts[9] == "true",
+		CanSeek:        parts[13] == "true",
 	}
 
 	if np.Title == "" {
@@ -488,21 +505,47 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 }
 
 func listPlayers() ([]string, error) {
-	// Use metadata to reliably get names instead of 'status' which breaks formatting
+	// 1. Get raw names
 	out, err := plugin.NewPlayerctlCmd(nil, "-a", "metadata", "--format", "{{playerName}}").Output()
 	if err != nil {
 		return nil, nil
 	}
-	var players []string
-	seen := make(map[string]bool)
+
+	rawPlayers := []string{}
+	hasPlasmaIntegration := false
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
-			if !seen[line] {
-				seen[line] = true
-				players = append(players, line)
+			rawPlayers = append(rawPlayers, line)
+			if line == "plasma-browser-integration" {
+				hasPlasmaIntegration = true
 			}
 		}
 	}
+
+	// 2. Filter and deduplicate with official logic
+	// If plasma-browser-integration is present, filter out raw browser services
+	players := []string{}
+	seen := make(map[string]int)
+
+	for _, p := range rawPlayers {
+		// Browser filtering
+		if hasPlasmaIntegration {
+			if strings.HasPrefix(p, "firefox") || strings.HasPrefix(p, "chromium") {
+				continue
+			}
+		}
+
+		// Unique naming: Append [2], [3] etc. for duplicate identities
+		count := seen[p]
+		seen[p]++
+		
+		uniqueName := p
+		if count > 0 {
+			uniqueName = fmt.Sprintf("%s [%d]", p, count+1)
+		}
+		players = append(players, uniqueName)
+	}
+
 	return players, nil
 }
 
