@@ -3,11 +3,13 @@ package mousepad
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"time"
 
+	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -15,32 +17,69 @@ import (
 )
 
 type MousepadPlugin struct {
-	logger      *zap.Logger
-	cfg         config.MousepadConfig
-	useYdotool  bool
-	moveCh      chan MousepadBody // capacity 1, older frames dropped
-	eventCh     chan MousepadBody // capacity 64, clicks + keys
+	logger     *zap.Logger
+	cfg        config.MousepadConfig
+	useYdotool bool
+	useUinput  bool
+
+	// uinput devices
+	mouse    uinput.Mouse
+	keyboard uinput.Keyboard
+
+	moveCh  chan MousepadBody // capacity 1, older frames dropped
+	eventCh chan MousepadBody // capacity 64, clicks + keys
 }
 
 func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin {
 	p := &MousepadPlugin{
-		logger: logger.With(zap.String("plugin", "mousepad")),
-		cfg:    cfg,
-		moveCh: make(chan MousepadBody, 1),
+		logger:  logger.With(zap.String("plugin", "mousepad")),
+		cfg:     cfg,
+		moveCh:  make(chan MousepadBody, 1),
 		eventCh: make(chan MousepadBody, 64),
 	}
 
-	switch cfg.Backend {
-	case "ydotool":
-		p.useYdotool = true
-	case "xdotool":
-		p.useYdotool = false
-	default: // auto
-		p.useYdotool = os.Getenv("WAYLAND_DISPLAY") != ""
+	// Try uinput first if auto or explicit
+	if cfg.Backend == "auto" || cfg.Backend == "uinput" {
+		if err := p.initUinput(); err != nil {
+			p.logger.Warn("uinput initialization failed, falling back to legacy backends", zap.Error(err))
+		} else {
+			p.useUinput = true
+			p.logger.Info("uinput initialized successfully")
+		}
+	}
+
+	if !p.useUinput {
+		switch cfg.Backend {
+		case "ydotool":
+			p.useYdotool = true
+		case "xdotool":
+			p.useYdotool = false
+		default: // auto
+			p.useYdotool = os.Getenv("WAYLAND_DISPLAY") != ""
+		}
 	}
 
 	go p.worker()
 	return p
+}
+
+func (p *MousepadPlugin) initUinput() error {
+	// Initialize virtual mouse
+	m, err := uinput.CreateMouse("/dev/uinput", []byte("kcd-mouse"))
+	if err != nil {
+		return fmt.Errorf("create mouse: %w", err)
+	}
+	p.mouse = m
+
+	// Initialize virtual keyboard
+	k, err := uinput.CreateKeyboard("/dev/uinput", []byte("kcd-keyboard"))
+	if err != nil {
+		m.Close()
+		return fmt.Errorf("create keyboard: %w", err)
+	}
+	p.keyboard = k
+
+	return nil
 }
 
 type MousepadBody struct {
@@ -103,7 +142,13 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 		return
 	}
 	if body.Scroll {
-		if p.useYdotool {
+		if p.useUinput {
+			if body.Dy > 0 {
+				p.mouse.Wheel(false, -1)
+			} else if body.Dy < 0 {
+				p.mouse.Wheel(false, 1)
+			}
+		} else if p.useYdotool {
 			if body.Dy > 0 {
 				p.runCmd("ydotool", "mousescroll", "--", "0", "1")
 			} else if body.Dy < 0 {
@@ -117,7 +162,9 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 			}
 		}
 	} else {
-		if p.useYdotool {
+		if p.useUinput {
+			p.mouse.Move(int32(body.Dx), int32(body.Dy))
+		} else if p.useYdotool {
 			dx := strconv.FormatFloat(body.Dx, 'f', 0, 64)
 			dy := strconv.FormatFloat(body.Dy, 'f', 0, 64)
 			p.runCmd("ydotool", "mousemove", "-x", dx, "-y", dy)
@@ -132,40 +179,72 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 // handleEvent handles clicks and key events.
 func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 	if body.SingleClick {
-		if p.useYdotool {
+		if p.useUinput {
+			p.mouse.LeftClick()
+		} else if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC0")
 		} else {
 			p.runCmd("xdotool", "click", "1")
 		}
 	}
 	if body.RightClick {
-		if p.useYdotool {
+		if p.useUinput {
+			p.mouse.RightClick()
+		} else if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC1")
 		} else {
 			p.runCmd("xdotool", "click", "3")
 		}
 	}
 	if body.MiddleClick {
-		if p.useYdotool {
+		if p.useUinput {
+			p.mouse.MiddleClick()
+		} else if p.useYdotool {
 			p.runCmd("ydotool", "click", "0xC2")
 		} else {
 			p.runCmd("xdotool", "click", "2")
 		}
 	}
 	if body.Key != "" {
-		if p.useYdotool {
+		if p.useUinput {
+			// uinput-level typing is complex because it deals with scan codes.
+			// bendahl/uinput doesn't have a high-level "Type" method, but we can do it manually.
+			// For now, we'll fall back to wtype/xdotool if uinput typing isn't implemented.
+			if p.useYdotool {
+				p.runCmd("wtype", body.Key)
+			} else {
+				p.runCmd("xdotool", "type", "--", body.Key)
+			}
+		} else if p.useYdotool {
 			p.runCmd("wtype", body.Key)
 		} else {
 			p.runCmd("xdotool", "type", "--", body.Key)
 		}
 	}
 	if body.SpecialKey != 0 {
-		keyName := mapSpecialKey(body.SpecialKey)
-		if keyName != "" {
-			if p.useYdotool {
-				p.runCmd("wtype", "-k", keyName)
+		if p.useUinput {
+			ukey := mapUinputKey(body.SpecialKey)
+			if ukey != -1 {
+				p.keyboard.KeyPress(ukey)
 			} else {
-				p.runCmd("xdotool", "key", keyName)
+				// fallback for unmapped special keys
+				keyName := mapSpecialKey(body.SpecialKey)
+				if keyName != "" {
+					if p.useYdotool {
+						p.runCmd("wtype", "-k", keyName)
+					} else {
+						p.runCmd("xdotool", "key", keyName)
+					}
+				}
+			}
+		} else {
+			keyName := mapSpecialKey(body.SpecialKey)
+			if keyName != "" {
+				if p.useYdotool {
+					p.runCmd("wtype", "-k", keyName)
+				} else {
+					p.runCmd("xdotool", "key", keyName)
+				}
 			}
 		}
 	}
@@ -174,6 +253,63 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 func (p *MousepadPlugin) runCmd(name string, arg ...string) {
 	if out, err := exec.Command(name, arg...).CombinedOutput(); err != nil {
 		p.logger.Debug("command failed", zap.String("cmd", name), zap.Error(err), zap.String("output", string(out)))
+	}
+}
+
+func mapUinputKey(k int) int {
+	switch k {
+	case 1:
+		return uinput.KeyBackspace
+	case 2:
+		return uinput.KeyTab
+	case 3, 12:
+		return uinput.KeyEnter
+	case 4:
+		return uinput.KeyLeft
+	case 5:
+		return uinput.KeyUp
+	case 6:
+		return uinput.KeyRight
+	case 7:
+		return uinput.KeyDown
+	case 8:
+		return uinput.KeyPageup
+	case 9:
+		return uinput.KeyPagedown
+	case 10:
+		return uinput.KeyHome
+	case 11:
+		return uinput.KeyEnd
+	case 13:
+		return uinput.KeyDelete
+	case 14:
+		return uinput.KeyEsc
+	case 21:
+		return uinput.KeyF1
+	case 22:
+		return uinput.KeyF2
+	case 23:
+		return uinput.KeyF3
+	case 24:
+		return uinput.KeyF4
+	case 25:
+		return uinput.KeyF5
+	case 26:
+		return uinput.KeyF6
+	case 27:
+		return uinput.KeyF7
+	case 28:
+		return uinput.KeyF8
+	case 29:
+		return uinput.KeyF9
+	case 30:
+		return uinput.KeyF10
+	case 31:
+		return uinput.KeyF11
+	case 32:
+		return uinput.KeyF12
+	default:
+		return -1
 	}
 }
 

@@ -168,7 +168,7 @@ func (c *Config) Validate() error {
 
 	// Mousepad backend validation
 	switch c.Mousepad.Backend {
-	case "auto", "ydotool", "xdotool":
+	case "auto", "ydotool", "xdotool", "uinput":
 	default:
 		return fmt.Errorf("config: invalid mousepad backend %q (expected auto, ydotool, xdotool)", c.Mousepad.Backend)
 	}
