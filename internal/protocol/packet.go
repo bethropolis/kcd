@@ -97,19 +97,29 @@ func NewPacket(typ string, body interface{}) (*Packet, error) {
 // ReadPacket reads a single newline-delimited JSON packet from r.
 // The returned Packet is from the pool — call ReleasePacket when done.
 func ReadPacket(r *bufio.Reader) (*Packet, error) {
-	line, err := r.ReadBytes('\n')
+	// ReadSlice is zero-allocation: it points directly to the reader's internal buffer.
+	line, err := r.ReadSlice('\n')
 	if err != nil {
-		if len(line) == 0 {
+		if err == bufio.ErrBufferFull {
+			// The packet is larger than the default 4KB buffer (e.g. embedded art).
+			// Fall back to ReadBytes, which allocates a new slice to fit the rest.
+			rest, errBytes := r.ReadBytes('\n')
+
+			// Make a copy of line since ReadSlice data is volatile
+			fullLine := make([]byte, len(line)+len(rest))
+			copy(fullLine, line)
+			copy(fullLine[len(line):], rest)
+			line = fullLine
+			err = errBytes
+		} else if err == io.EOF {
+			if len(line) == 0 {
+				return nil, fmt.Errorf("protocol: read: %w", err)
+			}
+			if len(line) > 0 && line[len(line)-1] != '\n' {
+				return nil, fmt.Errorf("protocol: read: truncated packet missing newline")
+			}
+		} else {
 			return nil, fmt.Errorf("protocol: read: %w", err)
-		}
-		// If we got partial data with EOF, still try to parse it,
-		// but only if it's a genuine EOF (not mid-stream error).
-		if err != io.EOF {
-			return nil, fmt.Errorf("protocol: read: %w", err)
-		}
-		// Partial data at EOF but missing newline is truncated
-		if len(line) > 0 && line[len(line)-1] != '\n' {
-			return nil, fmt.Errorf("protocol: read: truncated packet missing newline")
 		}
 	}
 
