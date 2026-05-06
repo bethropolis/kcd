@@ -22,10 +22,10 @@ import (
 
 // ClipboardPlugin handles clipboard sync both directions.
 type ClipboardPlugin struct {
-	lastTimestamp int64
-	tlsConfig     *tls.Config
-	logger        *zap.Logger
-	isWayland     bool
+	lastTimestamp     int64
+	tlsConfig         *tls.Config
+	logger            *zap.Logger
+	isWayland         bool
 	mu                sync.Mutex
 	lastContent       string // last content received from phone (inbound)
 	lastPushedContent string // last content sent to phone (outbound)
@@ -33,11 +33,18 @@ type ClipboardPlugin struct {
 
 // NewClipboardPlugin creates a clipboard plugin.
 func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger) *ClipboardPlugin {
-	return &ClipboardPlugin{
+	p := &ClipboardPlugin{
 		tlsConfig: tlsConfig,
 		logger:    logger.With(zap.String("plugin", "clipboard")),
 		isWayland: os.Getenv("WAYLAND_DISPLAY") != "",
 	}
+
+	// Automatically sync clipboard changes from PC to Phone if on Wayland
+	if p.isWayland {
+		go p.watchLocalClipboard()
+	}
+
+	return p
 }
 
 // ClipboardBody represents the content of a clipboard packet.
@@ -60,6 +67,20 @@ func (p *ClipboardPlugin) IncomingTypes() []string {
 // OutgoingTypes returns the packet types this plugin may send.
 func (p *ClipboardPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.clipboard"}
+}
+
+// watchLocalClipboard runs in the background and pushes changes automatically.
+func (p *ClipboardPlugin) watchLocalClipboard() {
+	for {
+		// wl-paste --watch blocks until the clipboard changes, then executes the given command.
+		// We tell it to run our own CLI command 'kcd clipboard', which handles the rest!
+		cmd := exec.Command("wl-paste", "--watch", "kcd", "clipboard")
+
+		if err := cmd.Run(); err != nil {
+			p.logger.Debug("clipboard watcher exited, restarting", zap.Error(err))
+			time.Sleep(2 * time.Second) // Prevent rapid crash loops if Wayland isn't ready
+		}
+	}
 }
 
 // Handle processes incoming clipboard packets.
