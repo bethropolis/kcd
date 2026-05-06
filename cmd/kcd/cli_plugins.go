@@ -1,0 +1,382 @@
+package main
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"github.com/urfave/cli/v2"
+)
+
+var pingCmd = &cli.Command{
+
+	Name:      "ping",
+	Usage:     "Send a ping notification to a device",
+	ArgsUsage: "<device-id>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 1 {
+			return fmt.Errorf("missing device ID")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		if err := cl.Ping(c.Args().First()); err != nil {
+			return err
+		}
+		fmt.Println("Ping sent")
+		return nil
+	},
+}
+
+var batteryCmd = &cli.Command{
+
+	Name:      "battery",
+	Usage:     "Fetch battery level and charging status",
+	ArgsUsage: "<device-id>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 1 {
+			return fmt.Errorf("missing device ID")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		charge, charging, err := cl.Battery(c.Args().First())
+		if err != nil {
+			return err
+		}
+		state := "discharging"
+		if charging {
+			state = "charging"
+		}
+		fmt.Printf("Battery: %d%% (%s)\n", charge, state)
+		return nil
+	},
+}
+
+var sftpCmd = &cli.Command{
+
+	Name:  "sftp",
+	Usage: "Manage SFTP connections to a device",
+	Subcommands: []*cli.Command{
+		{
+			Name:      "request",
+			Usage:     "Request SFTP connection details from the device",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				if err := cl.SftpMount(c.Args().First()); err != nil {
+					return err
+				}
+				fmt.Println("SFTP mount requested. Run 'kcd watch' to see details.")
+				return nil
+			},
+		},
+		{
+			Name:      "mount",
+			Usage:     "Request SFTP credentials from the phone, mount via sshfs, and open in file manager",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				fmt.Println("Requesting SFTP credentials from phone (waiting up to 20s)…")
+				path, err := cl.SftpMountLocal(c.Args().First())
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Mounted at: %s\n", path)
+				return nil
+			},
+		},
+		{
+			Name:      "unmount",
+			Usage:     "Unmount a previously mounted phone filesystem",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				if err := cl.SftpUnmount(c.Args().First()); err != nil {
+					return err
+				}
+				fmt.Println("Unmounted successfully.")
+				return nil
+			},
+		},
+	},
+}
+
+var replyCmd = &cli.Command{
+
+	Name:      "reply",
+	Usage:     "Send a text reply to a smartphone notification",
+	ArgsUsage: "<device-id> <reply-id> <message>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 3 {
+			return fmt.Errorf("missing device ID, reply ID, or message")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		if err := cl.NotifyReply(c.Args().Get(0), c.Args().Get(1), c.Args().Get(2)); err != nil {
+			return err
+		}
+		fmt.Println("Notification reply sent")
+		return nil
+	},
+}
+
+var callCmd = &cli.Command{
+
+	Name:  "call",
+	Usage: "Manage phone calls",
+	Subcommands: []*cli.Command{
+		{
+			Name:      "mute",
+			Usage:     "Silence an incoming call",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				if err := cl.CallMute(c.Args().First()); err != nil {
+					return err
+				}
+				fmt.Println("Call mute requested")
+				return nil
+			},
+		},
+	},
+}
+
+var findmyphoneCmd = &cli.Command{
+
+	Name:      "findmyphone",
+	Usage:     "Make the phone play a loud ringtone",
+	ArgsUsage: "[device-id]",
+	Action: func(c *cli.Context) error {
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+
+		targetID := c.Args().First()
+		if targetID == "" {
+			// Auto-select the first connected device
+			devs, err := cl.Devices()
+			if err != nil {
+				return err
+			}
+			for _, d := range devs {
+				if d.Connected {
+					targetID = d.ID
+					break
+				}
+			}
+			if targetID == "" {
+				return fmt.Errorf("no connected devices found")
+			}
+		}
+
+		if err := cl.FindMyPhone(targetID); err != nil {
+			return err
+		}
+		fmt.Println("Ring request sent")
+		return nil
+	},
+}
+
+var lockCmd = &cli.Command{
+
+	Name:      "lock",
+	Usage:     "Lock the current desktop session",
+	ArgsUsage: "<device-id>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 1 {
+			return fmt.Errorf("missing device ID")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		if err := cl.Lock(c.Args().First()); err != nil {
+			return err
+		}
+		fmt.Println("Lock requested")
+		return nil
+	},
+}
+
+var unlockCmd = &cli.Command{
+
+	Name:      "unlock",
+	Usage:     "Unlock the current desktop session",
+	ArgsUsage: "<device-id>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 1 {
+			return fmt.Errorf("missing device ID")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		if err := cl.Unlock(c.Args().First()); err != nil {
+			return err
+		}
+		fmt.Println("Unlock requested")
+		return nil
+	},
+}
+
+var shareCmd = &cli.Command{
+
+	Name:      "share",
+	Usage:     "Send a local file to a device",
+	ArgsUsage: "<device-id> <file-path>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 2 {
+			return fmt.Errorf("missing device ID or file path")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		// Resolve to absolute path before sending to the daemon — the daemon
+		// runs from a different working directory so relative paths break.
+		absPath, err := filepath.Abs(c.Args().Get(1))
+		if err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
+		if err := cl.ShareFile(c.Args().Get(0), absPath); err != nil {
+			return err
+		}
+		fmt.Println("File share requested")
+		return nil
+	},
+}
+
+var clipboardCmd = &cli.Command{
+
+	Name:      "clipboard",
+	Usage:     "Sync local clipboard content to a device",
+	ArgsUsage: "[device-id]",
+	Action: func(c *cli.Context) error {
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+
+		var targetID string
+		if c.NArg() >= 1 {
+			targetID = c.Args().First()
+		} else {
+			// Auto-find the first connected device
+			devs, err := cl.Devices()
+			if err != nil {
+				return err
+			}
+			for _, d := range devs {
+				if d.Connected {
+					targetID = d.ID
+					break
+				}
+			}
+			if targetID == "" {
+				return fmt.Errorf("no connected devices found")
+			}
+		}
+
+		if err := cl.ClipboardPush(targetID); err != nil {
+			return err
+		}
+		fmt.Printf("Clipboard pushed to %s\n", targetID)
+		return nil
+	},
+}
+
+var runCmd = &cli.Command{
+
+	Name:  "run",
+	Usage: "Execute and manage remote commands on the device",
+	Subcommands: []*cli.Command{
+		{
+			Name:      "list",
+			Usage:     "List available remote commands",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				if err := cl.RunList(c.Args().First()); err != nil {
+					return err
+				}
+				fmt.Println("Command list requested. Run 'kcd watch' to see results.")
+				return nil
+			},
+		},
+		{
+			Name:      "exec",
+			Usage:     "Execute a remote command by key",
+			ArgsUsage: "<device-id> <command-key>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 2 {
+					return fmt.Errorf("missing device ID or command key")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				if err := cl.RunExec(c.Args().Get(0), c.Args().Get(1)); err != nil {
+					return err
+				}
+				fmt.Println("Command execution requested")
+				return nil
+			},
+		},
+	},
+}
+
+var smsCmd = &cli.Command{
+
+	Name:      "sms",
+	Usage:     "Send an SMS via a device",
+	ArgsUsage: "<device-id> <phone-number> <message>",
+	Action: func(c *cli.Context) error {
+		if c.NArg() < 3 {
+			return fmt.Errorf("missing device ID, phone number, or message")
+		}
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		if err := cl.SendSMS(c.Args().Get(0), c.Args().Get(1), c.Args().Get(2)); err != nil {
+			return err
+		}
+		fmt.Println("SMS request sent")
+		return nil
+	},
+}

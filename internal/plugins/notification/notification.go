@@ -28,10 +28,10 @@ type NotificationPlugin struct {
 	bus            *events.Bus
 	tlsConfig      *tls.Config
 	logger         *zap.Logger
-	notifIDs       sync.Map           // maps body.ID (string) -> desktop notify-send ID (string)
-	iconDir        string             // temp dir for cached notification icons
+	notifIDs       sync.Map // maps body.ID (string) -> desktop notify-send ID (string)
+	iconDir        string   // temp dir for cached notification icons
 	cfg            config.NotificationPluginConfig
-	canCloseNotifs bool               // whether notify-send supports --print-id
+	canCloseNotifs bool // whether notify-send supports --print-id
 	mu             sync.RWMutex
 	filters        config.NotificationConfig
 }
@@ -279,7 +279,7 @@ func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, i
 	// Dunst / mako / swaync: stack notifications from the same app so they
 	// replace each other instead of flooding the screen.
 	groupHint := "string:x-dunst-stack-tag:kcd-" + appName
-	
+
 	args := []string{"-a", appName}
 	if p.cfg.Urgency != "" {
 		args = append(args, "-u", p.cfg.Urgency)
@@ -288,7 +288,7 @@ func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, i
 		args = append(args, "-t", strconv.Itoa(p.cfg.ExpireMS))
 	}
 	args = append(args, "-i", iconArg, "-h", groupHint)
-	
+
 	if p.canCloseNotifs && id != "" {
 		args = append(args, "--print-id", title, text)
 	} else {

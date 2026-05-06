@@ -26,7 +26,7 @@ type Device struct {
 	CertFP string
 
 	lastSeen time.Time
-	lastIP   net.IP     // cached from last successful connection; survives Disconnect
+	lastIP   net.IP // cached from last successful connection; survives Disconnect
 
 	conn      *transport.Conn
 	sendChan  chan *protocol.Packet // buffered 32
@@ -68,30 +68,6 @@ func (d *Device) SetBus(bus *events.Bus) {
 
 // Send attempts to enqueue a packet for delivery to the device.
 // If the send channel is full, the packet is dropped to avoid blocking.
-func (d *Device) Send(p *protocol.Packet) error {
-	d.mu.RLock()
-	connected := d.conn != nil
-	sendChan := d.sendChan
-	done := d.done
-	d.mu.RUnlock()
-
-	if !connected {
-		protocol.ReleasePacket(p)
-		return nil // silently drop if not connected
-	}
-
-	select {
-	case <-done:
-		protocol.ReleasePacket(p)
-		return nil
-	case sendChan <- p:
-		return nil
-	default:
-		d.logger.Warn("send channel full, dropping packet", zap.String("type", p.Type))
-		protocol.ReleasePacket(p)
-		return nil
-	}
-}
 
 // Connect establishes a connection for the device and starts the reader and writer loops.
 func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet), onConnect func(*Device), onDisconnect func(*Device)) {
@@ -214,67 +190,8 @@ func (d *Device) disconnectConn(conn *transport.Conn) {
 }
 
 // readLoop reads packets from the network and routes them.
-func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
-	d.mu.RLock()
-	dispatch := d.pluginDispatch
-	d.mu.RUnlock()
-
-	if conn == nil {
-		return
-	}
-
-	defer d.disconnectConn(conn)
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		pkt, err := conn.ReadPacket()
-		if err != nil {
-			d.logger.Debug("read packet error (disconnecting)", zap.Error(err))
-			return
-		}
-
-		if dispatch != nil {
-			if d.State() != StatePaired && pkt.Type != protocol.TypeIdentity && pkt.Type != protocol.TypePair {
-				d.logger.Debug("dropping packet from unpaired device", zap.String("type", pkt.Type))
-			} else {
-				dispatch(ctx, d, pkt)
-			}
-		}
-
-		// Don't leak memory; return the packet to pool after dispatch returns.
-		// Handlers shouldn't keep references to the original packet struct.
-		protocol.ReleasePacket(pkt)
-	}
-}
 
 // writerLoop drains the send channel and writes packets to the network.
-func (d *Device) writerLoop(ctx context.Context, conn *transport.Conn) {
-	d.mu.RLock()
-	sendChan := d.sendChan
-	done := d.done
-	d.mu.RUnlock()
-
-	if conn == nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-done:
-			return
-		case pkt := <-sendChan:
-			if err := conn.WritePacket(pkt); err != nil {
-				d.logger.Debug("write packet error", zap.Error(err))
-				return // write failed -> drop out, readLoop will detect disconnect soon
-			}
-		}
-	}
-}
 
 // UpdateBattery updates the battery state of the device.
 func (d *Device) UpdateBattery(charge int, charging bool) {

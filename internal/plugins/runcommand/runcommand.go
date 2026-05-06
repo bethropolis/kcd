@@ -14,7 +14,7 @@ import (
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {
-	Mu       sync.RWMutex      // exported so daemon.go can lock it during reload
+	Mu       sync.RWMutex // exported so daemon.go can lock it during reload
 	Commands map[string]string
 	logger   *zap.Logger
 }

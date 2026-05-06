@@ -15,9 +15,9 @@ import (
 
 // ThresholdEvent values from the KDE Connect protocol.
 const (
-	thresholdNone    = 0
-	thresholdLow     = 1 // battery is low (typically <= 15%)
-	thresholdFull    = 2 // battery reached full charge
+	thresholdNone = 0
+	thresholdLow  = 1 // battery is low (typically <= 15%)
+	thresholdFull = 2 // battery reached full charge
 )
 
 // BatteryPlugin handles incoming battery state updates.

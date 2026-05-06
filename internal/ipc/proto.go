@@ -24,9 +24,9 @@ const (
 	CmdLock           = "lock"
 	CmdUnlock         = "unlock"
 	CmdSendSMS        = "send_sms"
-	CmdSftpMountLocal  = "sftp_mount_local"
-	CmdSftpUnmount     = "sftp_unmount"
-	CmdStatus          = "status"
+	CmdSftpMountLocal = "sftp_mount_local"
+	CmdSftpUnmount    = "sftp_unmount"
+	CmdStatus         = "status"
 )
 
 // Request is sent from the client to the local daemon.
@@ -88,4 +88,3 @@ type StatusResponse struct {
 	DeviceCount    int      `json:"deviceCount"`
 	ConnectedCount int      `json:"connectedCount"`
 }
-

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"context"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/daemon"
 	"github.com/bethropolis/kcd/pkg/client"
-	"context"
 )
 
 // StartTestDaemon starts a kcd daemon in a goroutine with a cancellable
