@@ -64,14 +64,12 @@ func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadP
 }
 
 func (p *MousepadPlugin) initUinput() error {
-	// Initialize virtual mouse
 	m, err := uinput.CreateMouse("/dev/uinput", []byte("kcd-mouse"))
 	if err != nil {
 		return fmt.Errorf("create mouse: %w", err)
 	}
 	p.mouse = m
 
-	// Initialize virtual keyboard
 	k, err := uinput.CreateKeyboard("/dev/uinput", []byte("kcd-keyboard"))
 	if err != nil {
 		m.Close()
@@ -82,21 +80,33 @@ func (p *MousepadPlugin) initUinput() error {
 	return nil
 }
 
+// MousepadBody represents the exact spec Android sends.
 type MousepadBody struct {
 	Dx          float64 `json:"dx"`
 	Dy          float64 `json:"dy"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
 	SingleClick bool    `json:"singleclick"`
-	RightClick  bool    `json:"rightclick"`
+	DoubleClick bool    `json:"doubleclick"`
 	MiddleClick bool    `json:"middleclick"`
+	RightClick  bool    `json:"rightclick"`
+	SingleHold  bool    `json:"singlehold"`
+	SingleRel   bool    `json:"singlerelease"`
 	Scroll      bool    `json:"scroll"`
 	Key         string  `json:"key"`
 	SpecialKey  int     `json:"specialKey"`
+	Shift       bool    `json:"shift"`
+	Ctrl        bool    `json:"ctrl"`
+	Alt         bool    `json:"alt"`
+	Super       bool    `json:"super"`
 }
 
 func (p *MousepadPlugin) Name() string            { return "Mousepad" }
 func (p *MousepadPlugin) Timeout() time.Duration  { return 2 * time.Second }
 func (p *MousepadPlugin) IncomingTypes() []string { return []string{"kdeconnect.mousepad.request"} }
-func (p *MousepadPlugin) OutgoingTypes() []string { return []string{} }
+func (p *MousepadPlugin) OutgoingTypes() []string {
+	return []string{"kdeconnect.mousepad.keyboardstate"}
+}
 
 func (p *MousepadPlugin) Handle(_ context.Context, _ device.Sender, pkt *protocol.Packet) error {
 	var body MousepadBody
@@ -104,8 +114,9 @@ func (p *MousepadPlugin) Handle(_ context.Context, _ device.Sender, pkt *protoco
 		return err
 	}
 
-	isPointerMove := (body.Dx != 0 || body.Dy != 0) && !body.SingleClick &&
-		!body.RightClick && !body.MiddleClick && body.Key == "" && body.SpecialKey == 0
+	isPointerMove := (body.Dx != 0 || body.Dy != 0) && !body.SingleClick && !body.DoubleClick &&
+		!body.RightClick && !body.MiddleClick && !body.SingleHold && !body.SingleRel &&
+		body.Key == "" && body.SpecialKey == 0
 
 	if isPointerMove {
 		// Drop stale frame if worker hasn't consumed the last one yet.
@@ -136,7 +147,6 @@ func (p *MousepadPlugin) worker() {
 	}
 }
 
-// handleMove handles pointer movement and scroll events.
 func (p *MousepadPlugin) handleMove(body MousepadBody) {
 	if body.Dx == 0 && body.Dy == 0 {
 		return
@@ -176,8 +186,8 @@ func (p *MousepadPlugin) handleMove(body MousepadBody) {
 	}
 }
 
-// handleEvent handles clicks and key events.
 func (p *MousepadPlugin) handleEvent(body MousepadBody) {
+	// 1. Mouse Actions
 	if body.SingleClick {
 		if p.useUinput {
 			p.mouse.LeftClick()
@@ -185,6 +195,16 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 			p.runCmd("ydotool", "click", "0xC0")
 		} else {
 			p.runCmd("xdotool", "click", "1")
+		}
+	}
+	if body.DoubleClick {
+		if p.useUinput {
+			p.mouse.LeftClick()
+			p.mouse.LeftClick()
+		} else if p.useYdotool {
+			p.runCmd("ydotool", "click", "0xC0", "0xC0")
+		} else {
+			p.runCmd("xdotool", "click", "--repeat", "2", "1")
 		}
 	}
 	if body.RightClick {
@@ -205,48 +225,91 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 			p.runCmd("xdotool", "click", "2")
 		}
 	}
-	if body.Key != "" {
+	if body.SingleHold {
 		if p.useUinput {
-			// uinput-level typing is complex because it deals with scan codes.
-			// bendahl/uinput doesn't have a high-level "Type" method, but we can do it manually.
-			// For now, we'll fall back to wtype/xdotool if uinput typing isn't implemented.
-			if p.useYdotool {
-				p.runCmd("wtype", body.Key)
-			} else {
-				p.runCmd("xdotool", "type", "--", body.Key)
-			}
+			p.mouse.LeftPress()
 		} else if p.useYdotool {
-			p.runCmd("wtype", body.Key)
+			p.runCmd("ydotool", "click", "0x40")
 		} else {
-			p.runCmd("xdotool", "type", "--", body.Key)
+			p.runCmd("xdotool", "mousedown", "1")
 		}
 	}
+	if body.SingleRel {
+		if p.useUinput {
+			p.mouse.LeftRelease()
+		} else if p.useYdotool {
+			p.runCmd("ydotool", "click", "0x80")
+		} else {
+			p.runCmd("xdotool", "mouseup", "1")
+		}
+	}
+
+	// 2. Modifiers
+	if p.useUinput {
+		if body.Ctrl {
+			p.keyboard.KeyDown(uinput.KeyLeftctrl)
+		}
+		if body.Alt {
+			p.keyboard.KeyDown(uinput.KeyLeftalt)
+		}
+		if body.Shift {
+			p.keyboard.KeyDown(uinput.KeyLeftshift)
+		}
+		if body.Super {
+			p.keyboard.KeyDown(uinput.KeyLeftmeta)
+		}
+	}
+
+	// 3. Keys
 	if body.SpecialKey != 0 {
 		if p.useUinput {
 			ukey := mapUinputKey(body.SpecialKey)
 			if ukey != -1 {
 				p.keyboard.KeyPress(ukey)
 			} else {
-				// fallback for unmapped special keys
 				keyName := mapSpecialKey(body.SpecialKey)
 				if keyName != "" {
-					if p.useYdotool {
-						p.runCmd("wtype", "-k", keyName)
-					} else {
-						p.runCmd("xdotool", "key", keyName)
-					}
+					p.execKeyFallback(keyName)
 				}
 			}
 		} else {
 			keyName := mapSpecialKey(body.SpecialKey)
 			if keyName != "" {
-				if p.useYdotool {
-					p.runCmd("wtype", "-k", keyName)
-				} else {
-					p.runCmd("xdotool", "key", keyName)
-				}
+				p.execKeyFallback(keyName)
 			}
 		}
+	} else if body.Key != "" {
+		// Unicode strings cannot be typed via uinput directly.
+		// We fallback to tools that interface with the display server (X11/Wayland).
+		if p.useYdotool {
+			p.runCmd("wtype", body.Key)
+		} else {
+			p.runCmd("xdotool", "type", "--", body.Key)
+		}
+	}
+
+	// 4. Release Modifiers
+	if p.useUinput {
+		if body.Super {
+			p.keyboard.KeyUp(uinput.KeyLeftmeta)
+		}
+		if body.Shift {
+			p.keyboard.KeyUp(uinput.KeyLeftshift)
+		}
+		if body.Alt {
+			p.keyboard.KeyUp(uinput.KeyLeftalt)
+		}
+		if body.Ctrl {
+			p.keyboard.KeyUp(uinput.KeyLeftctrl)
+		}
+	}
+}
+
+func (p *MousepadPlugin) execKeyFallback(keyName string) {
+	if p.useYdotool {
+		p.runCmd("wtype", "-k", keyName)
+	} else {
+		p.runCmd("xdotool", "key", keyName)
 	}
 }
 
@@ -256,121 +319,11 @@ func (p *MousepadPlugin) runCmd(name string, arg ...string) {
 	}
 }
 
-func mapUinputKey(k int) int {
-	switch k {
-	case 1:
-		return uinput.KeyBackspace
-	case 2:
-		return uinput.KeyTab
-	case 3, 12:
-		return uinput.KeyEnter
-	case 4:
-		return uinput.KeyLeft
-	case 5:
-		return uinput.KeyUp
-	case 6:
-		return uinput.KeyRight
-	case 7:
-		return uinput.KeyDown
-	case 8:
-		return uinput.KeyPageup
-	case 9:
-		return uinput.KeyPagedown
-	case 10:
-		return uinput.KeyHome
-	case 11:
-		return uinput.KeyEnd
-	case 13:
-		return uinput.KeyDelete
-	case 14:
-		return uinput.KeyEsc
-	case 21:
-		return uinput.KeyF1
-	case 22:
-		return uinput.KeyF2
-	case 23:
-		return uinput.KeyF3
-	case 24:
-		return uinput.KeyF4
-	case 25:
-		return uinput.KeyF5
-	case 26:
-		return uinput.KeyF6
-	case 27:
-		return uinput.KeyF7
-	case 28:
-		return uinput.KeyF8
-	case 29:
-		return uinput.KeyF9
-	case 30:
-		return uinput.KeyF10
-	case 31:
-		return uinput.KeyF11
-	case 32:
-		return uinput.KeyF12
-	default:
-		return -1
-	}
+// OnConnect explicitly tells the Android app that this device supports Keyboard input.
+// Without this, the Android app will not show the keyboard icon in the Remote Input UI.
+func (p *MousepadPlugin) OnConnect(dev device.Sender) {
+	pkt, _ := protocol.NewPacket("kdeconnect.mousepad.keyboardstate", map[string]bool{"state": true})
+	dev.Send(pkt)
 }
 
-func mapSpecialKey(k int) string {
-	switch k {
-	case 1:
-		return "BackSpace"
-	case 2:
-		return "Tab"
-	case 3, 12:
-		return "Return"
-	case 4:
-		return "Left"
-	case 5:
-		return "Up"
-	case 6:
-		return "Right"
-	case 7:
-		return "Down"
-	case 8:
-		return "Prior"
-	case 9:
-		return "Next"
-	case 10:
-		return "Home"
-	case 11:
-		return "End"
-	case 13:
-		return "Delete"
-	case 14:
-		return "Escape"
-	case 16:
-		return "Scroll_Lock"
-	case 21:
-		return "F1"
-	case 22:
-		return "F2"
-	case 23:
-		return "F3"
-	case 24:
-		return "F4"
-	case 25:
-		return "F5"
-	case 26:
-		return "F6"
-	case 27:
-		return "F7"
-	case 28:
-		return "F8"
-	case 29:
-		return "F9"
-	case 30:
-		return "F10"
-	case 31:
-		return "F11"
-	case 32:
-		return "F12"
-	default:
-		return ""
-	}
-}
-
-func (p *MousepadPlugin) OnConnect(_ device.Sender)    {}
 func (p *MousepadPlugin) OnDisconnect(_ device.Sender) {}
