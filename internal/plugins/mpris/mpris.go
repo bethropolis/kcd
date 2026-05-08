@@ -34,6 +34,9 @@ type MPRISPlugin struct {
 
 	// cache for tracking track changes to avoid over-requesting album art
 	lastTracks map[string]trackIdentity
+
+	// Debounce map to prevent rapid duplicate album art requests from Android
+	artRequests map[string]time.Time
 }
 
 type trackIdentity struct {
@@ -46,10 +49,11 @@ type trackIdentity struct {
 
 func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	return &MPRISPlugin{
-		tlsConfig:  tlsConfig,
-		logger:     logger.With(zap.String("plugin", "mpris")),
-		devices:    make(map[string]device.Sender),
-		lastTracks: make(map[string]trackIdentity),
+		tlsConfig:   tlsConfig,
+		logger:      logger.With(zap.String("plugin", "mpris")),
+		devices:     make(map[string]device.Sender),
+		lastTracks:  make(map[string]trackIdentity),
+		artRequests: make(map[string]time.Time),
 	}
 }
 
@@ -198,6 +202,17 @@ func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 }
 
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
+	// Debounce: prevent the Android app from spamming duplicate art requests 
+	// for the same track within a 5-second window.
+	p.mu.Lock()
+	reqKey := dev.ID() + "|" + artUrl
+	if lastReq, exists := p.artRequests[reqKey]; exists && time.Since(lastReq) < 5*time.Second {
+		p.mu.Unlock()
+		return
+	}
+	p.artRequests[reqKey] = time.Now()
+	p.mu.Unlock()
+
 	// Strip the cache-buster timestamp before opening the local file
 	cleanUrl := artUrl
 	if idx := strings.LastIndex(cleanUrl, "?t="); idx != -1 {

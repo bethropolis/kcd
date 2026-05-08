@@ -130,10 +130,16 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 
 	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		logger.Error("share: TLS handshake failed on side-channel",
-			zap.String("remote_addr", conn.RemoteAddr().String()),
-			zap.Error(err),
-		)
+		if err == io.EOF {
+			logger.Debug("share: TLS handshake aborted by remote device (EOF)",
+				zap.String("remote_addr", conn.RemoteAddr().String()),
+			)
+		} else {
+			logger.Error("share: TLS handshake failed on side-channel",
+				zap.String("remote_addr", conn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+		}
 		return fmt.Errorf("tls handshake failed: %w", err)
 	}
 
