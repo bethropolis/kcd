@@ -16,8 +16,18 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	var args []string
 
 	switch action {
-	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
-		args = []string{"-p", player, strings.ToLower(action)}
+	case "Play":
+		args = []string{"-p", player, "play"}
+	case "Pause":
+		args = []string{"-p", player, "pause"}
+	case "PlayPause":
+		args = []string{"-p", player, "play-pause"}
+	case "Next":
+		args = []string{"-p", player, "next"}
+	case "Previous":
+		args = []string{"-p", player, "previous"}
+	case "Stop":
+		args = []string{"-p", player, "stop"}
 
 	case "Seek":
 		if seek != nil {
@@ -157,10 +167,10 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 		Pos:            pos / 1000,
 		Volume:         int(volF * 100),
 		CanControl:     true,
-		CanGoNext:      parts[11] == "true",
-		CanGoPrevious:  parts[12] == "true",
-		CanPause:       parts[10] == "true",
-		CanPlay:        parts[9] == "true",
+		CanGoNext:      parts[9] == "true",
+		CanGoPrevious:  parts[10] == "true",
+		CanPause:       parts[11] == "true",
+		CanPlay:        parts[12] == "true",
 		CanSeek:        parts[13] == "true",
 	}
 
