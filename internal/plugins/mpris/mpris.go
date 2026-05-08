@@ -1,23 +1,18 @@
 package mpris
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
@@ -58,9 +53,11 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	}
 }
 
-func (p *MPRISPlugin) Name() string            { return "MPRIS" }
-func (p *MPRISPlugin) Timeout() time.Duration  { return 5 * time.Second }
-func (p *MPRISPlugin) IncomingTypes() []string { return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"} }
+func (p *MPRISPlugin) Name() string           { return "MPRIS" }
+func (p *MPRISPlugin) Timeout() time.Duration { return 5 * time.Second }
+func (p *MPRISPlugin) IncomingTypes() []string {
+	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
+}
 func (p *MPRISPlugin) OutgoingTypes() []string { return []string{"kdeconnect.mpris"} }
 
 type MPRISRequest struct {
@@ -74,7 +71,7 @@ type MPRISRequest struct {
 	SetPosition       *int64 `json:"SetPosition,omitempty"`
 	SetShuffle        *bool  `json:"setShuffle,omitempty"`
 	SetLoopStatus     string `json:"setLoopStatus,omitempty"` // "None", "Track", "Playlist"
-	AlbumArtUrl       string `json:"albumArtUrl,omitempty"`  // Used for local art transfer requests
+	AlbumArtUrl       string `json:"albumArtUrl,omitempty"`   // Used for local art transfer requests
 }
 
 type NowPlaying struct {
@@ -84,8 +81,8 @@ type NowPlaying struct {
 	Album          string `json:"album"`
 	AlbumArtUrl    string `json:"albumArtUrl"`
 	Url            string `json:"url,omitempty"`
-	Length         int64  `json:"length"`           // ms, -1 for unknown
-	Pos            int64  `json:"pos,omitempty"`    // ms
+	Length         int64  `json:"length"`        // ms, -1 for unknown
+	Pos            int64  `json:"pos,omitempty"` // ms
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume,omitempty"` // 0-100
 	CanControl     bool   `json:"canControl"`
@@ -157,102 +154,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	return nil
-}
-
-// watchPlayerList polls for active players and removes closed ones from the UI.
-func (p *MPRISPlugin) watchPlayerList(ctx context.Context) {
-	var lastPlayers string
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			players, err := listPlayers()
-			if err != nil {
-				continue
-			}
-			current := strings.Join(players, ",")
-			if current != lastPlayers {
-				lastPlayers = current
-
-				if players == nil {
-					players = []string{}
-				}
-				pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
-					"playerList":             players,
-					"supportAlbumArtPayload": true,
-				})
-
-				p.mu.RLock()
-				for _, dev := range p.devices {
-					if dev.IsConnected() {
-						_ = dev.Send(pkt)
-					}
-				}
-				p.mu.RUnlock()
-			}
-		}
-	}
-}
-
-func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
-	var args []string
-
-	switch action {
-	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
-		args = []string{"-p", player, strings.ToLower(action)}
-
-	case "Seek":
-		if seek != nil {
-			secs := float64(*seek) / 1_000_000.0
-			args = []string{"-p", player, "position", fmt.Sprintf("%+.6f", secs)}
-		}
-
-	case "SetPosition":
-		if setPos != nil {
-			secs := float64(*setPos) / 1_000_000.0
-			args = []string{"-p", player, "position", fmt.Sprintf("%.6f", secs)}
-		}
-	}
-
-	// Handle Volume (if present)
-	if volume != nil {
-		args = []string{"-p", player, "volume", fmt.Sprintf("%.2f", float64(*volume)/100.0)}
-	}
-
-	// Handle Shuffle (if present)
-	if shuffle != nil {
-		state := "Off"
-		if *shuffle {
-			state = "On"
-		}
-		args = []string{"-p", player, "shuffle", state}
-	}
-
-	// Handle Loop (if present)
-	if loopStatus != "" {
-		args = []string{"-p", player, "loop", loopStatus}
-	}
-
-	if len(args) == 0 {
-		return
-	}
-
-	if err := plugin.NewPlayerctlCmd(nil, args...).Run(); err != nil {
-		p.logger.Debug("mpris: action failed",
-			zap.String("player", player),
-			zap.Strings("args", args),
-			zap.Error(err),
-		)
-	}
-
-	// Immediately read and broadcast the new state so the phone UI updates
-	if state, err := p.playerState(player); err == nil {
-		p.broadcast(state)
-	}
 }
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
@@ -343,210 +244,6 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 		pkt.PayloadTransferInfo = &protocol.TransferInfo{Port: port}
 		dev.Send(pkt)
 	}
-}
-
-func (p *MPRISPlugin) startWatcher(ctx context.Context) {
-	p.logger.Info("mpris: starting playerctl follow watcher")
-
-	go func() {
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			if err := p.runWatcher(ctx); err != nil && ctx.Err() == nil {
-				p.logger.Warn("mpris: playerctl watcher exited, restarting in 3s", zap.Error(err))
-				select {
-				case <-time.After(3 * time.Second):
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-}
-
-func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
-	cmd := plugin.NewPlayerctlCmd(ctx, "--all-players", "--follow", "metadata", "--format", outputFormat)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("playerctl --follow: %w", err)
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		parts := strings.SplitN(line, "|||", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		playerName := parts[0]
-
-		np, err := p.parseOutput(playerName, line)
-		if err != nil {
-			p.logger.Debug("mpris: parse error", zap.Error(err))
-			continue
-		}
-
-		p.broadcast(np)
-	}
-
-	_ = cmd.Wait()
-	return scanner.Err()
-}
-
-func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
-	out, err := plugin.NewPlayerctlCmd(nil, "-p", playerName, "metadata", "--format", outputFormat).Output()
-	if err != nil {
-		return nil, fmt.Errorf("playerctl metadata: %w", err)
-	}
-	np, err := p.parseOutput(playerName, strings.TrimSpace(string(out)))
-	if err != nil {
-		return nil, err
-	}
-
-	// Fetch shuffle/loop status separately as they aren't in metadata
-	sOut, _ := plugin.NewPlayerctlCmd(nil, "-p", playerName, "shuffle").Output()
-	isShuffle := strings.TrimSpace(string(sOut)) == "On"
-	np.Shuffle = &isShuffle
-
-	lOut, _ := plugin.NewPlayerctlCmd(nil, "-p", playerName, "loop").Output()
-	np.LoopStatus = strings.TrimSpace(string(lOut))
-
-	return np, nil
-}
-
-func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) {
-	// Clean up playerctl output
-	line = strings.ReplaceAll(line, "<no value>", "")
-
-	parts := strings.Split(line, "|||")
-	if len(parts) < 15 {
-		return nil, fmt.Errorf("unexpected playerctl output: %q", line)
-	}
-
-	length, err := strconv.ParseInt(parts[6], 10, 64)
-	if err != nil || length == 0 {
-		length = -1
-	}
-	pos, _ := strconv.ParseInt(parts[7], 10, 64)
-	volF, _ := strconv.ParseFloat(parts[8], 64)
-
-	title := parts[2]
-	artist := parts[3]
-	album := parts[4]
-	rawArtUrl := parts[5]
-	trackUrl := parts[14]
-
-	// Metadata Fallback: If title is empty but we have a local URL, use filename
-	if title == "" && strings.HasPrefix(trackUrl, "file://") {
-		cleanUrl := strings.TrimPrefix(trackUrl, "file://")
-		if unescaped, err := url.PathUnescape(cleanUrl); err == nil {
-			title = filepath.Base(unescaped)
-			if album == "" {
-				album = filepath.Base(filepath.Dir(unescaped))
-			}
-		}
-	}
-
-	// Determine if the track identity has changed for cache-busting
-	p.mu.Lock()
-	last, exists := p.lastTracks[playerName]
-	
-	if !exists || last.title != title || last.artist != artist || last.album != album || last.rawArtUrl != rawArtUrl {
-		last = trackIdentity{
-			title:     title,
-			artist:    artist,
-			album:     album,
-			rawArtUrl: rawArtUrl,
-			timestamp: time.Now().UnixNano(),
-		}
-		p.lastTracks[playerName] = last
-	}
-	p.mu.Unlock()
-
-	artUrl := rawArtUrl
-	if strings.HasPrefix(artUrl, "file://") {
-		artUrl = fmt.Sprintf("%s?t=%d", artUrl, last.timestamp)
-	}
-
-	np := &NowPlaying{
-		Player:         playerName,
-		PlaybackStatus: parts[1],
-		IsPlaying:      parts[1] == "Playing",
-		Title:          title,
-		Artist:         artist,
-		Album:          album,
-		AlbumArtUrl:    artUrl,
-		Url:            trackUrl,
-		Length:         length / 1000,
-		Pos:            pos / 1000,
-		Volume:         int(volF * 100),
-		CanControl:     true,
-		CanGoNext:      parts[11] == "true",
-		CanGoPrevious:  parts[12] == "true",
-		CanPause:       parts[10] == "true",
-		CanPlay:        parts[9] == "true",
-		CanSeek:        parts[13] == "true",
-	}
-
-	if np.Title == "" {
-		np.Title = "Unknown Media"
-	}
-
-	return np, nil
-}
-
-func listPlayers() ([]string, error) {
-	// 1. Get raw names
-	out, err := plugin.NewPlayerctlCmd(nil, "-a", "metadata", "--format", "{{playerName}}").Output()
-	if err != nil {
-		return nil, nil
-	}
-
-	rawPlayers := []string{}
-	hasPlasmaIntegration := false
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			rawPlayers = append(rawPlayers, line)
-			if line == "plasma-browser-integration" {
-				hasPlasmaIntegration = true
-			}
-		}
-	}
-
-	// 2. Filter and deduplicate with official logic
-	// If plasma-browser-integration is present, filter out raw browser services
-	players := []string{}
-	seen := make(map[string]int)
-
-	for _, p := range rawPlayers {
-		// Browser filtering
-		if hasPlasmaIntegration {
-			if strings.HasPrefix(p, "firefox") || strings.HasPrefix(p, "chromium") {
-				continue
-			}
-		}
-
-		// Unique naming: Append [2], [3] etc. for duplicate identities
-		count := seen[p]
-		seen[p]++
-		
-		uniqueName := p
-		if count > 0 {
-			uniqueName = fmt.Sprintf("%s [%d]", p, count+1)
-		}
-		players = append(players, uniqueName)
-	}
-
-	return players, nil
 }
 
 func (p *MPRISPlugin) OnConnect(dev device.Sender) {}
