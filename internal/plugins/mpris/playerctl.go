@@ -13,64 +13,48 @@ import (
 )
 
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
-	var args []string
+	run := func(args ...string) {
+		if err := plugin.NewPlayerctlCmd(nil, args...).Run(); err != nil {
+			p.logger.Debug("mpris: action failed",
+				zap.String("player", player),
+				zap.Strings("args", args),
+				zap.Error(err),
+			)
+		}
+	}
 
 	switch action {
-	case "Play":
-		args = []string{"-p", player, "play"}
-	case "Pause":
-		args = []string{"-p", player, "pause"}
-	case "PlayPause":
-		args = []string{"-p", player, "play-pause"}
-	case "Next":
-		args = []string{"-p", player, "next"}
-	case "Previous":
-		args = []string{"-p", player, "previous"}
-	case "Stop":
-		args = []string{"-p", player, "stop"}
+	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
+		run("-p", player, strings.ToLower(action))
 
 	case "Seek":
 		if seek != nil {
 			secs := float64(*seek) / 1_000_000.0
-			args = []string{"-p", player, "position", fmt.Sprintf("%+.6f", secs)}
+			run("-p", player, "position", fmt.Sprintf("%+.6f", secs))
 		}
 
 	case "SetPosition":
 		if setPos != nil {
 			secs := float64(*setPos) / 1_000_000.0
-			args = []string{"-p", player, "position", fmt.Sprintf("%.6f", secs)}
+			run("-p", player, "position", fmt.Sprintf("%.6f", secs))
 		}
 	}
 
-	// Handle Volume (if present)
+	// Property updates are independent of the action above
 	if volume != nil {
-		args = []string{"-p", player, "volume", fmt.Sprintf("%.2f", float64(*volume)/100.0)}
+		run("-p", player, "volume", fmt.Sprintf("%.2f", float64(*volume)/100.0))
 	}
 
-	// Handle Shuffle (if present)
 	if shuffle != nil {
 		state := "Off"
 		if *shuffle {
 			state = "On"
 		}
-		args = []string{"-p", player, "shuffle", state}
+		run("-p", player, "shuffle", state)
 	}
 
-	// Handle Loop (if present)
 	if loopStatus != "" {
-		args = []string{"-p", player, "loop", loopStatus}
-	}
-
-	if len(args) == 0 {
-		return
-	}
-
-	if err := plugin.NewPlayerctlCmd(nil, args...).Run(); err != nil {
-		p.logger.Debug("mpris: action failed",
-			zap.String("player", player),
-			zap.Strings("args", args),
-			zap.Error(err),
-		)
+		run("-p", player, "loop", loopStatus)
 	}
 
 	// Immediately read and broadcast the new state so the phone UI updates
@@ -189,8 +173,11 @@ func listPlayers() ([]string, error) {
 		return nil, nil
 	}
 
-	var players []string
-	seen := make(map[string]bool)
+	type entry struct {
+		busName   string
+		shortName string
+	}
+	var all []entry
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
@@ -198,16 +185,46 @@ func listPlayers() ([]string, error) {
 			continue
 		}
 
-		// playerctl -l outputs names like "firefox.instance1234"
-		// Strip the prefix/suffix to match `{{playerName}}` which the watcher outputs.
-		name := strings.TrimPrefix(line, "org.mpris.MediaPlayer2.")
-		if idx := strings.Index(name, ".instance"); idx != -1 {
-			name = name[:idx]
+		short := strings.TrimPrefix(line, "org.mpris.MediaPlayer2.")
+		if idx := strings.Index(short, ".instance"); idx != -1 {
+			short = short[:idx]
+		}
+		all = append(all, entry{line, short})
+	}
+
+	// Detect plasma-browser-integration wrappers
+	hasPlasmaFirefox := false
+	hasPlasmaChrome := false
+	for _, e := range all {
+		if strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.plasma-browser-integration") {
+			if strings.Contains(e.busName, "Firefox") {
+				hasPlasmaFirefox = true
+			}
+			if strings.Contains(e.busName, "Chrome") || strings.Contains(e.busName, "Chromium") {
+				hasPlasmaChrome = true
+			}
+		}
+	}
+
+	seen := make(map[string]bool)
+	var players []string
+	for _, e := range all {
+		// Filter out native browser instances if plasma-browser-integration is managing them
+		if hasPlasmaFirefox && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.firefox") {
+			continue
+		}
+		if hasPlasmaChrome && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.chromium") {
+			continue
 		}
 
-		if !seen[name] {
-			seen[name] = true
-			players = append(players, name)
+		// Ignore playerctld as it is just a proxy to other media players (matching C++ behavior)
+		if strings.Contains(e.shortName, "playerctld") {
+			continue
+		}
+
+		if !seen[e.shortName] {
+			seen[e.shortName] = true
+			players = append(players, e.shortName)
 		}
 	}
 

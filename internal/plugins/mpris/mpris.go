@@ -117,7 +117,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			watchCtx, cancel := context.WithCancel(context.Background())
 			p.watchCancel = cancel
 			p.startWatcher(watchCtx)
-			go p.watchPlayerList(watchCtx)
+			go p.watchPlayerListDBus(watchCtx)
 		}
 	}
 	p.mu.Unlock()
