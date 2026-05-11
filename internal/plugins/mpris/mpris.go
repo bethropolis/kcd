@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
 )
 
@@ -22,12 +23,13 @@ import (
 // We include capabilities (canPlay, canPause, etc.) and the track URL for better compatibility.
 const outputFormat = "{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}|||{{mpris:length}}|||{{position}}|||{{volume}}|||{{canPlay}}|||{{canPause}}|||{{canGoNext}}|||{{canGoPrevious}}|||{{canSeek}}|||{{xesam:url}}"
 
-// MPRISPlugin controls desktop media players via playerctl.
+// MPRISPlugin controls desktop media players via D-Bus MPRIS interface.
 type MPRISPlugin struct {
 	tlsConfig *tls.Config
 	logger    *zap.Logger
 	mu        sync.RWMutex
 	devices   map[string]device.Sender // connected phone devices
+	dbus      *dbus.Conn
 
 	watchCancel context.CancelFunc
 	watching    bool
@@ -48,9 +50,17 @@ type trackIdentity struct {
 }
 
 func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
+	dbusConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		logger.Warn("mpris: failed to connect to D-Bus session bus", zap.Error(err))
+	} else {
+		logger.Info("mpris: connected to D-Bus session bus")
+	}
+
 	return &MPRISPlugin{
 		tlsConfig:   tlsConfig,
 		logger:      logger.With(zap.String("plugin", "mpris")),
+		dbus:        dbusConn,
 		devices:     make(map[string]device.Sender),
 		lastTracks:  make(map[string]trackIdentity),
 		artRequests: make(map[string]time.Time),

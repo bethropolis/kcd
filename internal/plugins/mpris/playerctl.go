@@ -8,154 +8,157 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
-	run := func(args ...string) {
-		if err := plugin.NewPlayerctlCmd(nil, args...).Run(); err != nil {
-			p.logger.Debug("mpris: action failed",
-				zap.String("player", player),
-				zap.Strings("args", args),
-				zap.Error(err),
-			)
-		}
-	}
+	busName := "org.mpris.MediaPlayer2." + player
+	obj := p.dbus.Object(busName)
 
 	switch action {
 	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
-		run("-p", player, strings.ToLower(action))
-
+		_ = obj.Call("org.mpris.MediaPlayer2.Player."+action, 0)
 	case "Seek":
 		if seek != nil {
-			secs := float64(*seek) / 1_000_000.0
-			run("-p", player, "position", fmt.Sprintf("%+.6f", secs))
+			_ = obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, *seek)
 		}
-
 	case "SetPosition":
 		if setPos != nil {
-			secs := float64(*setPos) / 1_000_000.0
-			run("-p", player, "position", fmt.Sprintf("%.6f", secs))
+			_ = obj.Call("org.mpris.MediaPlayer2.Player.SetPosition", 0, dbus.ObjectPath("/org/mpris/MediaPlayer2"), *setPos)
 		}
 	}
 
-	// Property updates are independent of the action above
 	if volume != nil {
-		run("-p", player, "volume", fmt.Sprintf("%.2f", float64(*volume)/100.0))
+		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", float64(*volume)/100.0)
 	}
 
 	if shuffle != nil {
-		state := "Off"
-		if *shuffle {
-			state = "On"
-		}
-		run("-p", player, "shuffle", state)
+		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Shuffle", *shuffle)
 	}
 
 	if loopStatus != "" {
-		run("-p", player, "loop", loopStatus)
+		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "LoopStatus", loopStatus)
 	}
 
-	// Immediately read and broadcast the new state so the phone UI updates
-	if state, err := p.playerState(player); err == nil {
+	if state, err := p.playerStateDBus(player); err == nil {
 		p.broadcast(state)
 	}
 }
 
 func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
-	out, err := plugin.NewPlayerctlCmd(nil, "-p", playerName, "metadata", "--format", outputFormat).Output()
-	if err != nil {
-		return nil, fmt.Errorf("playerctl metadata: %w", err)
-	}
-	np, err := p.parseOutput(playerName, strings.TrimSpace(string(out)))
-	if err != nil {
-		return nil, err
-	}
-
-	// Fetch shuffle/loop status separately as they aren't in metadata
-	sOut, _ := plugin.NewPlayerctlCmd(nil, "-p", playerName, "shuffle").Output()
-	isShuffle := strings.TrimSpace(string(sOut)) == "On"
-	np.Shuffle = &isShuffle
-
-	lOut, _ := plugin.NewPlayerctlCmd(nil, "-p", playerName, "loop").Output()
-	np.LoopStatus = strings.TrimSpace(string(lOut))
-
-	return np, nil
+	return p.playerStateDBus(playerName)
 }
 
-func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) {
-	// Clean up playerctl output
-	line = strings.ReplaceAll(line, "<no value>", "")
+func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
+	busName := "org.mpris.MediaPlayer2." + playerName
+	obj := p.dbus.Object(busName)
 
-	parts := strings.Split(line, "|||")
-	if len(parts) < 15 {
-		return nil, fmt.Errorf("unexpected playerctl output: %q", line)
-	}
-
-	length, err := strconv.ParseInt(parts[6], 10, 64)
-	if err != nil || length == 0 {
-		length = -1
-	}
-	pos, _ := strconv.ParseInt(parts[7], 10, 64)
-	volF, _ := strconv.ParseFloat(parts[8], 64)
-
-	title := parts[2]
-	artist := parts[3]
-	album := parts[4]
-	rawArtUrl := parts[5]
-	trackUrl := parts[14]
-
-	// Metadata Fallback: If title is empty but we have a local URL, use filename
-	if title == "" && strings.HasPrefix(trackUrl, "file://") {
-		cleanUrl := strings.TrimPrefix(trackUrl, "file://")
-		if unescaped, err := url.PathUnescape(cleanUrl); err == nil {
-			title = filepath.Base(unescaped)
-			if album == "" {
-				album = filepath.Base(filepath.Dir(unescaped))
-			}
-		}
-	}
-
-	// Determine if the track identity has changed for cache-busting
-	p.mu.Lock()
-	last, exists := p.lastTracks[playerName]
-
-	if !exists || last.title != title || last.artist != artist || last.album != album || last.rawArtUrl != rawArtUrl {
-		last = trackIdentity{
-			title:     title,
-			artist:    artist,
-			album:     album,
-			rawArtUrl: rawArtUrl,
-			timestamp: time.Now().UnixNano(),
-		}
-		p.lastTracks[playerName] = last
-	}
-	p.mu.Unlock()
-
-	artUrl := rawArtUrl
-	if strings.HasPrefix(artUrl, "file://") {
-		artUrl = fmt.Sprintf("%s?t=%d", artUrl, last.timestamp)
+	var props map[string]dbus.Variant
+	if err := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, "org.mpris.MediaPlayer2.Player").Store(&props); err != nil {
+		return nil, fmt.Errorf("get properties: %w", err)
 	}
 
 	np := &NowPlaying{
-		Player:         playerName,
-		PlaybackStatus: parts[1],
-		IsPlaying:      parts[1] == "Playing",
-		Title:          title,
-		Artist:         artist,
-		Album:          album,
-		AlbumArtUrl:    artUrl,
-		Url:            trackUrl,
-		Length:         length / 1000,
-		Pos:            pos / 1000,
-		Volume:         int(volF * 100),
-		CanControl:     true,
-		CanGoNext:      parts[9] == "true",
-		CanGoPrevious:  parts[10] == "true",
-		CanPause:       parts[11] == "true",
-		CanPlay:        parts[12] == "true",
-		CanSeek:        parts[13] == "true",
+		Player:     playerName,
+		CanControl: true,
+	}
+
+	if v, ok := props["PlaybackStatus"]; ok {
+		np.PlaybackStatus = v.Value().(string)
+		np.IsPlaying = np.PlaybackStatus == "Playing"
+	}
+
+	if v, ok := props["Volume"]; ok {
+		np.Volume = int(v.Value().(float64) * 100)
+	}
+
+	if v, ok := props["Position"]; ok {
+		np.Pos = v.Value().(int64) / 1000
+	}
+
+	if v, ok := props["Shuffle"]; ok {
+		shuffle := v.Value().(bool)
+		np.Shuffle = &shuffle
+	}
+
+	if v, ok := props["LoopStatus"]; ok {
+		np.LoopStatus = v.Value().(string)
+	}
+
+	if v, ok := props["CanSeek"]; ok {
+		np.CanSeek = v.Value().(bool)
+	}
+
+	if v, ok := props["CanGoNext"]; ok {
+		np.CanGoNext = v.Value().(bool)
+	}
+
+	if v, ok := props["CanGoPrevious"]; ok {
+		np.CanGoPrevious = v.Value().(bool)
+	}
+
+	if v, ok := props["CanPause"]; ok {
+		np.CanPause = v.Value().(bool)
+	}
+
+	if v, ok := props["CanPlay"]; ok {
+		np.CanPlay = v.Value().(bool)
+	}
+
+	if v, ok := props["Metadata"]; ok {
+		if meta, ok := v.Value().(map[string]dbus.Variant); ok {
+			if tv, ok := meta["xesam:title"]; ok {
+				np.Title = tv.Value().(string)
+			}
+			if av, ok := meta["xesam:artist"]; ok {
+				if artists, ok := av.Value().([]string); ok {
+					np.Artist = strings.Join(artists, ", ")
+				}
+			}
+			if alv, ok := meta["xesam:album"]; ok {
+				np.Album = alv.Value().(string)
+			}
+			if artUrlV, ok := meta["mpris:artUrl"]; ok {
+				rawArtUrl := artUrlV.Value().(string)
+				np.AlbumArtUrl = rawArtUrl
+
+				p.mu.Lock()
+				last, exists := p.lastTracks[playerName]
+				if !exists || last.rawArtUrl != rawArtUrl {
+					p.lastTracks[playerName] = trackIdentity{
+						rawArtUrl: rawArtUrl,
+						timestamp: time.Now().UnixNano(),
+					}
+				} else {
+					last.timestamp = time.Now().UnixNano()
+					p.lastTracks[playerName] = last
+				}
+				p.mu.Unlock()
+
+				if strings.HasPrefix(rawArtUrl, "file://") {
+					np.AlbumArtUrl = fmt.Sprintf("%s?t=%d", rawArtUrl, time.Now().UnixNano())
+				}
+			}
+			if lv, ok := meta["mpris:length"]; ok {
+				if length, ok := lv.Value().(int64); ok {
+					np.Length = length / 1000
+				}
+			}
+			if uv, ok := meta["xesam:url"]; ok {
+				if trackUrl, ok := uv.Value().(string); ok {
+					np.Url = trackUrl
+					if np.Title == "" && strings.HasPrefix(trackUrl, "file://") {
+						if unescaped, err := url.PathUnescape(strings.TrimPrefix(trackUrl, "file://")); err == nil {
+							np.Title = filepath.Base(unescaped)
+							if np.Album == "" {
+								np.Album = filepath.Base(filepath.Dir(unescaped))
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	if np.Title == "" {
@@ -165,11 +168,19 @@ func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) 
 	return np, nil
 }
 
-// listPlayers reliably reads the D-Bus registry to find active players,
-// even if they are currently paused or stopped.
+func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) {
+	return p.playerStateDBus(playerName)
+}
+
 func listPlayers() ([]string, error) {
-	out, err := plugin.NewPlayerctlCmd(nil, "-l").Output()
+	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
+		return nil, nil
+	}
+	defer conn.Close()
+
+	var names []string
+	if err := conn.BusObject().Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
 		return nil, nil
 	}
 
@@ -179,20 +190,18 @@ func listPlayers() ([]string, error) {
 	}
 	var all []entry
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, name := range names {
+		if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
 			continue
 		}
 
-		short := strings.TrimPrefix(line, "org.mpris.MediaPlayer2.")
+		short := strings.TrimPrefix(name, "org.mpris.MediaPlayer2.")
 		if idx := strings.Index(short, ".instance"); idx != -1 {
 			short = short[:idx]
 		}
-		all = append(all, entry{line, short})
+		all = append(all, entry{name, short})
 	}
 
-	// Detect plasma-browser-integration wrappers
 	hasPlasmaFirefox := false
 	hasPlasmaChrome := false
 	for _, e := range all {
@@ -209,15 +218,12 @@ func listPlayers() ([]string, error) {
 	seen := make(map[string]bool)
 	var players []string
 	for _, e := range all {
-		// Filter out native browser instances if plasma-browser-integration is managing them
 		if hasPlasmaFirefox && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.firefox") {
 			continue
 		}
 		if hasPlasmaChrome && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.chromium") {
 			continue
 		}
-
-		// Ignore playerctld as it is just a proxy to other media players (matching C++ behavior)
 		if strings.Contains(e.shortName, "playerctld") {
 			continue
 		}
