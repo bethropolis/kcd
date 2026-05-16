@@ -124,6 +124,7 @@ func main() {
 			clipboardCmd,
 			runCmd,
 			smsCmd,
+			mprisCmd,
 			{
 
 				Name:  "doctor",

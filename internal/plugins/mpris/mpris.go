@@ -301,3 +301,76 @@ func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
 		}
 	}
 }
+
+type DebugPlayerInfo struct {
+	DisplayName    string `json:"displayName"`
+	BusName        string `json:"busName"`
+	ShortName      string `json:"shortName"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist"`
+	Album          string `json:"album"`
+	PlaybackStatus string `json:"playbackStatus"`
+	IsPlaying      bool   `json:"isPlaying"`
+	Volume         int    `json:"volume"`
+	Pos            int64  `json:"pos"`
+	Length         int64  `json:"length"`
+	AlbumArtUrl    string `json:"albumArtUrl"`
+	CanSeek        bool   `json:"canSeek"`
+	Error          string `json:"error,omitempty"`
+}
+
+type DebugStatus struct {
+	WatcherRunning bool               `json:"watcherRunning"`
+	DeviceCount    int                `json:"deviceCount"`
+	Players        []DebugPlayerInfo  `json:"players"`
+	NameToBus      map[string]string  `json:"nameToBus"`
+	BusToDisplay   map[string]string  `json:"busToDisplay"`
+}
+
+func (p *MPRISPlugin) DebugStatus() *DebugStatus {
+	p.mu.RLock()
+	watching := p.watching
+	devCount := len(p.devices)
+	nameToBus := make(map[string]string, len(p.playerNameToBus))
+	busToDisplay := make(map[string]string, len(p.busToDisplayName))
+	for k, v := range p.playerNameToBus {
+		nameToBus[k] = v
+	}
+	for k, v := range p.busToDisplayName {
+		busToDisplay[k] = v
+	}
+	p.mu.RUnlock()
+
+	entries, _ := listPlayersDBus(p.dbus, p.logger)
+	var players []DebugPlayerInfo
+	for _, e := range entries {
+		info := DebugPlayerInfo{
+			DisplayName: e.identity,
+			BusName:     e.busName,
+			ShortName:   e.shortName,
+		}
+		if state, err := p.playerStateDBus(e.identity); err == nil {
+			info.Title = state.Title
+			info.Artist = state.Artist
+			info.Album = state.Album
+			info.PlaybackStatus = state.PlaybackStatus
+			info.IsPlaying = state.IsPlaying
+			info.Volume = state.Volume
+			info.Pos = state.Pos
+			info.Length = state.Length
+			info.AlbumArtUrl = state.AlbumArtUrl
+			info.CanSeek = state.CanSeek
+		} else {
+			info.Error = err.Error()
+		}
+		players = append(players, info)
+	}
+
+	return &DebugStatus{
+		WatcherRunning: watching,
+		DeviceCount:    devCount,
+		Players:        players,
+		NameToBus:      nameToBus,
+		BusToDisplay:   busToDisplay,
+	}
+}

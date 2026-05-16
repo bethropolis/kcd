@@ -27,6 +27,7 @@ const (
 	CmdSftpMountLocal = "sftp_mount_local"
 	CmdSftpUnmount    = "sftp_unmount"
 	CmdStatus         = "status"
+	CmdMprisStatus    = "mpris_status"
 )
 
 // Request is sent from the client to the local daemon.
@@ -87,4 +88,29 @@ type StatusResponse struct {
 	Plugins        []string `json:"plugins"`
 	DeviceCount    int      `json:"deviceCount"`
 	ConnectedCount int      `json:"connectedCount"`
+}
+
+type MprisPlayerInfo struct {
+	DisplayName    string `json:"displayName"`
+	BusName        string `json:"busName"`
+	ShortName      string `json:"shortName"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist"`
+	Album          string `json:"album"`
+	PlaybackStatus string `json:"playbackStatus"`
+	IsPlaying      bool   `json:"isPlaying"`
+	Volume         int    `json:"volume"`
+	Pos            int64  `json:"pos"`
+	Length         int64  `json:"length"`
+	AlbumArtUrl    string `json:"albumArtUrl"`
+	CanSeek        bool   `json:"canSeek"`
+	Error          string `json:"error,omitempty"`
+}
+
+type MprisStatusResponse struct {
+	WatcherRunning bool                `json:"watcherRunning"`
+	DeviceCount    int                 `json:"deviceCount"`
+	Players        []MprisPlayerInfo   `json:"players"`
+	NameToBus      map[string]string   `json:"nameToBus"`
+	BusToDisplay   map[string]string   `json:"busToDisplay"`
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
 	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
+	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"github.com/bethropolis/kcd/internal/plugins/notification"
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 	"github.com/bethropolis/kcd/internal/plugins/share"
@@ -364,6 +365,17 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			DeviceCount:    total,
 			ConnectedCount: connected,
 		})
+		return ipc.Response{OK: true, Data: data}
+	})
+
+	// CmdMprisStatus — MPRIS debug info
+	handler.Register(ipc.CmdMprisStatus, func(req ipc.Request) ipc.Response {
+		pl, ok := plugins.GetByName("MPRIS")
+		if !ok {
+			return ipc.Response{OK: false, Error: "mpris plugin not enabled"}
+		}
+		status := pl.(*mpris.MPRISPlugin).DebugStatus()
+		data, _ := json.Marshal(status)
 		return ipc.Response{OK: true, Data: data}
 	})
 

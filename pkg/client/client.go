@@ -236,6 +236,19 @@ func (c *Client) SendSMS(deviceID, phoneNumber, message string) error {
 	return err
 }
 
+// MprisStatus returns MPRIS plugin debug information.
+func (c *Client) MprisStatus() (*ipc.MprisStatusResponse, error) {
+	res, err := c.Call(ipc.CmdMprisStatus, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ipc.MprisStatusResponse
+	if err := json.Unmarshal(res.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decode mpris status: %w", err)
+	}
+	return &resp, nil
+}
+
 // WatchFile subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
 	conn, err := net.Dial("unix", c.SocketPath)

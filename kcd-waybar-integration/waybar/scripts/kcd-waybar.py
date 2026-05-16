@@ -2,25 +2,20 @@
 """
 kcd-waybar.py — Waybar custom module for the kcd daemon.
 
-Connects to `kcd watch --json`, maintains per-device state in memory,
-and re-renders Waybar JSON on every event. Reconnects automatically
-if the daemon restarts.
-
-Install: chmod +x ~/.config/waybar/scripts/kcd-waybar.py
+Connects directly to the kcd daemon's Unix socket (no subprocess),
+maintains per-device state in memory, and re-renders Waybar JSON
+on every event. Reconnects automatically if the daemon restarts.
 """
 
 import json
 import os
-import signal
-import subprocess
-import sys
+import socket
 import time
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-# Add common user bin paths since Waybar environment might not have them
 os.environ["PATH"] += (
     os.pathsep
     + os.path.expanduser("~/.local/bin")
@@ -28,32 +23,37 @@ os.environ["PATH"] += (
     + os.path.expanduser("~/go/bin")
 )
 
-KCD_BIN = os.environ.get("KCD_BIN", "kcd")
-RECONNECT_DELAY = 5  # seconds before reconnecting after daemon exit
+RECONNECT_DELAY = 5
 
-# Nerd Font icons (requires a Nerd Font in your Waybar font config)
-ICON_PHONE = "󰏲"  # phone connected
-ICON_PHONE_OFF = "󰄕"  # no device
-ICON_CHARGING = "󰂄"  # charging
-ICONS_BAT = {  # discharge tiers: ≥80, ≥60, ≥40, ≥20, else
-    80: "󰁹",
-    60: "󰁾",
-    40: "󰁼",
-    20: "󰁺",
-    0: "󰁻",
-}
+_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+if not _runtime_dir:
+    _runtime_dir = f"/run/user/{os.getuid()}"
+SOCKET_PATH = os.environ.get("KCD_SOCKET") or os.path.join(
+    _runtime_dir, "kcd", "kcd.sock"
+)
+
+# Nerd Font icons
+ICON_PHONE_OFF = "󰄕"
+ICON_CHARGING = "󰂄"
+# discharge tiers: ≥80, ≥60, ≥40, ≥20, else (pre-sorted descending)
+ICONS_BAT = ((80, "󰁹"), (60, "󰁾"), (40, "󰁼"), (20, "󰁺"), (0, "󰁻"))
 
 
 # ---------------------------------------------------------------------------
-# State
+# Device state (__slots__ avoids per-instance dict overhead)
 # ---------------------------------------------------------------------------
 
-# devices[device_id] = {
-#   "name": str, "type": str,
-#   "charge": int, "charging": bool,
-#   "connected": bool
-# }
-devices: dict = {}
+class Device:
+    __slots__ = ("name", "type", "charge", "charging", "connected")
+    def __init__(self, name="", type="phone", charge=0, charging=False, connected=True):
+        self.name = name
+        self.type = type
+        self.charge = charge
+        self.charging = charging
+        self.connected = connected
+
+
+devices: dict[str, Device] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -64,56 +64,60 @@ devices: dict = {}
 def battery_icon(charge: int, charging: bool) -> str:
     if charging:
         return ICON_CHARGING
-    for threshold, icon in sorted(ICONS_BAT.items(), reverse=True):
+    for threshold, icon in ICONS_BAT:
         if charge >= threshold:
             return icon
-    return ICONS_BAT[0]
+    return ICONS_BAT[-1][1]
 
 
 def render() -> None:
-    connected = {did: d for did, d in devices.items() if d["connected"]}
+    # Find first connected device
+    primary = None
+    for d in devices.values():
+        if d.connected:
+            primary = d
+            break
 
-    if not connected:
-        out = {
-            "text": ICON_PHONE_OFF,
-            "tooltip": "kcd: no devices connected",
-            "class": "kcd-disconnected",
-            "percentage": 0,
-        }
-        print(json.dumps(out, ensure_ascii=False), flush=True)
+    if primary is None:
+        print(
+            json.dumps(
+                {
+                    "text": ICON_PHONE_OFF,
+                    "tooltip": "kcd: no devices connected",
+                    "class": "kcd-disconnected",
+                    "percentage": 0,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         return
 
-    # Primary device: first in connected dict
-    primary = next(iter(connected.values()))
-    charge = primary["charge"]
-    charging = primary["charging"]
+    charge = primary.charge
+    charging = primary.charging
+    icon = battery_icon(charge, charging)
+    text = f"{icon} {charge}%"
+    css = "kcd-charging" if charging else ("kcd-low" if charge < 20 else "kcd-connected")
 
-    bat_icon = battery_icon(charge, charging)
-    text = f"{bat_icon} {charge}%"
-
-    # CSS class
-    if charging:
-        css = "kcd-charging"
-    elif charge < 20:
-        css = "kcd-low"
-    else:
-        css = "kcd-connected"
-
-    # Tooltip: one line per device
     lines = ["<b>KDE Connect</b>"]
-    for d in connected.values():
-        state_str = (
-            f"charging {d['charge']}%" if d["charging"] else f"battery {d['charge']}%"
-        )
-        lines.append(f"{d['name']}  {state_str}  ({d['type']})")
+    for d in devices.values():
+        if not d.connected:
+            continue
+        state = f"charging {d.charge}%" if d.charging else f"battery {d.charge}%"
+        lines.append(f"{d.name}  {state}  ({d.type})")
 
-    out = {
-        "text": text,
-        "tooltip": "\n".join(lines),
-        "class": css,
-        "percentage": charge,
-    }
-    print(json.dumps(out, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {
+                "text": text,
+                "tooltip": "\n".join(lines),
+                "class": css,
+                "percentage": charge,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
 
 def render_error(msg: str) -> None:
@@ -132,6 +136,47 @@ def render_error(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Socket connection
+# ---------------------------------------------------------------------------
+
+
+def connect_watch():
+    """Connect to kcd daemon's Unix socket and subscribe to events."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(10)
+    sock.connect(SOCKET_PATH)
+
+    req = json.dumps({
+        "cmd": "watch",
+        "payload": {
+            "events": [
+                "device.connected",
+                "device.disconnected",
+                "battery.update",
+                "pair.request",
+                "pair.accepted",
+            ]
+        },
+    })
+    sock.sendall((req + "\n").encode())
+
+    # Buffered reader around the socket for efficient readline()
+    rfile = sock.makefile("r")
+
+    resp_line = rfile.readline()
+    if not resp_line:
+        sock.close()
+        raise ConnectionError("daemon closed connection")
+    resp = json.loads(resp_line)
+    if not resp.get("ok"):
+        sock.close()
+        raise ConnectionError(f"watch rejected: {resp.get('error')}")
+
+    sock.settimeout(None)
+    return sock, rfile
+
+
+# ---------------------------------------------------------------------------
 # Event handling
 # ---------------------------------------------------------------------------
 
@@ -143,41 +188,30 @@ def handle_event(ev: dict) -> None:
 
     if etype == "device.connected":
         if did not in devices:
-            devices[did] = {
-                "name": payload.get("name", did),
-                "type": payload.get("type", "phone"),
-                "charge": 0,
-                "charging": False,
-                "connected": True,
-            }
+            devices[did] = Device(
+                name=payload.get("name", did),
+                type=payload.get("type", "phone"),
+            )
         else:
-            devices[did]["connected"] = True
-            # refresh name if changed
+            devices[did].connected = True
             if payload.get("name"):
-                devices[did]["name"] = payload["name"]
+                devices[did].name = payload["name"]
         render()
 
     elif etype == "device.disconnected":
         if did in devices:
-            devices[did]["connected"] = False
+            devices[did].connected = False
         render()
 
     elif etype == "battery.update":
         if did not in devices:
-            devices[did] = {
-                "name": did,
-                "type": "phone",
-                "charge": 0,
-                "charging": False,
-                "connected": True,
-            }
-        devices[did]["charge"] = int(payload.get("charge", 0))
-        devices[did]["charging"] = bool(payload.get("charging", False))
+            devices[did] = Device(name=did)
+        devices[did].charge = int(payload.get("charge", 0))
+        devices[did].charging = bool(payload.get("charging", False))
         render()
 
     elif etype == "pair.request":
         name = payload.get("name", "Unknown device")
-        # Fire-and-forget: show a system notification asking to accept
         os.system(
             f'notify-send -a "KDE Connect" -u normal -t 15000 '
             f'"Pair request" "From: {name}\\nRun: kcd pair <device-id>"'
@@ -190,51 +224,29 @@ def handle_event(ev: dict) -> None:
             f'"Paired" "Now paired with {name}"'
         )
 
-    # device.added / device.removed: re-render but no state change needed here
-
 
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
-proc = None
-
-
-def cleanup(*args):
-    global proc
-    if proc is not None:
-        try:
-            proc.terminate()
-            proc.wait(timeout=2)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-    sys.exit(0)
-
 
 def main() -> None:
-    global devices, proc
+    global devices
+
+    sock = None
+    rfile = None
 
     while True:
         try:
-            render()  # Ensure we draw the disconnected state initially or immediately
+            render()
 
-            proc = subprocess.Popen(
-                [KCD_BIN, "watch", "--json"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,  # line-buffered
-            )
+            sock, rfile = connect_watch()
 
             while True:
-                raw_line = proc.stdout.readline()
-                if not raw_line:  # EOF (Daemon disconnected)
+                line = rfile.readline()
+                if not line:
                     break
-
-                line = raw_line.strip()
+                line = line.strip()
                 if not line:
                     continue
 
@@ -244,25 +256,37 @@ def main() -> None:
                     continue
                 handle_event(ev)
 
-            proc.wait()
-
         except FileNotFoundError:
-            render_error(f"kcd not found in PATH ({KCD_BIN})")
+            render_error(f"kcd socket not found ({SOCKET_PATH})")
             time.sleep(RECONNECT_DELAY * 2)
             continue
+
+        except (ConnectionError, OSError) as exc:
+            render_error(f"kcd: {exc}")
 
         except Exception as exc:
             render_error(f"kcd-waybar error: {exc}")
 
-        # Daemon exited: mark everything disconnected, wait, retry
+        # Connection lost — mark devices disconnected
         for d in devices.values():
-            d["connected"] = False
+            d.connected = False
         render()
+
+        if rfile is not None:
+            try:
+                rfile.close()
+            except Exception:
+                pass
+            rfile = None
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            sock = None
+
         time.sleep(RECONNECT_DELAY)
 
 
 if __name__ == "__main__":
-    # Clean exit on SIGTERM (sent by Waybar on reload)
-    signal.signal(signal.SIGTERM, cleanup)
-    signal.signal(signal.SIGINT, cleanup)
     main()
