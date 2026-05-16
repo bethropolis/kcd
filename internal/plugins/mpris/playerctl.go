@@ -46,16 +46,14 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 
 	if volume != nil {
 		volF := float64(*volume) / 100.0
-		p.mu.Lock()
-		prevVol := p.prevVolume[player]
-		p.prevVolume[player] = volF
-		p.mu.Unlock()
-		if volF != prevVol {
-			if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF).Err; err != nil {
-				p.logger.Debug("mpris: setVolume failed", zap.Float64("volume", volF), zap.Error(err))
-			}
-			needsDelay = true
+		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF).Err; err != nil {
+			p.logger.Debug("mpris: setVolume failed", zap.Float64("volume", volF), zap.Error(err))
+		} else {
+			p.mu.Lock()
+			p.prevVolume[player] = volF
+			p.mu.Unlock()
 		}
+		needsDelay = true
 	}
 
 	if shuffle != nil {
@@ -72,7 +70,7 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 
 	// Small delay before broadcasting to let the player update its state
 	if needsDelay {
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 	}
 
 	if state, err := p.playerStateDBus(player); err == nil {

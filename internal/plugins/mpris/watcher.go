@@ -97,7 +97,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 			// Map bus name to display name
 			displayName := p.busNameToDisplayName(sender)
 
-			if sig.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" {
+			if sig.Name == "PropertiesChanged" {
 				// PropertiesChanged: (interface_name, changed_properties, invalidated_properties)
 				if len(sig.Body) < 2 {
 					continue
@@ -126,7 +126,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 						p.broadcast(state)
 					}
 				}
-			} else if sig.Name == "org.mpris.MediaPlayer2.Player.Seeked" {
+			} else if sig.Name == "Seeked" {
 				// Seeked: (position in microseconds)
 				if len(sig.Body) < 1 {
 					continue
