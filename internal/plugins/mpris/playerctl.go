@@ -215,24 +215,16 @@ func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
 
 // resolvePlayerBus maps a display name back to its D-Bus bus name.
 func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
+	if displayName == "" {
+		return ""
+	}
+
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	// Try exact match first
+	// Try exact match first (Identity or shortName)
 	if bus, ok := p.playerNameToBus[displayName]; ok {
 		return bus
-	}
-
-	// Try matching by short name (fallback for when display name differs)
-	for bus, storedDisplayName := range p.playerNameToBus {
-		_ = storedDisplayName
-		short := strings.TrimPrefix(bus, "org.mpris.MediaPlayer2.")
-		if idx := strings.Index(short, ".instance"); idx != -1 {
-			short = short[:idx]
-		}
-		if short == displayName {
-			return bus
-		}
 	}
 
 	// Try matching by prefix (e.g. "VLC" → "org.mpris.MediaPlayer2.vlc")
@@ -243,7 +235,7 @@ func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
 			short = short[:idx]
 		}
 		if strings.Contains(strings.ToLower(short), lowerDisplayName) || strings.Contains(lowerDisplayName, strings.ToLower(short)) {
-			return bus
+			return p.playerNameToBus[bus]
 		}
 	}
 

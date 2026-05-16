@@ -45,31 +45,27 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	p.mu.Lock()
 	p.playerNameToBus = make(map[string]string)
+	p.busToDisplayName = make(map[string]string)
 	for _, e := range entries {
-		p.playerNameToBus[e.identity] = e.busName
+		p.playerNameToBus[e.shortName] = e.busName
+		p.busToDisplayName[e.busName] = e.identity
 	}
 	p.mu.Unlock()
 
 	// uniqueToWellKnown maps D-Bus unique names (":1.42") to well-known names
 	// ("org.mpris.MediaPlayer2.vlc"). sig.Sender always contains the unique name.
+	// Built dynamically from NameOwnerChanged signals.
 	uniqueToWellKnown := make(map[string]string)
-	for _, e := range entries {
-		uniqueToWellKnown[e.busName] = e.busName // well-known name may also appear as sender
-	}
 
-	// Add per-player signal matches using well-known bus names.
-	for _, e := range entries {
-		_ = conn.AddMatchSignal(
-			dbus.WithMatchSender(e.busName),
-			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
-			dbus.WithMatchMember("PropertiesChanged"),
-		)
-		_ = conn.AddMatchSignal(
-			dbus.WithMatchSender(e.busName),
-			dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
-			dbus.WithMatchMember("Seeked"),
-		)
-	}
+	// Add global signal matches — filter by checking known players at runtime.
+	_ = conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+		dbus.WithMatchMember("PropertiesChanged"),
+	)
+	_ = conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
+		dbus.WithMatchMember("Seeked"),
+	)
 
 	// Listen for NameOwnerChanged to track unique → well-known name mapping
 	// and detect new/removed players.
@@ -107,12 +103,25 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				}
 				if newOwner != "" && strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
 					uniqueToWellKnown[newOwner] = name
+
+					// Update player maps for new players
+					if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") &&
+						name != "org.mpris.MediaPlayer2.playerctld" {
+						p.mu.Lock()
+						p.playerNameToBus[name] = name
+						p.mu.Unlock()
+						p.broadcastPlayerList()
+					}
 				}
 
-				// Detect new/removed MPRIS players
-				if strings.HasPrefix(name, "org.mpris.MediaPlayer2.") &&
+				// Detect removed players
+				if newOwner == "" && strings.HasPrefix(name, "org.mpris.MediaPlayer2.") &&
 					!strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") &&
 					name != "org.mpris.MediaPlayer2.playerctld" {
+					p.mu.Lock()
+					delete(p.playerNameToBus, name)
+					delete(p.busToDisplayName, name)
+					p.mu.Unlock()
 					p.broadcastPlayerList()
 				}
 				continue
@@ -125,6 +134,12 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				// Fallback: try using sender directly (some players send as well-known name)
 				busName = uniqueName
 			}
+
+			// Check if this is a known MPRIS player
+			if !strings.HasPrefix(busName, "org.mpris.MediaPlayer2.") {
+				continue
+			}
+
 			displayName := p.busNameToDisplayName(busName)
 			if displayName == "" {
 				continue
@@ -187,11 +202,8 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 func (p *MPRISPlugin) busNameToDisplayName(busName string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	// First try exact match
-	for displayName, bus := range p.playerNameToBus {
-		if bus == busName {
-			return displayName
-		}
+	if name, ok := p.busToDisplayName[busName]; ok {
+		return name
 	}
 	// Fallback: use short name
 	short := strings.TrimPrefix(busName, "org.mpris.MediaPlayer2.")
@@ -264,9 +276,12 @@ func (p *MPRISPlugin) broadcastPlayerList() {
 
 	p.mu.Lock()
 	p.playerNameToBus = make(map[string]string)
+	p.busToDisplayName = make(map[string]string)
 	for _, e := range entries {
 		displayNames = append(displayNames, e.identity)
+		p.playerNameToBus[e.shortName] = e.busName
 		p.playerNameToBus[e.identity] = e.busName
+		p.busToDisplayName[e.busName] = e.identity
 	}
 	p.mu.Unlock()
 

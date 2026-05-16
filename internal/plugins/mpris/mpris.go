@@ -38,8 +38,11 @@ type MPRISPlugin struct {
 	// prevVolume tracks the last volume sent per player to avoid redundant broadcasts
 	prevVolume map[string]float64
 
-	// playerNameToBus maps display names (e.g. "VLC media player") → D-Bus bus names
+	// playerNameToBus maps display names and short names → D-Bus bus names
 	playerNameToBus map[string]string
+
+	// busToDisplayName maps bus names → display names (for signal resolution)
+	busToDisplayName map[string]string
 }
 
 type trackIdentity struct {
@@ -59,14 +62,15 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	}
 
 	return &MPRISPlugin{
-		tlsConfig:       tlsConfig,
-		logger:          logger.With(zap.String("plugin", "mpris")),
-		dbus:            dbusConn,
-		devices:         make(map[string]device.Sender),
-		lastTracks:      make(map[string]trackIdentity),
-		artRequests:     make(map[string]time.Time),
-		prevVolume:      make(map[string]float64),
-		playerNameToBus: make(map[string]string),
+		tlsConfig:        tlsConfig,
+		logger:           logger.With(zap.String("plugin", "mpris")),
+		dbus:             dbusConn,
+		devices:          make(map[string]device.Sender),
+		lastTracks:       make(map[string]trackIdentity),
+		artRequests:      make(map[string]time.Time),
+		prevVolume:       make(map[string]float64),
+		playerNameToBus:  make(map[string]string),
+		busToDisplayName: make(map[string]string),
 	}
 }
 
@@ -173,9 +177,12 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 
 	p.mu.Lock()
 	p.playerNameToBus = make(map[string]string)
+	p.busToDisplayName = make(map[string]string)
 	for _, e := range entries {
 		displayNames = append(displayNames, e.identity)
+		p.playerNameToBus[e.shortName] = e.busName
 		p.playerNameToBus[e.identity] = e.busName
+		p.busToDisplayName[e.busName] = e.identity
 	}
 	p.mu.Unlock()
 
