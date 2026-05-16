@@ -41,25 +41,6 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	// Match PropertiesChanged signals
-	if err := conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
-		dbus.WithMatchMember("PropertiesChanged"),
-	); err != nil {
-		return err
-	}
-
-	// Also match Seeked signals
-	if err := conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
-		dbus.WithMatchMember("Seeked"),
-	); err != nil {
-		return err
-	}
-
-	ch := make(chan *dbus.Signal, 64)
-	conn.Signal(ch)
-
 	// Initial broadcast for all currently active players
 	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	p.mu.Lock()
@@ -68,6 +49,31 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		p.playerNameToBus[e.identity] = e.busName
 	}
 	p.mu.Unlock()
+
+	// Add per-player signal matches using well-known bus names.
+	// This ensures sig.Sender contains the well-known name (e.g. org.mpris.MediaPlayer2.vlc)
+	// rather than the unique connection name (e.g. :1.42).
+	for _, e := range entries {
+		_ = conn.AddMatchSignal(
+			dbus.WithMatchSender(e.busName),
+			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+			dbus.WithMatchMember("PropertiesChanged"),
+		)
+		_ = conn.AddMatchSignal(
+			dbus.WithMatchSender(e.busName),
+			dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
+			dbus.WithMatchMember("Seeked"),
+		)
+	}
+
+	// Also listen for new players appearing/disappearing
+	_ = conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+	)
+
+	ch := make(chan *dbus.Signal, 64)
+	conn.Signal(ch)
 
 	for _, e := range entries {
 		if state, err := p.playerStateDBus(e.identity); err == nil {
@@ -84,21 +90,22 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				continue
 			}
 
-			// Extract player bus name from the sender
-			sender := string(sig.Sender)
-			if !strings.HasPrefix(sender, "org.mpris.MediaPlayer2.") {
-				continue
-			}
-			// Skip our own kdeconnect players
-			if strings.HasPrefix(sender, "org.mpris.MediaPlayer2.kdeconnect.") {
+			// Handle NameOwnerChanged to detect new/removed players
+			if sig.Name == "NameOwnerChanged" && len(sig.Body) >= 3 {
+				name, _ := sig.Body[0].(string)
+				if strings.HasPrefix(name, "org.mpris.MediaPlayer2.") &&
+					!strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") &&
+					name != "org.mpris.MediaPlayer2.playerctld" {
+					p.broadcastPlayerList()
+				}
 				continue
 			}
 
-			// Map bus name to display name
-			displayName := p.busNameToDisplayName(sender)
+			// sig.Sender is the well-known bus name because we matched per-player
+			busName := string(sig.Sender)
+			displayName := p.busNameToDisplayName(busName)
 
 			if sig.Name == "PropertiesChanged" {
-				// PropertiesChanged: (interface_name, changed_properties, invalidated_properties)
 				if len(sig.Body) < 2 {
 					continue
 				}
@@ -111,7 +118,6 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 					continue
 				}
 
-				// If any relevant property changed, fetch full state and broadcast
 				relevantKeys := []string{"Metadata", "PlaybackStatus", "Volume", "Position", "CanPlay", "CanPause", "CanGoNext", "CanGoPrevious", "CanSeek"}
 				shouldBroadcast := false
 				for _, key := range relevantKeys {
@@ -127,7 +133,6 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 					}
 				}
 			} else if sig.Name == "Seeked" {
-				// Seeked: (position in microseconds)
 				if len(sig.Body) < 1 {
 					continue
 				}
@@ -138,7 +143,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 
 				pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
 					"player": displayName,
-					"pos":    pos / 1000, // microseconds to milliseconds
+					"pos":    pos / 1000,
 				})
 
 				p.mu.RLock()
