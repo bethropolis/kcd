@@ -26,6 +26,7 @@ type ClipboardPlugin struct {
 	tlsConfig         *tls.Config
 	logger            *zap.Logger
 	isWayland         bool
+	waylandEnv        []string // cached env vars for wl-paste/wl-copy
 	mu                sync.Mutex
 	lastContent       string // last content received from phone (inbound)
 	lastPushedContent string // last content sent to phone (outbound)
@@ -39,8 +40,9 @@ func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger) *ClipboardPlu
 		isWayland: os.Getenv("WAYLAND_DISPLAY") != "",
 	}
 
-	// Automatically sync clipboard changes from PC to Phone if on Wayland
+	// Cache Wayland env vars for spawned subprocesses (daemon may not inherit them)
 	if p.isWayland {
+		p.waylandEnv = os.Environ()
 		go p.watchLocalClipboard()
 	}
 
@@ -72,13 +74,12 @@ func (p *ClipboardPlugin) OutgoingTypes() []string {
 // watchLocalClipboard runs in the background and pushes changes automatically.
 func (p *ClipboardPlugin) watchLocalClipboard() {
 	for {
-		// wl-paste --watch blocks until the clipboard changes, then executes the given command.
-		// We tell it to run our own CLI command 'kcd clipboard', which handles the rest!
 		cmd := exec.Command("wl-paste", "--watch", "kcd", "clipboard")
+		cmd.Env = p.waylandEnv
 
 		if err := cmd.Run(); err != nil {
 			p.logger.Debug("clipboard watcher exited, restarting", zap.Error(err))
-			time.Sleep(2 * time.Second) // Prevent rapid crash loops if Wayland isn't ready
+			time.Sleep(2 * time.Second)
 		}
 	}
 }
@@ -121,9 +122,9 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	// Spawning goroutine as Handlers must not block.
 	go func() {
 		var cmd *exec.Cmd
-		// Automatically detect tool by env per absolute rule.
 		if p.isWayland {
 			cmd = exec.Command("wl-copy")
+			cmd.Env = p.waylandEnv
 		} else {
 			cmd = exec.Command("xclip", "-selection", "clipboard")
 		}
@@ -189,6 +190,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		var cmd *exec.Cmd
 		if p.isWayland {
 			cmd = exec.Command("wl-copy", "--type", mimeType)
+			cmd.Env = p.waylandEnv
 		} else {
 			cmd = exec.Command("xclip", "-selection", "clipboard", "-t", mimeType, "-i")
 		}
@@ -233,8 +235,9 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
 func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	var cmd *exec.Cmd
-	if os.Getenv("WAYLAND_DISPLAY") != "" {
+	if p.isWayland {
 		cmd = exec.Command("wl-paste", "-n")
+		cmd.Env = p.waylandEnv
 	} else {
 		cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
 	}
