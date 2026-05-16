@@ -28,10 +28,8 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		}
 	case "SetPosition":
 		if setPos != nil {
-			// Match C++ behavior: seek by difference rather than absolute position
-			// SetPosition is in milliseconds on the wire, player position is in microseconds
 			currentPosUs := p.getPlayerPosition(busName)
-			targetPosUs := (*setPos) * 1000 // ms → μs
+			targetPosUs := (*setPos) * 1000
 			seekOffset := targetPosUs - currentPosUs
 			_ = obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset)
 		}
@@ -61,7 +59,6 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	}
 }
 
-// getPlayerPosition fetches the current position in microseconds via D-Bus.
 func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 	var pos int64
@@ -102,7 +99,7 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	}
 
 	if v, ok := props["Position"]; ok {
-		np.Pos = v.Value().(int64) / 1000 // μs → ms
+		np.Pos = v.Value().(int64) / 1000
 	}
 
 	if v, ok := props["Shuffle"]; ok {
@@ -170,7 +167,7 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 			}
 			if lv, ok := meta["mpris:length"]; ok {
 				if length, ok := lv.Value().(int64); ok {
-					np.Length = length / 1000 // ns → ms
+					np.Length = length / 1000
 				}
 			}
 			if uv, ok := meta["xesam:url"]; ok {
@@ -196,21 +193,6 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	return np, nil
 }
 
-// getPlayerIdentity reads the MPRIS Identity property for a player.
-func (p *MPRISPlugin) getPlayerIdentity(busName string) string {
-	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
-	var identity string
-	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").Store(&identity); err != nil || identity == "" {
-		// Fallback: use the short bus name
-		identity = strings.TrimPrefix(busName, "org.mpris.MediaPlayer2.")
-		if idx := strings.Index(identity, ".instance"); idx != -1 {
-			identity = identity[:idx]
-		}
-	}
-	return identity
-}
-
-// getPlayerArtUrl reads the current mpris:artUrl for a player.
 func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 	var meta map[string]dbus.Variant
@@ -223,14 +205,28 @@ func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
 	return ""
 }
 
-// resolvePlayerBus maps a display name (e.g. "VLC media player") back to its D-Bus bus name.
+// resolvePlayerBus maps a display name back to its D-Bus bus name.
 func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+
+	// Try exact match first
 	if bus, ok := p.playerNameToBus[displayName]; ok {
 		return bus
 	}
-	// Fallback: try constructing from display name
+
+	// Try matching by short name (fallback for when display name differs)
+	for _, bus := range p.playerNameToBus {
+		short := strings.TrimPrefix(bus, "org.mpris.MediaPlayer2.")
+		if idx := strings.Index(short, ".instance"); idx != -1 {
+			short = short[:idx]
+		}
+		if short == displayName {
+			return bus
+		}
+	}
+
+	// Last resort: try constructing from display name
 	return "org.mpris.MediaPlayer2." + displayName
 }
 
@@ -240,7 +236,7 @@ type playerEntry struct {
 	identity  string
 }
 
-func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
+func listPlayersDBus(conn *dbus.Conn, logger *zap.Logger) ([]playerEntry, error) {
 	if conn == nil {
 		return nil, nil
 	}
@@ -255,11 +251,9 @@ func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 		if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
 			continue
 		}
-		// Skip our own kdeconnect players
 		if strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") {
 			continue
 		}
-		// Skip playerctld
 		if name == "org.mpris.MediaPlayer2.playerctld" {
 			continue
 		}
@@ -308,7 +302,6 @@ func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 		}
 
 		displayName := e.identity
-		// Handle duplicate names with [2], [3] suffixes (matching C++ behavior)
 		baseName := displayName
 		for n := 2; seen[displayName]; n++ {
 			displayName = fmt.Sprintf("%s [%d]", baseName, n)
@@ -316,6 +309,14 @@ func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 		seen[displayName] = true
 		e.identity = displayName
 		result = append(result, e)
+	}
+
+	if logger != nil {
+		var names []string
+		for _, e := range result {
+			names = append(names, e.identity+" ("+e.shortName+")")
+		}
+		logger.Debug("mpris: discovered players", zap.Strings("players", names))
 	}
 
 	return result, nil
@@ -328,7 +329,7 @@ func listPlayers() ([]string, error) {
 	}
 	defer conn.Close()
 
-	entries, err := listPlayersDBus(conn)
+	entries, err := listPlayersDBus(conn, nil)
 	if err != nil {
 		return nil, nil
 	}

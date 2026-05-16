@@ -61,7 +61,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	conn.Signal(ch)
 
 	// Initial broadcast for all currently active players
-	entries, _ := listPlayersDBus(p.dbus)
+	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	p.mu.Lock()
 	p.playerNameToBus = make(map[string]string)
 	for _, e := range entries {
@@ -229,7 +229,7 @@ func (p *MPRISPlugin) watchPlayerListDBus(ctx context.Context) {
 }
 
 func (p *MPRISPlugin) broadcastPlayerList() {
-	entries, _ := listPlayersDBus(p.dbus)
+	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	var displayNames []string
 
 	p.mu.Lock()
@@ -269,7 +269,7 @@ func (p *MPRISPlugin) watchPlayerList(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			entries, err := listPlayersDBus(p.dbus)
+			entries, err := listPlayersDBus(p.dbus, p.logger)
 			if err != nil {
 				continue
 			}

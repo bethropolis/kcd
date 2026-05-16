@@ -168,7 +168,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 }
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
-	entries, _ := listPlayersDBus(p.dbus)
+	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	var displayNames []string
 
 	p.mu.Lock()
@@ -183,6 +183,8 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 		displayNames = []string{}
 	}
 
+	p.logger.Debug("mpris: sending player list", zap.Strings("players", displayNames))
+
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
 		"playerList":             displayNames,
 		"supportAlbumArtPayload": true,
@@ -191,7 +193,6 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 		return err
 	}
 
-	// Broadcast current states one by one
 	go func() {
 		for _, name := range displayNames {
 			if state, err := p.playerState(name); err == nil {
@@ -230,25 +231,6 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	p.artRequests[reqKey] = time.Now()
 	p.mu.Unlock()
 
-	// Validate: check that the requested albumArtUrl matches the player's current artUrl
-	// (matching C++ behavior in mpriscontrolplugin.cpp:230-235)
-	busName := p.resolvePlayerBus(player)
-	if busName != "" {
-		currentArtUrl := p.getPlayerArtUrl(busName)
-		cleanRequested := artUrl
-		if idx := strings.LastIndex(cleanRequested, "?t="); idx != -1 {
-			cleanRequested = cleanRequested[:idx]
-		}
-		if currentArtUrl == "" || currentArtUrl != cleanRequested {
-			p.logger.Debug("mpris: album art URL mismatch, ignoring request",
-				zap.String("player", player),
-				zap.String("requested", cleanRequested),
-				zap.String("current", currentArtUrl),
-			)
-			return
-		}
-	}
-
 	// Strip the cache-buster timestamp before opening the local file
 	cleanUrl := artUrl
 	if idx := strings.LastIndex(cleanUrl, "?t="); idx != -1 {
@@ -262,6 +244,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 
 	f, err := os.Open(filePath)
 	if err != nil {
+		p.logger.Debug("mpris: album art file not found", zap.String("path", filePath), zap.Error(err))
 		return
 	}
 	stat, err := f.Stat()
