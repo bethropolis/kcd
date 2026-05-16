@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +34,12 @@ type MPRISPlugin struct {
 
 	// Debounce map to prevent rapid duplicate album art requests from Android
 	artRequests map[string]time.Time
+
+	// prevVolume tracks the last volume sent per player to avoid redundant broadcasts
+	prevVolume map[string]float64
+
+	// playerNameToBus maps display names (e.g. "VLC media player") → D-Bus bus names
+	playerNameToBus map[string]string
 }
 
 type trackIdentity struct {
@@ -54,12 +59,14 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	}
 
 	return &MPRISPlugin{
-		tlsConfig:   tlsConfig,
-		logger:      logger.With(zap.String("plugin", "mpris")),
-		dbus:        dbusConn,
-		devices:     make(map[string]device.Sender),
-		lastTracks:  make(map[string]trackIdentity),
-		artRequests: make(map[string]time.Time),
+		tlsConfig:       tlsConfig,
+		logger:          logger.With(zap.String("plugin", "mpris")),
+		dbus:            dbusConn,
+		devices:         make(map[string]device.Sender),
+		lastTracks:      make(map[string]trackIdentity),
+		artRequests:     make(map[string]time.Time),
+		prevVolume:      make(map[string]float64),
+		playerNameToBus: make(map[string]string),
 	}
 }
 
@@ -108,12 +115,6 @@ type NowPlaying struct {
 
 // Handle processes incoming packets from the phone.
 func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
-	// Check if playerctl is available
-	if _, err := exec.LookPath("playerctl"); err != nil {
-		p.logger.Warn("playerctl not found, MPRIS plugin disabled")
-		return nil
-	}
-
 	// Register device on first packet
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
@@ -167,23 +168,33 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 }
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
-	players, _ := listPlayers()
-	if players == nil {
-		players = []string{}
+	entries, _ := listPlayersDBus(p.dbus)
+	var displayNames []string
+
+	p.mu.Lock()
+	p.playerNameToBus = make(map[string]string)
+	for _, e := range entries {
+		displayNames = append(displayNames, e.identity)
+		p.playerNameToBus[e.identity] = e.busName
+	}
+	p.mu.Unlock()
+
+	if displayNames == nil {
+		displayNames = []string{}
 	}
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
-		"playerList":             players,
-		"supportAlbumArtPayload": true, // We now support the side-channel!
+		"playerList":             displayNames,
+		"supportAlbumArtPayload": true,
 	})
 	if err != nil {
 		return err
 	}
 
-	// Broadast current states one by one
+	// Broadcast current states one by one
 	go func() {
-		for _, player := range players {
-			if state, err := p.playerState(player); err == nil {
+		for _, name := range displayNames {
+			if state, err := p.playerState(name); err == nil {
 				p.broadcast(state)
 			}
 		}
@@ -218,6 +229,25 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 	p.artRequests[reqKey] = time.Now()
 	p.mu.Unlock()
+
+	// Validate: check that the requested albumArtUrl matches the player's current artUrl
+	// (matching C++ behavior in mpriscontrolplugin.cpp:230-235)
+	busName := p.resolvePlayerBus(player)
+	if busName != "" {
+		currentArtUrl := p.getPlayerArtUrl(busName)
+		cleanRequested := artUrl
+		if idx := strings.LastIndex(cleanRequested, "?t="); idx != -1 {
+			cleanRequested = cleanRequested[:idx]
+		}
+		if currentArtUrl == "" || currentArtUrl != cleanRequested {
+			p.logger.Debug("mpris: album art URL mismatch, ignoring request",
+				zap.String("player", player),
+				zap.String("requested", cleanRequested),
+				zap.String("current", currentArtUrl),
+			)
+			return
+		}
+	}
 
 	// Strip the cache-buster timestamp before opening the local file
 	cleanUrl := artUrl

@@ -41,7 +41,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	// Match PropertiesChanged signals from org.mpris.MediaPlayer2.Player
+	// Match PropertiesChanged signals
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 		dbus.WithMatchMember("PropertiesChanged"),
@@ -61,9 +61,16 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	conn.Signal(ch)
 
 	// Initial broadcast for all currently active players
-	players, _ := listPlayers()
-	for _, player := range players {
-		if state, err := p.playerStateDBus(player); err == nil {
+	entries, _ := listPlayersDBus(p.dbus)
+	p.mu.Lock()
+	p.playerNameToBus = make(map[string]string)
+	for _, e := range entries {
+		p.playerNameToBus[e.identity] = e.busName
+	}
+	p.mu.Unlock()
+
+	for _, e := range entries {
+		if state, err := p.playerStateDBus(e.identity); err == nil {
 			p.broadcast(state)
 		}
 	}
@@ -77,15 +84,18 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				continue
 			}
 
-			// Extract player name from the sender
+			// Extract player bus name from the sender
 			sender := string(sig.Sender)
 			if !strings.HasPrefix(sender, "org.mpris.MediaPlayer2.") {
 				continue
 			}
-			playerName := strings.TrimPrefix(sender, "org.mpris.MediaPlayer2.")
-			if idx := strings.Index(playerName, ".instance"); idx != -1 {
-				playerName = playerName[:idx]
+			// Skip our own kdeconnect players
+			if strings.HasPrefix(sender, "org.mpris.MediaPlayer2.kdeconnect.") {
+				continue
 			}
+
+			// Map bus name to display name
+			displayName := p.busNameToDisplayName(sender)
 
 			if sig.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" {
 				// PropertiesChanged: (interface_name, changed_properties, invalidated_properties)
@@ -112,7 +122,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				}
 
 				if shouldBroadcast {
-					if state, err := p.playerStateDBus(playerName); err == nil {
+					if state, err := p.playerStateDBus(displayName); err == nil {
 						p.broadcast(state)
 					}
 				}
@@ -127,7 +137,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				}
 
 				pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
-					"player": playerName,
+					"player": displayName,
 					"pos":    pos / 1000, // microseconds to milliseconds
 				})
 
@@ -141,6 +151,24 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// busNameToDisplayName converts a D-Bus bus name to the display name.
+func (p *MPRISPlugin) busNameToDisplayName(busName string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	// First try exact match
+	for displayName, bus := range p.playerNameToBus {
+		if bus == busName {
+			return displayName
+		}
+	}
+	// Fallback: use short name
+	short := strings.TrimPrefix(busName, "org.mpris.MediaPlayer2.")
+	if idx := strings.Index(short, ".instance"); idx != -1 {
+		short = short[:idx]
+	}
+	return short
 }
 
 // watchPlayerListDBus uses D-Bus signals to provide instant player list updates.
@@ -186,6 +214,10 @@ func (p *MPRISPlugin) watchPlayerListDBus(ctx context.Context) {
 			if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
 				continue
 			}
+			// Skip our own kdeconnect players
+			if strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") {
+				continue
+			}
 			// Skip playerctld as it's just a proxy
 			if name == "org.mpris.MediaPlayer2.playerctld" {
 				continue
@@ -197,12 +229,23 @@ func (p *MPRISPlugin) watchPlayerListDBus(ctx context.Context) {
 }
 
 func (p *MPRISPlugin) broadcastPlayerList() {
-	players, _ := listPlayers()
-	if players == nil {
-		players = []string{}
+	entries, _ := listPlayersDBus(p.dbus)
+	var displayNames []string
+
+	p.mu.Lock()
+	p.playerNameToBus = make(map[string]string)
+	for _, e := range entries {
+		displayNames = append(displayNames, e.identity)
+		p.playerNameToBus[e.identity] = e.busName
 	}
+	p.mu.Unlock()
+
+	if displayNames == nil {
+		displayNames = []string{}
+	}
+
 	pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
-		"playerList":             players,
+		"playerList":             displayNames,
 		"supportAlbumArtPayload": true,
 	})
 
@@ -226,11 +269,15 @@ func (p *MPRISPlugin) watchPlayerList(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			players, err := listPlayers()
+			entries, err := listPlayersDBus(p.dbus)
 			if err != nil {
 				continue
 			}
-			current := strings.Join(players, ",")
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.identity)
+			}
+			current := strings.Join(names, ",")
 			if current != lastPlayers {
 				lastPlayers = current
 				p.broadcastPlayerList()

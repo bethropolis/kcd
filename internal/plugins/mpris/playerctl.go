@@ -8,10 +8,15 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
-	busName := "org.mpris.MediaPlayer2." + player
+	busName := p.resolvePlayerBus(player)
+	if busName == "" {
+		p.logger.Debug("mpris: cannot resolve player bus name", zap.String("player", player))
+		return
+	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	switch action {
@@ -23,12 +28,24 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		}
 	case "SetPosition":
 		if setPos != nil {
-			_ = obj.Call("org.mpris.MediaPlayer2.Player.SetPosition", 0, dbus.ObjectPath("/org/mpris/MediaPlayer2"), *setPos)
+			// Match C++ behavior: seek by difference rather than absolute position
+			// SetPosition is in milliseconds on the wire, player position is in microseconds
+			currentPosUs := p.getPlayerPosition(busName)
+			targetPosUs := (*setPos) * 1000 // ms → μs
+			seekOffset := targetPosUs - currentPosUs
+			_ = obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset)
 		}
 	}
 
 	if volume != nil {
-		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", float64(*volume)/100.0)
+		volF := float64(*volume) / 100.0
+		p.mu.Lock()
+		prevVol := p.prevVolume[player]
+		p.prevVolume[player] = volF
+		p.mu.Unlock()
+		if volF != prevVol {
+			_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF)
+		}
 	}
 
 	if shuffle != nil {
@@ -44,12 +61,25 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	}
 }
 
+// getPlayerPosition fetches the current position in microseconds via D-Bus.
+func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
+	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
+	var pos int64
+	if err := obj.Call("org.mpris.MediaPlayer2.Player.Get", 0, "org.mpris.MediaPlayer2.Player", "Position").Store(&pos); err != nil {
+		return 0
+	}
+	return pos
+}
+
 func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
 	return p.playerStateDBus(playerName)
 }
 
 func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
-	busName := "org.mpris.MediaPlayer2." + playerName
+	busName := p.resolvePlayerBus(playerName)
+	if busName == "" {
+		return nil, fmt.Errorf("mpris: cannot resolve player bus name for %q", playerName)
+	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	var props map[string]dbus.Variant
@@ -72,7 +102,7 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	}
 
 	if v, ok := props["Position"]; ok {
-		np.Pos = v.Value().(int64) / 1000
+		np.Pos = v.Value().(int64) / 1000 // μs → ms
 	}
 
 	if v, ok := props["Shuffle"]; ok {
@@ -140,7 +170,7 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 			}
 			if lv, ok := meta["mpris:length"]; ok {
 				if length, ok := lv.Value().(int64); ok {
-					np.Length = length / 1000
+					np.Length = length / 1000 // ns → ms
 				}
 			}
 			if uv, ok := meta["xesam:url"]; ok {
@@ -166,26 +196,71 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	return np, nil
 }
 
-func listPlayers() ([]string, error) {
-	conn, err := dbus.ConnectSessionBus()
-	if err != nil {
+// getPlayerIdentity reads the MPRIS Identity property for a player.
+func (p *MPRISPlugin) getPlayerIdentity(busName string) string {
+	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
+	var identity string
+	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").Store(&identity); err != nil || identity == "" {
+		// Fallback: use the short bus name
+		identity = strings.TrimPrefix(busName, "org.mpris.MediaPlayer2.")
+		if idx := strings.Index(identity, ".instance"); idx != -1 {
+			identity = identity[:idx]
+		}
+	}
+	return identity
+}
+
+// getPlayerArtUrl reads the current mpris:artUrl for a player.
+func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
+	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
+	var meta map[string]dbus.Variant
+	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2.Player", "Metadata").Store(&meta); err != nil {
+		return ""
+	}
+	if v, ok := meta["mpris:artUrl"]; ok {
+		return v.Value().(string)
+	}
+	return ""
+}
+
+// resolvePlayerBus maps a display name (e.g. "VLC media player") back to its D-Bus bus name.
+func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if bus, ok := p.playerNameToBus[displayName]; ok {
+		return bus
+	}
+	// Fallback: try constructing from display name
+	return "org.mpris.MediaPlayer2." + displayName
+}
+
+type playerEntry struct {
+	busName   string
+	shortName string
+	identity  string
+}
+
+func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
+	if conn == nil {
 		return nil, nil
 	}
-	defer conn.Close()
 
 	var names []string
 	if err := conn.BusObject().Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
-		return nil, nil
+		return nil, err
 	}
 
-	type entry struct {
-		busName   string
-		shortName string
-	}
-	var all []entry
-
+	var all []playerEntry
 	for _, name := range names {
 		if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
+			continue
+		}
+		// Skip our own kdeconnect players
+		if strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") {
+			continue
+		}
+		// Skip playerctld
+		if name == "org.mpris.MediaPlayer2.playerctld" {
 			continue
 		}
 
@@ -193,9 +268,21 @@ func listPlayers() ([]string, error) {
 		if idx := strings.Index(short, ".instance"); idx != -1 {
 			short = short[:idx]
 		}
-		all = append(all, entry{name, short})
+		all = append(all, playerEntry{name, short, ""})
 	}
 
+	// Resolve Identity for each player
+	for i := range all {
+		obj := conn.Object(all[i].busName, "/org/mpris/MediaPlayer2")
+		var identity string
+		if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").Store(&identity); err == nil && identity != "" {
+			all[i].identity = identity
+		} else {
+			all[i].identity = all[i].shortName
+		}
+	}
+
+	// Detect plasma-browser-integration wrappers
 	hasPlasmaFirefox := false
 	hasPlasmaChrome := false
 	for _, e := range all {
@@ -209,8 +296,9 @@ func listPlayers() ([]string, error) {
 		}
 	}
 
+	// Build deduplicated display names
 	seen := make(map[string]bool)
-	var players []string
+	var result []playerEntry
 	for _, e := range all {
 		if hasPlasmaFirefox && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.firefox") {
 			continue
@@ -218,15 +306,36 @@ func listPlayers() ([]string, error) {
 		if hasPlasmaChrome && strings.HasPrefix(e.busName, "org.mpris.MediaPlayer2.chromium") {
 			continue
 		}
-		if strings.Contains(e.shortName, "playerctld") {
-			continue
-		}
 
-		if !seen[e.shortName] {
-			seen[e.shortName] = true
-			players = append(players, e.shortName)
+		displayName := e.identity
+		// Handle duplicate names with [2], [3] suffixes (matching C++ behavior)
+		baseName := displayName
+		for n := 2; seen[displayName]; n++ {
+			displayName = fmt.Sprintf("%s [%d]", baseName, n)
 		}
+		seen[displayName] = true
+		e.identity = displayName
+		result = append(result, e)
 	}
 
-	return players, nil
+	return result, nil
+}
+
+func listPlayers() ([]string, error) {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		return nil, nil
+	}
+	defer conn.Close()
+
+	entries, err := listPlayersDBus(conn)
+	if err != nil {
+		return nil, nil
+	}
+
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.identity)
+	}
+	return names, nil
 }
