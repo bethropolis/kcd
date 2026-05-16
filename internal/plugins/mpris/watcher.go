@@ -1,44 +1,28 @@
 package mpris
 
 import (
-	"bufio"
 	"context"
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) startWatcher(ctx context.Context) {
-	p.logger.Info("mpris: starting playerctl follow watcher")
+	if p.dbus == nil {
+		p.logger.Warn("mpris: D-Bus not available, cannot start watcher")
+		return
+	}
 
 	go func() {
 		for {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := p.runWatcher(ctx); err != nil && ctx.Err() == nil {
-				p.logger.Warn("mpris: playerctl watcher exited, restarting in 3s", zap.Error(err))
-				select {
-				case <-time.After(3 * time.Second):
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			if err := p.runPositionWatcher(ctx); err != nil && ctx.Err() == nil {
+			if err := p.runDBusWatcher(ctx); err != nil && ctx.Err() == nil {
+				p.logger.Warn("mpris: D-Bus watcher exited, restarting in 3s", zap.Error(err))
 				select {
 				case <-time.After(3 * time.Second):
 				case <-ctx.Done():
@@ -49,90 +33,124 @@ func (p *MPRISPlugin) startWatcher(ctx context.Context) {
 	}()
 }
 
-func (p *MPRISPlugin) runWatcher(ctx context.Context) error {
-	cmd := plugin.NewPlayerctlCmd(ctx, "--all-players", "--follow", "metadata", "--format", outputFormat)
-
-	stdout, err := cmd.StdoutPipe()
+// runDBusWatcher listens for PropertiesChanged signals from all MPRIS players.
+func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
+	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("playerctl --follow: %w", err)
-	}
+	defer conn.Close()
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		parts := strings.SplitN(line, "|||", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		playerName := parts[0]
-
-		np, err := p.parseOutput(playerName, line)
-		if err != nil {
-			p.logger.Debug("mpris: parse error", zap.Error(err))
-			continue
-		}
-
-		p.broadcast(np)
-	}
-
-	_ = cmd.Wait()
-	return scanner.Err()
-}
-
-func (p *MPRISPlugin) runPositionWatcher(ctx context.Context) error {
-	// playerctl --all-players --follow --format "{{playerName}}|||{{position}}"
-	cmd := plugin.NewPlayerctlCmd(ctx, "--all-players", "--follow", "--format", "{{playerName}}|||{{position}}")
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	// Match PropertiesChanged signals from org.mpris.MediaPlayer2.Player
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+		dbus.WithMatchMember("PropertiesChanged"),
+	); err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("playerctl --follow position: %w", err)
+
+	// Also match Seeked signals
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
+		dbus.WithMatchMember("Seeked"),
+	); err != nil {
+		return err
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	ch := make(chan *dbus.Signal, 64)
+	conn.Signal(ch)
+
+	// Initial broadcast for all currently active players
+	players, _ := listPlayers()
+	for _, player := range players {
+		if state, err := p.playerStateDBus(player); err == nil {
+			p.broadcast(state)
 		}
+	}
 
-		parts := strings.Split(line, "|||")
-		if len(parts) < 2 {
-			continue
-		}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case sig := <-ch:
+			if sig == nil {
+				continue
+			}
 
-		playerName := parts[0]
-		pos, _ := strconv.ParseInt(parts[1], 10, 64)
+			// Extract player name from the sender
+			sender := string(sig.Sender)
+			if !strings.HasPrefix(sender, "org.mpris.MediaPlayer2.") {
+				continue
+			}
+			playerName := strings.TrimPrefix(sender, "org.mpris.MediaPlayer2.")
+			if idx := strings.Index(playerName, ".instance"); idx != -1 {
+				playerName = playerName[:idx]
+			}
 
-		pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
-			"player": playerName,
-			"pos":    pos / 1000,
-		})
+			if sig.Name == "org.freedesktop.DBus.Properties.PropertiesChanged" {
+				// PropertiesChanged: (interface_name, changed_properties, invalidated_properties)
+				if len(sig.Body) < 2 {
+					continue
+				}
+				iface, _ := sig.Body[0].(string)
+				if iface != "org.mpris.MediaPlayer2.Player" {
+					continue
+				}
+				changed, ok := sig.Body[1].(map[string]dbus.Variant)
+				if !ok {
+					continue
+				}
 
-		p.mu.RLock()
-		for _, dev := range p.devices {
-			if dev.IsConnected() {
-				_ = dev.Send(pkt)
+				// If any relevant property changed, fetch full state and broadcast
+				relevantKeys := []string{"Metadata", "PlaybackStatus", "Volume", "Position", "CanPlay", "CanPause", "CanGoNext", "CanGoPrevious", "CanSeek"}
+				shouldBroadcast := false
+				for _, key := range relevantKeys {
+					if _, exists := changed[key]; exists {
+						shouldBroadcast = true
+						break
+					}
+				}
+
+				if shouldBroadcast {
+					if state, err := p.playerStateDBus(playerName); err == nil {
+						p.broadcast(state)
+					}
+				}
+			} else if sig.Name == "org.mpris.MediaPlayer2.Player.Seeked" {
+				// Seeked: (position in microseconds)
+				if len(sig.Body) < 1 {
+					continue
+				}
+				pos, ok := sig.Body[0].(int64)
+				if !ok {
+					continue
+				}
+
+				pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
+					"player": playerName,
+					"pos":    pos / 1000, // microseconds to milliseconds
+				})
+
+				p.mu.RLock()
+				for _, dev := range p.devices {
+					if dev.IsConnected() {
+						_ = dev.Send(pkt)
+					}
+				}
+				p.mu.RUnlock()
 			}
 		}
-		p.mu.RUnlock()
 	}
-
-	_ = cmd.Wait()
-	return scanner.Err()
 }
 
 // watchPlayerListDBus uses D-Bus signals to provide instant player list updates.
 func (p *MPRISPlugin) watchPlayerListDBus(ctx context.Context) {
+	if p.dbus == nil {
+		p.logger.Warn("mpris: D-Bus not available, falling back to poll")
+		p.watchPlayerList(ctx)
+		return
+	}
+
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		p.logger.Warn("mpris: D-Bus session bus unavailable, falling back to poll", zap.Error(err))
@@ -220,4 +238,3 @@ func (p *MPRISPlugin) watchPlayerList(ctx context.Context) {
 		}
 	}
 }
-

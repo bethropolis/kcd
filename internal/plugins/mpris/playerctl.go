@@ -4,17 +4,15 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
 	busName := "org.mpris.MediaPlayer2." + player
-	obj := p.dbus.Object(busName)
+	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	switch action {
 	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
@@ -52,7 +50,7 @@ func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
 
 func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	busName := "org.mpris.MediaPlayer2." + playerName
-	obj := p.dbus.Object(busName)
+	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	var props map[string]dbus.Variant
 	if err := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, "org.mpris.MediaPlayer2.Player").Store(&props); err != nil {
@@ -166,10 +164,6 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	}
 
 	return np, nil
-}
-
-func (p *MPRISPlugin) parseOutput(playerName, line string) (*NowPlaying, error) {
-	return p.playerStateDBus(playerName)
 }
 
 func listPlayers() ([]string, error) {

@@ -19,10 +19,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// outputFormat uses a multi-character delimiter to avoid splitting on titles containing pipes.
-// We include capabilities (canPlay, canPause, etc.) and the track URL for better compatibility.
-const outputFormat = "{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}|||{{mpris:length}}|||{{position}}|||{{volume}}|||{{canPlay}}|||{{canPause}}|||{{canGoNext}}|||{{canGoPrevious}}|||{{canSeek}}|||{{xesam:url}}"
-
 // MPRISPlugin controls desktop media players via D-Bus MPRIS interface.
 type MPRISPlugin struct {
 	tlsConfig *tls.Config
@@ -212,7 +208,7 @@ func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 }
 
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
-	// Debounce: prevent the Android app from spamming duplicate art requests 
+	// Debounce: prevent the Android app from spamming duplicate art requests
 	// for the same track within a 5-second window.
 	p.mu.Lock()
 	reqKey := dev.ID() + "|" + artUrl
