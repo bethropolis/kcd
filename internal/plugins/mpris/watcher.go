@@ -48,24 +48,38 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	p.busToDisplayName = make(map[string]string)
 	for _, e := range entries {
 		p.playerNameToBus[e.shortName] = e.busName
+		p.playerNameToBus[e.identity] = e.busName
 		p.busToDisplayName[e.busName] = e.identity
 	}
 	p.mu.Unlock()
 
 	// uniqueToWellKnown maps D-Bus unique names (":1.42") to well-known names
 	// ("org.mpris.MediaPlayer2.vlc"). sig.Sender always contains the unique name.
-	// Built dynamically from NameOwnerChanged signals.
+	// Built dynamically from NameOwnerChanged signals AND populated for existing players.
 	uniqueToWellKnown := make(map[string]string)
 
-	// Add global signal matches — filter by checking known players at runtime.
-	_ = conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
-		dbus.WithMatchMember("PropertiesChanged"),
-	)
-	_ = conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
-		dbus.WithMatchMember("Seeked"),
-	)
+	// Populate uniqueToWellKnown for existing players by querying their unique names.
+	for _, e := range entries {
+		var owner string
+		if err := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, e.busName).Store(&owner); err == nil {
+			uniqueToWellKnown[owner] = e.busName
+		}
+	}
+
+	// Add per-player signal matches using well-known bus names.
+	// This ensures we only receive signals from known MPRIS players.
+	for _, e := range entries {
+		_ = conn.AddMatchSignal(
+			dbus.WithMatchSender(e.busName),
+			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+			dbus.WithMatchMember("PropertiesChanged"),
+		)
+		_ = conn.AddMatchSignal(
+			dbus.WithMatchSender(e.busName),
+			dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
+			dbus.WithMatchMember("Seeked"),
+		)
+	}
 
 	// Listen for NameOwnerChanged to track unique → well-known name mapping
 	// and detect new/removed players.
@@ -110,6 +124,19 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 						p.mu.Lock()
 						p.playerNameToBus[name] = name
 						p.mu.Unlock()
+
+						// Add signal matches for the new player
+						_ = conn.AddMatchSignal(
+							dbus.WithMatchSender(name),
+							dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+							dbus.WithMatchMember("PropertiesChanged"),
+						)
+						_ = conn.AddMatchSignal(
+							dbus.WithMatchSender(name),
+							dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
+							dbus.WithMatchMember("Seeked"),
+						)
+
 						p.broadcastPlayerList()
 					}
 				}
