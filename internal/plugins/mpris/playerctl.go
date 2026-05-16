@@ -14,24 +14,33 @@ import (
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
 	busName := p.resolvePlayerBus(player)
 	if busName == "" {
-		p.logger.Debug("mpris: cannot resolve player bus name", zap.String("player", player))
+		p.logger.Warn("mpris: cannot resolve player bus name", zap.String("player", player))
 		return
 	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
+	needsDelay := false
+
 	switch action {
 	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
-		_ = obj.Call("org.mpris.MediaPlayer2.Player."+action, 0)
+		if err := obj.Call("org.mpris.MediaPlayer2.Player."+action, 0).Err; err != nil {
+			p.logger.Debug("mpris: action failed", zap.String("action", action), zap.Error(err))
+		}
 	case "Seek":
 		if seek != nil {
-			_ = obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, *seek)
+			if err := obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, *seek).Err; err != nil {
+				p.logger.Debug("mpris: seek failed", zap.Int64("offset", *seek), zap.Error(err))
+			}
 		}
 	case "SetPosition":
 		if setPos != nil {
 			currentPosUs := p.getPlayerPosition(busName)
 			targetPosUs := (*setPos) * 1000
 			seekOffset := targetPosUs - currentPosUs
-			_ = obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset)
+			if err := obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset).Err; err != nil {
+				p.logger.Debug("mpris: setPosition seek failed", zap.Int64("target", *setPos), zap.Error(err))
+			}
+			needsDelay = true
 		}
 	}
 
@@ -42,16 +51,28 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		p.prevVolume[player] = volF
 		p.mu.Unlock()
 		if volF != prevVol {
-			_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF)
+			if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF).Err; err != nil {
+				p.logger.Debug("mpris: setVolume failed", zap.Float64("volume", volF), zap.Error(err))
+			}
+			needsDelay = true
 		}
 	}
 
 	if shuffle != nil {
-		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Shuffle", *shuffle)
+		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Shuffle", *shuffle).Err; err != nil {
+			p.logger.Debug("mpris: setShuffle failed", zap.Bool("shuffle", *shuffle), zap.Error(err))
+		}
 	}
 
 	if loopStatus != "" {
-		_ = obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "LoopStatus", loopStatus)
+		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "LoopStatus", loopStatus).Err; err != nil {
+			p.logger.Debug("mpris: setLoopStatus failed", zap.String("loopStatus", loopStatus), zap.Error(err))
+		}
+	}
+
+	// Small delay before broadcasting to let the player update its state
+	if needsDelay {
+		time.Sleep(150 * time.Millisecond)
 	}
 
 	if state, err := p.playerStateDBus(player); err == nil {
@@ -150,18 +171,17 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 
 				p.mu.Lock()
 				last, exists := p.lastTracks[playerName]
-				if !exists || last.rawArtUrl != rawArtUrl {
+				trackChanged := !exists || last.rawArtUrl != rawArtUrl
+				if trackChanged {
 					p.lastTracks[playerName] = trackIdentity{
 						rawArtUrl: rawArtUrl,
 						timestamp: time.Now().UnixNano(),
 					}
-				} else {
-					last.timestamp = time.Now().UnixNano()
-					p.lastTracks[playerName] = last
 				}
 				p.mu.Unlock()
 
-				if strings.HasPrefix(rawArtUrl, "file://") {
+				// Only add cache-buster when track actually changes
+				if strings.HasPrefix(rawArtUrl, "file://") && trackChanged {
 					np.AlbumArtUrl = fmt.Sprintf("%s?t=%d", rawArtUrl, time.Now().UnixNano())
 				}
 			}
@@ -216,7 +236,8 @@ func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
 	}
 
 	// Try matching by short name (fallback for when display name differs)
-	for _, bus := range p.playerNameToBus {
+	for bus, storedDisplayName := range p.playerNameToBus {
+		_ = storedDisplayName
 		short := strings.TrimPrefix(bus, "org.mpris.MediaPlayer2.")
 		if idx := strings.Index(short, ".instance"); idx != -1 {
 			short = short[:idx]
@@ -226,8 +247,20 @@ func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
 		}
 	}
 
-	// Last resort: try constructing from display name
-	return "org.mpris.MediaPlayer2." + displayName
+	// Try matching by prefix (e.g. "VLC" → "org.mpris.MediaPlayer2.vlc")
+	lowerDisplayName := strings.ToLower(displayName)
+	for bus := range p.playerNameToBus {
+		short := strings.TrimPrefix(bus, "org.mpris.MediaPlayer2.")
+		if idx := strings.Index(short, ".instance"); idx != -1 {
+			short = short[:idx]
+		}
+		if strings.Contains(strings.ToLower(short), lowerDisplayName) || strings.Contains(lowerDisplayName, strings.ToLower(short)) {
+			return bus
+		}
+	}
+
+	p.logger.Debug("mpris: failed to resolve player bus", zap.String("displayName", displayName))
+	return ""
 }
 
 type playerEntry struct {
