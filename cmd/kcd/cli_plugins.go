@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/urfave/cli/v2"
@@ -280,7 +282,18 @@ var clipboardCmd = &cli.Command{
 	Name:      "clipboard",
 	Usage:     "Sync local clipboard content to a device",
 	ArgsUsage: "[device-id]",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "watch",
+			Aliases: []string{"w"},
+			Usage:   "Watch for local clipboard changes and auto-sync to connected devices",
+		},
+	},
 	Action: func(c *cli.Context) error {
+		if c.Bool("watch") {
+			return clipboardWatch()
+		}
+
 		cl, err := getClient(c)
 		if err != nil {
 			return err
@@ -312,6 +325,31 @@ var clipboardCmd = &cli.Command{
 		fmt.Printf("Clipboard pushed to %s\n", targetID)
 		return nil
 	},
+}
+
+// clipboardWatch runs wl-paste --watch in the user's session and triggers
+// kcd clipboard on every change. This must run in a session with Wayland access.
+func clipboardWatch() error {
+	if os.Getenv("WAYLAND_DISPLAY") == "" {
+		return fmt.Errorf("clipboard --watch requires a Wayland session (WAYLAND_DISPLAY not set)")
+	}
+
+	// Find our own binary path to re-invoke
+	self, err := os.Executable()
+	if err != nil {
+		self = "kcd"
+	}
+
+	fmt.Println("Watching for clipboard changes (Ctrl+C to stop)…")
+
+	for {
+		cmd := exec.Command("wl-paste", "--watch", self, "clipboard")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "clipboard watch error: %v\n", err)
+		}
+	}
 }
 
 var runCmd = &cli.Command{
