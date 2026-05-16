@@ -21,6 +21,7 @@ type MousepadPlugin struct {
 	cfg        config.MousepadConfig
 	useYdotool bool
 	useUinput  bool
+	isWayland  bool
 
 	// uinput devices
 	mouse    uinput.Mouse
@@ -31,11 +32,13 @@ type MousepadPlugin struct {
 }
 
 func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin {
+	isWayland := os.Getenv("WAYLAND_DISPLAY") != ""
 	p := &MousepadPlugin{
-		logger:  logger.With(zap.String("plugin", "mousepad")),
-		cfg:     cfg,
-		moveCh:  make(chan MousepadBody, 1),
-		eventCh: make(chan MousepadBody, 64),
+		logger:    logger.With(zap.String("plugin", "mousepad")),
+		cfg:       cfg,
+		isWayland: isWayland,
+		moveCh:    make(chan MousepadBody, 1),
+		eventCh:   make(chan MousepadBody, 64),
 	}
 
 	// Try uinput first if auto or explicit
@@ -280,8 +283,8 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 		}
 	} else if body.Key != "" {
 		// Unicode strings cannot be typed via uinput directly.
-		// We fallback to tools that interface with the display server (X11/Wayland).
-		if p.useYdotool {
+		// Use display-server tool for text input regardless of uinput backend.
+		if p.isWayland {
 			p.runCmd("wtype", body.Key)
 		} else {
 			p.runCmd("xdotool", "type", "--", body.Key)
@@ -306,7 +309,7 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 }
 
 func (p *MousepadPlugin) execKeyFallback(keyName string) {
-	if p.useYdotool {
+	if p.isWayland {
 		p.runCmd("wtype", "-k", keyName)
 	} else {
 		p.runCmd("xdotool", "key", keyName)

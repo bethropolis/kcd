@@ -41,6 +41,11 @@ func Run() []Check {
 		"install ydotool (Wayland) or xdotool (X11)",
 		"ydotool", "xdotool"))
 
+	// wtype (Wayland text input for mousepad plugin)
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		checks = append(checks, checkBin("wtype", "wtype", "install wtype for Wayland keyboard input"))
+	}
+
 	// playerctl
 	checks = append(checks, checkBin("playerctl", "playerctl", "install playerctl for MPRIS media control"))
 
