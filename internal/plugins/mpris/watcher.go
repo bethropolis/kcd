@@ -50,9 +50,14 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	}
 	p.mu.Unlock()
 
+	// uniqueToWellKnown maps D-Bus unique names (":1.42") to well-known names
+	// ("org.mpris.MediaPlayer2.vlc"). sig.Sender always contains the unique name.
+	uniqueToWellKnown := make(map[string]string)
+	for _, e := range entries {
+		uniqueToWellKnown[e.busName] = e.busName // well-known name may also appear as sender
+	}
+
 	// Add per-player signal matches using well-known bus names.
-	// This ensures sig.Sender contains the well-known name (e.g. org.mpris.MediaPlayer2.vlc)
-	// rather than the unique connection name (e.g. :1.42).
 	for _, e := range entries {
 		_ = conn.AddMatchSignal(
 			dbus.WithMatchSender(e.busName),
@@ -66,7 +71,8 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		)
 	}
 
-	// Also listen for new players appearing/disappearing
+	// Listen for NameOwnerChanged to track unique → well-known name mapping
+	// and detect new/removed players.
 	_ = conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
@@ -90,9 +96,20 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				continue
 			}
 
-			// Handle NameOwnerChanged to detect new/removed players
+			// Handle NameOwnerChanged to track unique name mappings and detect player changes
 			if sig.Name == "NameOwnerChanged" && len(sig.Body) >= 3 {
 				name, _ := sig.Body[0].(string)
+				oldOwner, _ := sig.Body[1].(string)
+				newOwner, _ := sig.Body[2].(string)
+
+				if oldOwner != "" {
+					delete(uniqueToWellKnown, oldOwner)
+				}
+				if newOwner != "" && strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
+					uniqueToWellKnown[newOwner] = name
+				}
+
+				// Detect new/removed MPRIS players
 				if strings.HasPrefix(name, "org.mpris.MediaPlayer2.") &&
 					!strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") &&
 					name != "org.mpris.MediaPlayer2.playerctld" {
@@ -101,9 +118,17 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				continue
 			}
 
-			// sig.Sender is the well-known bus name because we matched per-player
-			busName := string(sig.Sender)
+			// Resolve unique sender name to well-known name, then to display name
+			uniqueName := string(sig.Sender)
+			busName := uniqueToWellKnown[uniqueName]
+			if busName == "" {
+				// Fallback: try using sender directly (some players send as well-known name)
+				busName = uniqueName
+			}
 			displayName := p.busNameToDisplayName(busName)
+			if displayName == "" {
+				continue
+			}
 
 			if sig.Name == "PropertiesChanged" {
 				if len(sig.Body) < 2 {

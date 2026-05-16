@@ -19,8 +19,6 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
-	needsDelay := false
-
 	switch action {
 	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
 		if err := obj.Call("org.mpris.MediaPlayer2.Player."+action, 0).Err; err != nil {
@@ -40,7 +38,6 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 			if err := obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset).Err; err != nil {
 				p.logger.Debug("mpris: setPosition seek failed", zap.Int64("target", *setPos), zap.Error(err))
 			}
-			needsDelay = true
 		}
 	}
 
@@ -53,7 +50,6 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 			p.prevVolume[player] = volF
 			p.mu.Unlock()
 		}
-		needsDelay = true
 	}
 
 	if shuffle != nil {
@@ -68,14 +64,8 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		}
 	}
 
-	// Small delay before broadcasting to let the player update its state
-	if needsDelay {
-		time.Sleep(300 * time.Millisecond)
-	}
-
-	if state, err := p.playerStateDBus(player); err == nil {
-		p.broadcast(state)
-	}
+	// State updates are handled by the D-Bus PropertiesChanged signal watcher.
+	// No need to manually poll after actions — the player will emit signals.
 }
 
 func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
