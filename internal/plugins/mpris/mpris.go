@@ -18,31 +18,30 @@ import (
 	"go.uber.org/zap"
 )
 
-// MPRISPlugin controls desktop media players via D-Bus MPRIS interface.
+const dbusTimeout = 500 * time.Millisecond
+
+type trackedPlayer struct {
+	busName     string
+	uniqueName  string
+	displayName string
+	shortName   string
+}
+
 type MPRISPlugin struct {
 	tlsConfig *tls.Config
 	logger    *zap.Logger
 	mu        sync.RWMutex
-	devices   map[string]device.Sender // connected phone devices
+	devices   map[string]device.Sender
 	dbus      *dbus.Conn
 
 	watchCancel context.CancelFunc
 	watching    bool
 
-	// cache for tracking track changes to avoid over-requesting album art
-	lastTracks map[string]trackIdentity
-
-	// Debounce map to prevent rapid duplicate album art requests from Android
+	players     map[string]*trackedPlayer
+	lastTracks  map[string]trackIdentity
+	lastStates  map[string]*NowPlaying
 	artRequests map[string]time.Time
-
-	// prevVolume tracks the last volume sent per player to avoid redundant broadcasts
-	prevVolume map[string]float64
-
-	// playerNameToBus maps display names and short names → D-Bus bus names
-	playerNameToBus map[string]string
-
-	// busToDisplayName maps bus names → display names (for signal resolution)
-	busToDisplayName map[string]string
+	prevVolume  int
 }
 
 type trackIdentity struct {
@@ -62,15 +61,15 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	}
 
 	return &MPRISPlugin{
-		tlsConfig:        tlsConfig,
-		logger:           logger.With(zap.String("plugin", "mpris")),
-		dbus:             dbusConn,
-		devices:          make(map[string]device.Sender),
-		lastTracks:       make(map[string]trackIdentity),
-		artRequests:      make(map[string]time.Time),
-		prevVolume:       make(map[string]float64),
-		playerNameToBus:  make(map[string]string),
-		busToDisplayName: make(map[string]string),
+		tlsConfig:   tlsConfig,
+		logger:      logger.With(zap.String("plugin", "mpris")),
+		dbus:        dbusConn,
+		devices:     make(map[string]device.Sender),
+		players:     make(map[string]*trackedPlayer),
+		lastTracks:  make(map[string]trackIdentity),
+		lastStates:  make(map[string]*NowPlaying),
+		artRequests: make(map[string]time.Time),
+		prevVolume:  -1,
 	}
 }
 
@@ -91,8 +90,8 @@ type MPRISRequest struct {
 	Seek              *int64 `json:"Seek,omitempty"`
 	SetPosition       *int64 `json:"SetPosition,omitempty"`
 	SetShuffle        *bool  `json:"setShuffle,omitempty"`
-	SetLoopStatus     string `json:"setLoopStatus,omitempty"` // "None", "Track", "Playlist"
-	AlbumArtUrl       string `json:"albumArtUrl,omitempty"`   // Used for local art transfer requests
+	SetLoopStatus     string `json:"setLoopStatus,omitempty"`
+	AlbumArtUrl       string `json:"albumArtUrl,omitempty"`
 }
 
 type NowPlaying struct {
@@ -102,24 +101,22 @@ type NowPlaying struct {
 	Album          string `json:"album"`
 	AlbumArtUrl    string `json:"albumArtUrl"`
 	Url            string `json:"url,omitempty"`
-	Length         int64  `json:"length"`        // ms, -1 for unknown
-	Pos            int64  `json:"pos,omitempty"` // ms
+	Length         int64  `json:"length"`
+	Pos            int64  `json:"pos,omitempty"`
 	IsPlaying      bool   `json:"isPlaying"`
-	Volume         int    `json:"volume,omitempty"` // 0-100
+	Volume         int    `json:"volume,omitempty"`
 	CanControl     bool   `json:"canControl"`
 	CanGoNext      bool   `json:"canGoNext"`
 	CanGoPrevious  bool   `json:"canGoPrevious"`
 	CanPause       bool   `json:"canPause"`
 	CanPlay        bool   `json:"canPlay"`
 	CanSeek        bool   `json:"canSeek"`
-	PlaybackStatus string `json:"playbackStatus"` // "Playing", "Paused", "Stopped"
+	PlaybackStatus string `json:"playbackStatus"`
 	Shuffle        *bool  `json:"shuffle,omitempty"`
 	LoopStatus     string `json:"loopStatus,omitempty"`
 }
 
-// Handle processes incoming packets from the phone.
 func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
-	// Register device on first packet
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
 		p.devices[dev.ID()] = dev
@@ -128,7 +125,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			watchCtx, cancel := context.WithCancel(context.Background())
 			p.watchCancel = cancel
 			p.startWatcher(watchCtx)
-			go p.watchPlayerListDBus(watchCtx)
 		}
 	}
 	p.mu.Unlock()
@@ -138,13 +134,11 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return err
 	}
 
-	// 1. Phone is asking to download a local album art file
 	if body.AlbumArtUrl != "" && strings.HasPrefix(body.AlbumArtUrl, "file://") {
 		go p.sendAlbumArt(ctx, dev, body.Player, body.AlbumArtUrl)
 		return nil
 	}
 
-	// 2. Phone wants the list of players
 	if body.RequestPlayerList {
 		return p.sendPlayerList(dev)
 	}
@@ -153,7 +147,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	// 3. Phone explicitly requested current state to update its UI
 	if body.RequestNowPlaying || body.RequestVolume {
 		go func() {
 			if state, err := p.playerState(body.Player); err == nil {
@@ -163,7 +156,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	// 4. Phone sent an action
 	if body.Action != "" || body.Seek != nil || body.SetPosition != nil || body.SetVolume != nil || body.SetShuffle != nil || body.SetLoopStatus != "" {
 		go p.handleAction(body.Player, body.Action, body.Seek, body.SetPosition, body.SetVolume, body.SetShuffle, body.SetLoopStatus)
 	}
@@ -172,19 +164,12 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 }
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
-	entries, _ := listPlayersDBus(p.dbus, p.logger)
-	var displayNames []string
-
-	p.mu.Lock()
-	p.playerNameToBus = make(map[string]string)
-	p.busToDisplayName = make(map[string]string)
-	for _, e := range entries {
-		displayNames = append(displayNames, e.identity)
-		p.playerNameToBus[e.shortName] = e.busName
-		p.playerNameToBus[e.identity] = e.busName
-		p.busToDisplayName[e.busName] = e.identity
+	p.mu.RLock()
+	displayNames := make([]string, 0, len(p.players))
+	for name := range p.players {
+		displayNames = append(displayNames, name)
 	}
-	p.mu.Unlock()
+	p.mu.RUnlock()
 
 	if displayNames == nil {
 		displayNames = []string{}
@@ -211,6 +196,32 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
+func (p *MPRISPlugin) sendPlayerListBroadcast() {
+	p.mu.RLock()
+	displayNames := make([]string, 0, len(p.players))
+	for name := range p.players {
+		displayNames = append(displayNames, name)
+	}
+	p.mu.RUnlock()
+
+	if displayNames == nil {
+		displayNames = []string{}
+	}
+
+	pkt, _ := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
+		"playerList":             displayNames,
+		"supportAlbumArtPayload": true,
+	})
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, dev := range p.devices {
+		if dev.IsConnected() {
+			_ = dev.Send(pkt)
+		}
+	}
+}
+
 func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", state)
 	if err != nil {
@@ -226,9 +237,56 @@ func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 	}
 }
 
+func (p *MPRISPlugin) addPlayer(busName, uniqueName, displayName, shortName string) {
+	p.mu.Lock()
+	p.players[displayName] = &trackedPlayer{
+		busName:     busName,
+		uniqueName:  uniqueName,
+		displayName: displayName,
+		shortName:   shortName,
+	}
+	p.lastStates[displayName] = &NowPlaying{
+		Player:     displayName,
+		CanControl: true,
+	}
+	p.mu.Unlock()
+
+	p.logger.Debug("mpris: added player", zap.String("displayName", displayName), zap.String("busName", busName))
+
+	if state, err := p.playerState(displayName); err == nil {
+		p.broadcast(state)
+	}
+
+	p.sendPlayerListBroadcast()
+}
+
+func (p *MPRISPlugin) removePlayer(displayName string) {
+	p.mu.Lock()
+	delete(p.players, displayName)
+	delete(p.lastTracks, displayName)
+	delete(p.lastStates, displayName)
+	p.mu.Unlock()
+
+	p.logger.Debug("mpris: removed player", zap.String("displayName", displayName))
+
+	p.sendPlayerListBroadcast()
+}
+
+func (p *MPRISPlugin) resolvePlayer(displayName string) *trackedPlayer {
+	if displayName == "" {
+		return nil
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, pl := range p.players {
+		if pl.displayName == displayName || pl.shortName == displayName || strings.EqualFold(pl.shortName, displayName) {
+			return pl
+		}
+	}
+	return nil
+}
+
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
-	// Debounce: prevent the Android app from spamming duplicate art requests
-	// for the same track within a 5-second window.
 	p.mu.Lock()
 	reqKey := dev.ID() + "|" + artUrl
 	if lastReq, exists := p.artRequests[reqKey]; exists && time.Since(lastReq) < 5*time.Second {
@@ -238,7 +296,6 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	p.artRequests[reqKey] = time.Now()
 	p.mu.Unlock()
 
-	// Strip the cache-buster timestamp before opening the local file
 	cleanUrl := artUrl
 	if idx := strings.LastIndex(cleanUrl, "?t="); idx != -1 {
 		cleanUrl = cleanUrl[:idx]
@@ -260,18 +317,15 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 		return
 	}
 
-	// Use default share config for the side-channel
 	var shareCfg config.ShareConfig
 	shareCfg.Defaults()
 
-	// Open TLS side-channel
 	ln, port, err := share.ListenSideChannel(ctx, shareCfg, p.tlsConfig)
 	if err != nil {
 		return
 	}
 
 	go func() {
-		// 10-second timeout prevents port exhaustion if the phone ignores the art
 		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), 10*time.Second, nil, p.logger)
 	}()
 
@@ -320,36 +374,32 @@ type DebugPlayerInfo struct {
 }
 
 type DebugStatus struct {
-	WatcherRunning bool               `json:"watcherRunning"`
-	DeviceCount    int                `json:"deviceCount"`
-	Players        []DebugPlayerInfo  `json:"players"`
-	NameToBus      map[string]string  `json:"nameToBus"`
-	BusToDisplay   map[string]string  `json:"busToDisplay"`
+	WatcherRunning bool              `json:"watcherRunning"`
+	DeviceCount    int               `json:"deviceCount"`
+	Players        []DebugPlayerInfo `json:"players"`
+	PlayerMappings map[string]string `json:"playerMappings"`
 }
 
 func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 	p.mu.RLock()
 	watching := p.watching
 	devCount := len(p.devices)
-	nameToBus := make(map[string]string, len(p.playerNameToBus))
-	busToDisplay := make(map[string]string, len(p.busToDisplayName))
-	for k, v := range p.playerNameToBus {
-		nameToBus[k] = v
-	}
-	for k, v := range p.busToDisplayName {
-		busToDisplay[k] = v
+	playerMappings := make(map[string]string, len(p.players))
+	playerList := make([]*trackedPlayer, 0, len(p.players))
+	for _, pl := range p.players {
+		playerMappings[pl.displayName] = pl.busName
+		playerList = append(playerList, pl)
 	}
 	p.mu.RUnlock()
 
-	entries, _ := listPlayersDBus(p.dbus, p.logger)
 	var players []DebugPlayerInfo
-	for _, e := range entries {
+	for _, pl := range playerList {
 		info := DebugPlayerInfo{
-			DisplayName: e.identity,
-			BusName:     e.busName,
-			ShortName:   e.shortName,
+			DisplayName: pl.displayName,
+			BusName:     pl.busName,
+			ShortName:   pl.shortName,
 		}
-		if state, err := p.playerStateDBus(e.identity); err == nil {
+		if state, err := p.playerState(pl.displayName); err == nil {
 			info.Title = state.Title
 			info.Artist = state.Artist
 			info.Album = state.Album
@@ -370,7 +420,6 @@ func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 		WatcherRunning: watching,
 		DeviceCount:    devCount,
 		Players:        players,
-		NameToBus:      nameToBus,
-		BusToDisplay:   busToDisplay,
+		PlayerMappings: playerMappings,
 	}
 }

@@ -470,19 +470,12 @@ var mprisCmd = &cli.Command{
 					}
 				}
 
-				if len(status.NameToBus) > 0 {
-					fmt.Println("Name → Bus mappings:")
-					for name, bus := range status.NameToBus {
+				if len(status.PlayerMappings) > 0 {
+					fmt.Println("Player Mappings:")
+					for name, bus := range status.PlayerMappings {
 						fmt.Printf("  %-25s → %s\n", name, bus)
 					}
 					fmt.Println()
-				}
-
-				if len(status.BusToDisplay) > 0 {
-					fmt.Println("Bus → Display mappings:")
-					for bus, display := range status.BusToDisplay {
-						fmt.Printf("  %-45s → %s\n", bus, display)
-					}
 				}
 
 				return nil

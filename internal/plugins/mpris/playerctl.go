@@ -1,41 +1,47 @@
 package mpris
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/godbus/dbus/v5"
 	"go.uber.org/zap"
 )
 
+func dbusCall(obj dbus.BusObject, method string, args ...interface{}) *dbus.Call {
+	ctx, cancel := context.WithTimeout(context.Background(), dbusTimeout)
+	defer cancel()
+	return obj.CallWithContext(ctx, method, 0, args...)
+}
+
 func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, volume *int, shuffle *bool, loopStatus string) {
-	busName := p.resolvePlayerBus(player)
-	if busName == "" {
-		p.logger.Warn("mpris: cannot resolve player bus name", zap.String("player", player))
+	pl := p.resolvePlayer(player)
+	if pl == nil {
+		p.logger.Warn("mpris: cannot resolve player", zap.String("player", player))
 		return
 	}
-	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
+	obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
 
 	switch action {
 	case "Play", "Pause", "PlayPause", "Next", "Previous", "Stop":
-		if err := obj.Call("org.mpris.MediaPlayer2.Player."+action, 0).Err; err != nil {
+		if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player."+action).Err; err != nil {
 			p.logger.Debug("mpris: action failed", zap.String("action", action), zap.Error(err))
 		}
 	case "Seek":
 		if seek != nil {
-			if err := obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, *seek).Err; err != nil {
+			if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Seek", *seek).Err; err != nil {
 				p.logger.Debug("mpris: seek failed", zap.Int64("offset", *seek), zap.Error(err))
 			}
 		}
 	case "SetPosition":
 		if setPos != nil {
-			currentPosUs := p.getPlayerPosition(busName)
+			currentPosUs := p.getPlayerPosition(pl.busName)
 			targetPosUs := (*setPos) * 1000
 			seekOffset := targetPosUs - currentPosUs
-			if err := obj.Call("org.mpris.MediaPlayer2.Player.Seek", 0, seekOffset).Err; err != nil {
+			if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Seek", seekOffset).Err; err != nil {
 				p.logger.Debug("mpris: setPosition seek failed", zap.Int64("target", *setPos), zap.Error(err))
 			}
 		}
@@ -43,56 +49,55 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 
 	if volume != nil {
 		volF := float64(*volume) / 100.0
-		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Volume", volF).Err; err != nil {
+		if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Set", "org.mpris.MediaPlayer2.Player", "Volume", volF).Err; err != nil {
 			p.logger.Debug("mpris: setVolume failed", zap.Float64("volume", volF), zap.Error(err))
 		} else {
-			p.mu.Lock()
-			p.prevVolume[player] = volF
-			p.mu.Unlock()
+			p.prevVolume = *volume
 		}
 	}
 
 	if shuffle != nil {
-		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "Shuffle", *shuffle).Err; err != nil {
+		if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Set", "org.mpris.MediaPlayer2.Player", "Shuffle", *shuffle).Err; err != nil {
 			p.logger.Debug("mpris: setShuffle failed", zap.Bool("shuffle", *shuffle), zap.Error(err))
 		}
 	}
 
 	if loopStatus != "" {
-		if err := obj.Call("org.freedesktop.DBus.Properties.Set", 0, "org.mpris.MediaPlayer2.Player", "LoopStatus", loopStatus).Err; err != nil {
+		if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Set", "org.mpris.MediaPlayer2.Player", "LoopStatus", loopStatus).Err; err != nil {
 			p.logger.Debug("mpris: setLoopStatus failed", zap.String("loopStatus", loopStatus), zap.Error(err))
 		}
 	}
-
-	// State updates are handled by the D-Bus PropertiesChanged signal watcher.
-	// No need to manually poll after actions — the player will emit signals.
 }
 
 func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 	var pos int64
-	if err := obj.Call("org.mpris.MediaPlayer2.Player.Get", 0, "org.mpris.MediaPlayer2.Player", "Position").Store(&pos); err != nil {
+	if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Get", "Position").Store(&pos); err != nil {
 		return 0
 	}
 	return pos
 }
 
 func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
-	return p.playerStateDBus(playerName)
+	pl := p.resolvePlayer(playerName)
+	if pl == nil {
+		return nil, fmt.Errorf("mpris: cannot resolve player %q", playerName)
+	}
+	return p.playerStateDBus(pl.busName, playerName)
 }
 
-func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
-	busName := p.resolvePlayerBus(playerName)
-	if busName == "" {
-		return nil, fmt.Errorf("mpris: cannot resolve player bus name for %q", playerName)
-	}
+func (p *MPRISPlugin) playerStateDBus(busName, playerName string) (*NowPlaying, error) {
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	var props map[string]dbus.Variant
-	if err := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, "org.mpris.MediaPlayer2.Player").Store(&props); err != nil {
+	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.GetAll", "org.mpris.MediaPlayer2.Player").Store(&props); err != nil {
 		return nil, fmt.Errorf("get properties: %w", err)
 	}
 
+	return buildNowPlaying(props, playerName), nil
+}
+
+func buildNowPlaying(props map[string]dbus.Variant, playerName string) *NowPlaying {
 	np := &NowPlaying{
 		Player:     playerName,
 		CanControl: true,
@@ -142,52 +147,41 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 
 	if v, ok := props["Metadata"]; ok {
 		if meta, ok := v.Value().(map[string]dbus.Variant); ok {
-			if tv, ok := meta["xesam:title"]; ok {
-				np.Title = tv.Value().(string)
-			}
-			if av, ok := meta["xesam:artist"]; ok {
-				if artists, ok := av.Value().([]string); ok {
-					np.Artist = strings.Join(artists, ", ")
-				}
-			}
-			if alv, ok := meta["xesam:album"]; ok {
-				np.Album = alv.Value().(string)
-			}
-			if artUrlV, ok := meta["mpris:artUrl"]; ok {
-				rawArtUrl := artUrlV.Value().(string)
-				np.AlbumArtUrl = rawArtUrl
+			fillMetadataFromMap(np, meta)
+		}
+	}
 
-				p.mu.Lock()
-				last, exists := p.lastTracks[playerName]
-				trackChanged := !exists || last.rawArtUrl != rawArtUrl
-				if trackChanged {
-					p.lastTracks[playerName] = trackIdentity{
-						rawArtUrl: rawArtUrl,
-						timestamp: time.Now().UnixNano(),
-					}
-				}
-				p.mu.Unlock()
+	return np
+}
 
-				// Only add cache-buster when track actually changes
-				if strings.HasPrefix(rawArtUrl, "file://") && trackChanged {
-					np.AlbumArtUrl = fmt.Sprintf("%s?t=%d", rawArtUrl, time.Now().UnixNano())
-				}
-			}
-			if lv, ok := meta["mpris:length"]; ok {
-				if length, ok := lv.Value().(int64); ok {
-					np.Length = length / 1000
-				}
-			}
-			if uv, ok := meta["xesam:url"]; ok {
-				if trackUrl, ok := uv.Value().(string); ok {
-					np.Url = trackUrl
-					if np.Title == "" && strings.HasPrefix(trackUrl, "file://") {
-						if unescaped, err := url.PathUnescape(strings.TrimPrefix(trackUrl, "file://")); err == nil {
-							np.Title = filepath.Base(unescaped)
-							if np.Album == "" {
-								np.Album = filepath.Base(filepath.Dir(unescaped))
-							}
-						}
+func fillMetadataFromMap(np *NowPlaying, meta map[string]dbus.Variant) {
+	if tv, ok := meta["xesam:title"]; ok {
+		np.Title = tv.Value().(string)
+	}
+	if av, ok := meta["xesam:artist"]; ok {
+		if artists, ok := av.Value().([]string); ok {
+			np.Artist = strings.Join(artists, ", ")
+		}
+	}
+	if alv, ok := meta["xesam:album"]; ok {
+		np.Album = alv.Value().(string)
+	}
+	if artUrlV, ok := meta["mpris:artUrl"]; ok {
+		np.AlbumArtUrl = artUrlV.Value().(string)
+	}
+	if lv, ok := meta["mpris:length"]; ok {
+		if length, ok := lv.Value().(int64); ok {
+			np.Length = length / 1000
+		}
+	}
+	if uv, ok := meta["xesam:url"]; ok {
+		if trackUrl, ok := uv.Value().(string); ok {
+			np.Url = trackUrl
+			if np.Title == "" && strings.HasPrefix(trackUrl, "file://") {
+				if unescaped, err := url.PathUnescape(strings.TrimPrefix(trackUrl, "file://")); err == nil {
+					np.Title = filepath.Base(unescaped)
+					if np.Album == "" {
+						np.Album = filepath.Base(filepath.Dir(unescaped))
 					}
 				}
 			}
@@ -197,14 +191,67 @@ func (p *MPRISPlugin) playerStateDBus(playerName string) (*NowPlaying, error) {
 	if np.Title == "" {
 		np.Title = "Unknown Media"
 	}
+}
 
-	return np, nil
+func fillChangedProps(np *NowPlaying, changed map[string]dbus.Variant) bool {
+	somethingChanged := false
+
+	if metaV, ok := changed["Metadata"]; ok {
+		if meta, ok := metaV.Value().(map[string]dbus.Variant); ok {
+			fillMetadataFromMap(np, meta)
+			somethingChanged = true
+		}
+	}
+
+	if v, ok := changed["PlaybackStatus"]; ok {
+		np.PlaybackStatus = v.Value().(string)
+		np.IsPlaying = np.PlaybackStatus == "Playing"
+		somethingChanged = true
+	}
+
+	if v, ok := changed["Volume"]; ok {
+		np.Volume = int(v.Value().(float64) * 100)
+		somethingChanged = true
+	}
+
+	if v, ok := changed["CanPlay"]; ok {
+		np.CanPlay = v.Value().(bool)
+		somethingChanged = true
+	}
+	if v, ok := changed["CanPause"]; ok {
+		np.CanPause = v.Value().(bool)
+		somethingChanged = true
+	}
+	if v, ok := changed["CanGoNext"]; ok {
+		np.CanGoNext = v.Value().(bool)
+		somethingChanged = true
+	}
+	if v, ok := changed["CanGoPrevious"]; ok {
+		np.CanGoPrevious = v.Value().(bool)
+		somethingChanged = true
+	}
+	if v, ok := changed["CanSeek"]; ok {
+		np.CanSeek = v.Value().(bool)
+		somethingChanged = true
+	}
+
+	if v, ok := changed["LoopStatus"]; ok {
+		np.LoopStatus = v.Value().(string)
+		somethingChanged = true
+	}
+	if v, ok := changed["Shuffle"]; ok {
+		shuffle := v.Value().(bool)
+		np.Shuffle = &shuffle
+		somethingChanged = true
+	}
+
+	return somethingChanged
 }
 
 func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 	var meta map[string]dbus.Variant
-	if err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2.Player", "Metadata").Store(&meta); err != nil {
+	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Metadata").Store(&meta); err != nil {
 		return ""
 	}
 	if v, ok := meta["mpris:artUrl"]; ok {
@@ -213,34 +260,20 @@ func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
 	return ""
 }
 
-// resolvePlayerBus maps a display name back to its D-Bus bus name.
-func (p *MPRISPlugin) resolvePlayerBus(displayName string) string {
-	if displayName == "" {
-		return ""
+func (p *MPRISPlugin) queryPositionAndCanSeek(pl *trackedPlayer) (pos int64, canSeek bool) {
+	obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
+
+	var position int64
+	if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Get", "Position").Store(&position); err == nil {
+		pos = position / 1000
 	}
 
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	// Try exact match first (Identity or shortName)
-	if bus, ok := p.playerNameToBus[displayName]; ok {
-		return bus
+	var seekable bool
+	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "CanSeek").Store(&seekable); err == nil {
+		canSeek = seekable
 	}
 
-	// Try matching by prefix (e.g. "VLC" → "org.mpris.MediaPlayer2.vlc")
-	lowerDisplayName := strings.ToLower(displayName)
-	for bus := range p.playerNameToBus {
-		short := strings.TrimPrefix(bus, "org.mpris.MediaPlayer2.")
-		if idx := strings.Index(short, ".instance"); idx != -1 {
-			short = short[:idx]
-		}
-		if strings.Contains(strings.ToLower(short), lowerDisplayName) || strings.Contains(lowerDisplayName, strings.ToLower(short)) {
-			return p.playerNameToBus[bus]
-		}
-	}
-
-	p.logger.Debug("mpris: failed to resolve player bus", zap.String("displayName", displayName))
-	return ""
+	return
 }
 
 type playerEntry struct {
@@ -278,7 +311,6 @@ func listPlayersDBus(conn *dbus.Conn, logger *zap.Logger) ([]playerEntry, error)
 		all = append(all, playerEntry{name, short, ""})
 	}
 
-	// Resolve Identity for each player
 	for i := range all {
 		obj := conn.Object(all[i].busName, "/org/mpris/MediaPlayer2")
 		var identity string
@@ -289,7 +321,6 @@ func listPlayersDBus(conn *dbus.Conn, logger *zap.Logger) ([]playerEntry, error)
 		}
 	}
 
-	// Detect plasma-browser-integration wrappers
 	hasPlasmaFirefox := false
 	hasPlasmaChrome := false
 	for _, e := range all {
@@ -303,7 +334,6 @@ func listPlayersDBus(conn *dbus.Conn, logger *zap.Logger) ([]playerEntry, error)
 		}
 	}
 
-	// Build deduplicated display names
 	seen := make(map[string]bool)
 	var result []playerEntry
 	for _, e := range all {

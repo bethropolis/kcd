@@ -108,9 +108,8 @@ type MprisPlayerInfo struct {
 }
 
 type MprisStatusResponse struct {
-	WatcherRunning bool                `json:"watcherRunning"`
-	DeviceCount    int                 `json:"deviceCount"`
-	Players        []MprisPlayerInfo   `json:"players"`
-	NameToBus      map[string]string   `json:"nameToBus"`
-	BusToDisplay   map[string]string   `json:"busToDisplay"`
+	WatcherRunning bool              `json:"watcherRunning"`
+	DeviceCount    int               `json:"deviceCount"`
+	Players        []MprisPlayerInfo `json:"players"`
+	PlayerMappings map[string]string `json:"playerMappings"`
 }
