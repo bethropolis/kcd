@@ -28,7 +28,8 @@ kcd daemon [--config <path>] [--log-level <level>]
 ```
 
 The daemon:
-- Discovers devices via UDP broadcast and mDNS
+- Listens for device announcements via UDP and mDNS (always on)
+- Broadcasts its own identity only during `kcd pair` (listen mode)
 - Accepts inbound TCP connections on port 1716
 - Runs all enabled plugins
 - Opens the IPC Unix socket for CLI clients
@@ -165,27 +166,31 @@ kcd connect 192.168.1.50
 
 ## pair
 
-Initiate a pairing request to a discovered device, or accept an incoming request from one.
+Pair with a device. Two modes depending on whether you provide a device ID.
 
-```
+### Pair to a specific device
+
+```bash
 kcd pair <device-id>
 ```
 
-- If the device has sent a pair request to `kcd` (State: `PairRequestedByPeer`), this command **accepts** it.
-- Otherwise, this command **initiates** a new request and waits for the user to accept on the phone.
+If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it sends a new pair request — accept on your phone.
 
-**Workflow**
+### Listen mode (headless / server)
 
 ```bash
-# 1. Find the device ID
-kcd devices
-
-# 2. Send pair request
-kcd pair a1b2c3d4_e5f6_7890_abcd_ef1234567890
-
-# 3. Accept on the phone when prompted, then confirm:
-kcd watch --events=pair.accepted,pair.rejected
+kcd pair
 ```
+
+No arguments = listen mode. Broadcast is started automatically so the phone can discover the PC. The CLI waits for any incoming pair request and accepts it immediately, printing the verification code:
+
+```
+Listening for pair requests… (Ctrl+C to cancel)
+Paired with Pixel 8 Pro (a1b2c3d4...)
+Verification code: 3a8f
+```
+
+Broadcast stops when pairing completes or you press Ctrl+C.
 
 ---
 
@@ -340,6 +345,8 @@ Uses `loginctl lock-session` / `loginctl unlock-session` under the hood.
 
 Manage SFTP access to the phone's filesystem.
 
+The phone's SFTP server may expose multiple storage volumes (e.g. "Internal shared storage" and "SD card"). These are reported via `multiPaths` and `pathNames` in the KDE Connect protocol.
+
 ### sftp request
 
 Ask the device for SFTP credentials (host, port, user, password). The result is emitted as an `sftp.mount` event.
@@ -353,6 +360,48 @@ Capture the credentials:
 ```bash
 kcd watch --json --events=sftp.mount | jq -r 'select(.type=="sftp.mount") | .payload.uri'
 ```
+
+### sftp info
+
+Show cached SFTP connection details for a paired device, including available storage volumes:
+
+```
+kcd sftp info <device-id>
+```
+
+**Example output**
+
+```
+Device: a1b2c3d4_e5f6_7890_abcd_ef1234567890 (Pixel 8 Pro)
+IP:     192.168.1.50
+Port:   8022
+User:   sftp-user
+Password: ********
+
+Volumes:
+  1. Internal shared storage  →  /storage/emulated/0
+  2. SD card                  →  /storage/ABCD-1234
+```
+
+If the phone returned an error (e.g. storage permission not granted), the `errorMessage` field is shown instead.
+
+### sftp volumes
+
+List available storage volumes without the full info output:
+
+```
+kcd sftp volumes <device-id>
+```
+
+**Example output**
+
+```
+Internal shared storage  →  /storage/emulated/0
+SD card                  →  /storage/ABCD-1234
+```
+
+> The phone must have an active SFTP session (run `kcd sftp request` first if
+> the volumes list is empty).
 
 ### sftp mount
 
@@ -478,7 +527,7 @@ kcd watch [--events <type,...>] [--json]
 | `telephony.missed` | Missed call: `{contactName, phoneNumber}` |
 | `telephony.canceled` | Call ended |
 | `connectivity.update` | Signal strength: `{signal, networkType}` |
-| `sftp.mount` | SFTP credentials: `{uri, host, port, user, password}` |
+| `sftp.mount` | SFTP credentials: `{uri, ip, port, user, password, path, multiPaths, pathNames, errorMessage}` |
 
 ### Examples
 
@@ -553,18 +602,11 @@ kcd devices --json | jq -r '[.[] | select(.Connected)] | .[0].ID'
 
 Install [`packaging/nautilus-kcd.py`](../packaging/nautilus-kcd.py) for right-click → "Send to phone" in GNOME Files.
 
-**Reduce idle CPU to zero**
-
-Once devices are paired, add to `~/.config/kcd/kcd.toml`:
-
-```toml
-enable_broadcast = false
-```
-
-Restart the daemon. Paired phones reconnect automatically; new devices require manual IP entry.
-
 **Debug connection issues**
 
 ```bash
 kcd daemon --log-level=debug 2>&1 | grep -E "discovery|transport|pair"
 ```
+
+> Broadcast is off by default (only active during `kcd pair` listen mode).
+> The daemon sits at 0.0% idle CPU — no config change needed.

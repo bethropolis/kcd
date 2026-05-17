@@ -56,7 +56,7 @@ Devices are found via two parallel mechanisms that run concurrently:
 
 `Listener` binds to `0.0.0.0:1716` and parses every incoming UDP packet. Packets whose `type` is not `kdeconnect.identity` or whose `deviceId` matches the local device are silently dropped.
 
-The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds, cutting network chatter during idle operation. Setting `enable_broadcast = false` in config disables UDP entirely after pairing.
+The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it only starts during `kcd pair` (listen mode) and stops when pairing completes. The UDP **listener** is always active, so paired devices reconnect without any broadcast.
 
 ### mDNS / Zeroconf (`_kdeconnect._udp`)
 
@@ -190,7 +190,7 @@ Plugin execution is wrapped in a context with the plugin's declared `Timeout()` 
 | `ping` | `kdeconnect.ping` | Fires `ping.received`; can be sent outbound |
 | `runcommand` | `kdeconnect.runcommand` | Executes commands from the `[commands]` config table |
 | `sendnotification` | — | Sends `kdeconnect.notification` outbound |
-| `sftp` | `kdeconnect.sftp` | Mounts at server root (not `body.Path`) to avoid chroot double-path bug; tracks active mounts in `mountPoints` map; `Unmount()` calls `fusermount3`/`fusermount` |
+| `sftp` | `kdeconnect.sftp` | Parses `multiPaths`, `pathNames`, and `errorMessage` from the phone's response. `Info()` returns cached credentials + `StorageVolume` slices; `Volumes()` lists storage roots with human-readable names. `Handle()` logs errors when the phone returns `errorMessage` (e.g. missing storage permission). Mounts at server root to avoid chroot double-path bug; tracks mounts in `mountPoints` map; `Unmount()` calls `fusermount3`/`fusermount` |
 | `share` | `kdeconnect.share.request` | Streaming file receive + URL/text handling; fires progress events |
 | `sms` | — | Sends `kdeconnect.sms.request` outbound (receive not yet implemented) |
 | `systemvolume` | `kdeconnect.systemvolume` | Accepts `bus`; publishes `volume.update` on volume/mute changes |
@@ -279,22 +279,25 @@ The `kcd` binary is both daemon and client. Sub-commands that don't require the 
 kcd daemon        — start the background daemon
 kcd devices       — list known/connected devices
 kcd connect <ip>  — manually connect by IP
-kcd pair <id>     — initiate or accept pairing
+kcd pair [<id>]   — pair: with an ID sends a request; without one, listen mode (auto-accepts + Ctrl+C)
 kcd unpair <id>   — revoke trust
 kcd ping <id>     — send a ping
 kcd battery <id>  — fetch battery status
-kcd share <id> <file>         — send a file
-kcd clipboard [id]            — push local clipboard to phone
-kcd sftp request <id>         — request SFTP credentials
-kcd sftp mount <id>           — mount via sshfs
-kcd run list <id>             — list remote commands
-kcd run exec <id> <key>       — execute a remote command
-kcd reply <id> <reply-id> <msg>  — reply to a notification
-kcd call mute <id>            — mute an incoming call
-kcd findmyphone <id>          — ring the phone
-kcd lock <id>                 — lock the desktop
-kcd unlock <id>               — unlock the desktop
-kcd sms <id> <number> <msg>   — send an SMS
+kcd share <id> <file>              — send a file
+kcd clipboard [id]                 — push local clipboard to phone
+kcd sftp request <id>              — request SFTP credentials
+kcd sftp info <id>                 — show cached credentials and volumes
+kcd sftp volumes <id>              — list storage roots (multiPaths)
+kcd sftp mount <id>                — mount via sshfs
+kcd sftp unmount <id>              — unmount a previous mount
+kcd run list <id>                  — list remote commands
+kcd run exec <id> <key>            — execute a remote command
+kcd reply <id> <reply-id> <msg>   — reply to a notification
+kcd call mute <id>                 — mute an incoming call
+kcd findmyphone <id>               — ring the phone
+kcd lock <id>                      — lock the desktop
+kcd unlock <id>                    — unlock the desktop
+kcd sms <id> <number> <msg>        — send an SMS
 kcd watch [--events=...] [--json]  — stream live events
 ```
 
@@ -310,10 +313,10 @@ kcd watch [--events=...] [--json]  — stream live events
 4. Register all enabled plugins
 5. Start the TCP listener (inbound connections)
 6. Start the IPC Unix socket server
-7. Start UDP broadcaster and mDNS registration
-8. Start the mDNS browser (discovery listener)
+7. Start the UDP listener and mDNS browser (discovery listener — always on)
+8. Create the `BroadcasterController` in stopped state (broadcast is off by default)
 9. Block until context is cancelled (SIGINT / SIGTERM)
-10. Graceful shutdown: close listener, shutdown mDNS, stop broadcaster
+10. Graceful shutdown: close listener, shutdown mDNS, stop broadcaster (if running)
 
 ---
 
@@ -375,6 +378,6 @@ kcd/
 
 **Progress event throttling.** Share plugin progress events are rate-limited to one per 500ms via `progressThrottle`. Without this, a 1 GB transfer over a fast LAN fires ~32,000 events (one per 32 KB io.Copy buffer), flooding kcd watch consumers and consuming measurable CPU on the bus mutex.
 
-**Adaptive broadcast interval.** Once all known devices are connected the broadcast cadence drops to 60 seconds. With `enable_broadcast = false` the daemon sits at 0.0% idle CPU.
+**Adaptive broadcast interval.** Once all known devices are connected the broadcast cadence drops to 60 seconds. Broadcast is off by default (only active during `kcd pair` listen mode) so the daemon sits at 0.0% idle CPU in normal operation.
 
 **NDJSON event stream.** The `kcd watch` event stream is newline-delimited JSON, making it directly composable with standard Unix tools (`jq`, `grep`, `while read`) and Waybar's `exec` module without any custom parsing.

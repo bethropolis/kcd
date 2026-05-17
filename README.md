@@ -33,7 +33,8 @@
 | **Auto-reconnect** | Paired devices reconnect automatically after dropping |
 
 Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
-> Paired devices reconnect automatically using the last known IP when broadcast is disabled (`enable_broadcast = false`), so the daemon reaches 0.0% idle CPU without losing reconnection ability.
+
+> **Broadcast is off by default.** It only runs during `kcd pair` (listen mode) and stops immediately after. The UDP/mDNS **listener** stays always-on, so paired devices reconnect automatically via remembered IPs at 0.0% idle CPU.
 
 ---
 
@@ -117,15 +118,24 @@ a1b2c3d4_e5f6_7890_abcd_ef1234567890 Pixel 8 Pro       phone      Unpaired   tru
 
 ### 3. Pair
 
+Two ways to pair:
+
+**A. Send pair request to a discovered device:**
 ```bash
 kcd pair a1b2c3d4_e5f6_7890_abcd_ef1234567890
 ```
 
-Accept the pairing request on your phone. You can watch for the confirmation:
-
+Accept on your phone. Watch for confirmation:
 ```bash
 kcd watch --events=pair.accepted
 ```
+
+**B. Listen mode — accept any incoming request (headless/server):**
+```bash
+kcd pair
+```
+
+Broadcast starts automatically so the phone can find the PC. Accept on the phone, the CLI confirms and exits. Broadcast stops immediately. Press Ctrl+C to cancel.
 
 ### 4. Use it
 
@@ -151,8 +161,12 @@ kcd watch
 # Watch device connect/disconnect live
 kcd devices --watch
 
-# Unmount a previously mounted phone filesystem
-kcd sftp unmount <device-id>
+# SFTP — browse the phone's filesystem
+kcd sftp request <id>    # Request credentials from the phone
+kcd sftp info <id>       # Show cached credentials and storage volumes
+kcd sftp volumes <id>    # List available storage roots (multiPaths)
+kcd sftp mount <id>      # Mount via sshfs and open in file manager
+kcd sftp unmount <id>    # Unmount a previously mounted filesystem
 ```
 
 ---
@@ -166,13 +180,6 @@ device_name = "my-desktop"
 device_type = "desktop"        # desktop | laptop | phone | tablet | tv
 tcp_port    = 1716
 log_level   = "info"           # debug | info | warn | error | quiet
-
-# Set to false once all devices are paired — reaches 0.0% idle CPU.
-enable_broadcast = true
-
-# Auto-accept pairing requests without prompting (headless/server use).
-# ⚠  Only enable on trusted networks.
-auto_accept_pairing = false
 
 # Directory where received files are saved.
 download_dir = "~/Downloads/kcd"
@@ -315,13 +322,7 @@ done
 
 ## Performance
 
-`kcd` is optimised for extremely low resource usage. After your devices are paired:
-
-1. Open `~/.config/kcd/kcd.toml`
-2. Set `enable_broadcast = false`
-3. Restart the daemon
-
-This reaches **0.0% idle CPU**. Your phone will still reconnect automatically (it remembers the IP from pairing); you only lose the ability to discover brand-new devices without entering an IP manually.
+`kcd` is optimised for extremely low resource usage. Broadcast is off by default (only enabled during `kcd pair` listen mode for discovery), so the daemon sits at **0.0% idle CPU** in normal operation. Paired phones reconnect automatically via the last known IP without any broadcast chatter.
 
 ---
 
