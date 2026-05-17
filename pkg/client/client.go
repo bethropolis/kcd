@@ -224,6 +224,18 @@ func (c *Client) SftpUnmount(deviceID string) error {
 	return err
 }
 
+// BroadcastStart asks the daemon to begin UDP/mDNS broadcasting.
+func (c *Client) BroadcastStart() error {
+	_, err := c.Call(ipc.CmdBroadcastStart, nil)
+	return err
+}
+
+// BroadcastStop asks the daemon to stop UDP/mDNS broadcasting.
+func (c *Client) BroadcastStop() error {
+	_, err := c.Call(ipc.CmdBroadcastStop, nil)
+	return err
+}
+
 // Status returns runtime status information from the daemon.
 func (c *Client) Status() (*ipc.StatusResponse, error) {
 	res, err := c.Call(ipc.CmdStatus, nil)

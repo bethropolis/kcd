@@ -10,6 +10,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
@@ -18,7 +19,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, ctx context.Context, tlsCfg *tls.Config, logger *zap.Logger, startedAt time.Time) {
+func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger *zap.Logger, startedAt time.Time) {
 	if cfg.Plugins.Notification {
 		if notifPl, ok := plugins.GetByName("Notification"); ok {
 			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications)
@@ -62,6 +63,15 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger)
 		}()
 
+		return ipc.Response{OK: true}
+	})
+
+	handler.Register(ipc.CmdBroadcastStart, func(req ipc.Request) ipc.Response {
+		bc.Start(ctx)
+		return ipc.Response{OK: true}
+	})
+	handler.Register(ipc.CmdBroadcastStop, func(req ipc.Request) ipc.Response {
+		bc.Stop()
 		return ipc.Response{OK: true}
 	})
 

@@ -68,7 +68,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	}
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	// TCP Listener
 	tcpListener, err := transport.Listen(":1716")
 	if err != nil {
@@ -77,11 +77,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, enableBroadcast bool, id
 	}
 	defer tcpListener.Close()
 
-	// UDP Broadcaster
-	if enableBroadcast {
-		broadcaster := discovery.NewBroadcaster(identity, 30*time.Second, logger)
-		go broadcaster.Run(ctx, devices.AllPairedDevicesConnected)
-	}
+	// Broadcast is off by default — controlled via `kcd pair` or IPC.
+	// The controller is started in stopped state.
 
 	// UDP/mDNS Listener (onDeviceFound)
 	onDeviceFound := func(ip net.IP, tcpPort int, peerIdentity *protocol.Packet) {

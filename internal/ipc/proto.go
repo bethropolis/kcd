@@ -17,6 +17,8 @@ const (
 	CmdRunExec        = "run_exec"
 	CmdShare          = "share"
 	CmdConnect        = "connect"
+	CmdBroadcastStart = "broadcast_start"
+	CmdBroadcastStop  = "broadcast_stop"
 	CmdWatch          = "watch"
 	CmdSftpMount      = "sftp_mount"
 	CmdSftpInfo       = "sftp_info"

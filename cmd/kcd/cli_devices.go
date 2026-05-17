@@ -3,8 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/urfave/cli/v2"
 )
 
@@ -70,15 +74,43 @@ request and auto-accepts it. Press Ctrl+C to cancel.`,
 
 		// Listen mode — wait for any incoming pair request
 		fmt.Println("Listening for pair requests… (Ctrl+C to cancel)")
-		result, err := cl.PairListen()
-		if err != nil {
-			return err
+
+		if err := cl.BroadcastStart(); err != nil {
+			return fmt.Errorf("failed to start broadcast: %w", err)
 		}
-		fmt.Printf("Paired with %s (%s)\n", result.DeviceName, result.DeviceID)
-		if result.VerificationKey != "" {
-			fmt.Printf("Verification code: %s\n", result.VerificationKey)
+
+		// Stop broadcast on Ctrl+C or normal exit
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer func() {
+			signal.Stop(sigCh)
+			_ = cl.BroadcastStop()
+		}()
+
+		type listenResult struct {
+			result *ipc.PairListenResult
+			err    error
 		}
-		return nil
+		resultCh := make(chan listenResult, 1)
+		go func() {
+			r, err := cl.PairListen()
+			resultCh <- listenResult{r, err}
+		}()
+
+		select {
+		case <-sigCh:
+			fmt.Println("\nCancelled")
+			return nil
+		case r := <-resultCh:
+			if r.err != nil {
+				return r.err
+			}
+			fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+			if r.result.VerificationKey != "" {
+				fmt.Printf("Verification code: %s\n", r.result.VerificationKey)
+			}
+			return nil
+		}
 	},
 }
 

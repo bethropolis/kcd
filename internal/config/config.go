@@ -22,7 +22,7 @@ type Config struct {
 	SocketPath        string                   `toml:"socket_path"`
 	DownloadDir       string                   `toml:"download_dir"`
 	TCPPort           int                      `toml:"tcp_port"`
-	EnableBroadcast   bool                     `toml:"enable_broadcast"`    // Toggle UDP discovery broadcast
+	// EnableBroadcast was removed — broadcast starts automatically with `kcd pair` (listen mode)
 	LogLevel          string                   `toml:"log_level"`           // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
 	// Old config values are silently ignored by the TOML parser.
@@ -57,7 +57,6 @@ func Defaults() *Config {
 	c.SocketPath = DefaultSocketPath()
 	c.DownloadDir = filepath.Join(home, "Downloads", "kcd")
 	c.TCPPort = 1716
-	c.EnableBroadcast = true
 	c.LogLevel = "info"
 
 	c.Plugins.Defaults()

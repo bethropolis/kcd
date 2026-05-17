@@ -1,6 +1,6 @@
 package daemon
 
-import (
+	import (
 	"context"
 	"crypto/x509"
 	"fmt"
@@ -14,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -114,10 +115,19 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, saveDevices, plugins)
 
-	// 4. IPC Server
+	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
+	incomingCaps, outgoingCaps := plugins.Capabilities()
+	identity, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", 1716, incomingCaps, outgoingCaps)
+	if err != nil {
+		return err
+	}
+
+	bc := discovery.NewBroadcasterController(identity, 30*time.Second, logger, devices.AllPairedDevicesConnected)
+
+	// 5. IPC Server
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus)
 
-	registerIPCRoutes(handler, cfg, devices, plugins, ctx, tlsCfg, logger, startedAt)
+	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
 
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
@@ -128,14 +138,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	// 5. Transport Layer
-	incomingCaps, outgoingCaps := plugins.Capabilities()
-	identity, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", 1716, incomingCaps, outgoingCaps)
-	if err != nil {
-		return err
-	}
-
-	go runTransport(ctx, tlsCfg, cfg.EnableBroadcast, identity, devices, plugins, cfg.DeviceID, logger)
+	// 6. Transport Layer
+	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger)
 
 	// Wait for context cancellation (SIGTERM)
 	if notifySocket := os.Getenv("NOTIFY_SOCKET"); notifySocket != "" {

@@ -6,12 +6,83 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/libp2p/zeroconf/v2"
 	"go.uber.org/zap"
 )
+
+// BroadcasterController manages the broadcast lifecycle — start/stop on demand.
+// Starts in stopped state. Broadcast is only active while Start() is in effect.
+type BroadcasterController struct {
+	identityPacket *protocol.Packet
+	interval       time.Duration
+	shouldReduce   func() bool
+	logger         *zap.Logger
+
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
+}
+
+// NewBroadcasterController creates a controller that starts in stopped state.
+func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger *zap.Logger, shouldReduce func() bool) *BroadcasterController {
+	return &BroadcasterController{
+		identityPacket: identity,
+		interval:       interval,
+		shouldReduce:   shouldReduce,
+		logger:         logger.With(zap.String("component", "broadcaster")),
+	}
+}
+
+// Start launches the UDP broadcaster loop in a background goroutine using a
+// child of parentCtx. No-op if already running.
+func (bc *BroadcasterController) Start(parentCtx context.Context) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if bc.running {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(parentCtx)
+	bc.cancel = cancel
+	bc.running = true
+
+	b := &Broadcaster{
+		identityPacket: bc.identityPacket,
+		interval:       bc.interval,
+		logger:         bc.logger,
+	}
+	go func() {
+		b.Run(ctx, bc.shouldReduce)
+		bc.mu.Lock()
+		bc.running = false
+		bc.mu.Unlock()
+	}()
+}
+
+// Stop cancels the broadcast loop. No-op if not running.
+func (bc *BroadcasterController) Stop() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if !bc.running || bc.cancel == nil {
+		return
+	}
+	bc.cancel()
+	bc.cancel = nil
+	bc.running = false
+}
+
+// IsRunning reports whether the broadcast loop is currently active.
+func (bc *BroadcasterController) IsRunning() bool {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.running
+}
 
 // Broadcaster sends identity packets over UDP to advertise the local device.
 type Broadcaster struct {

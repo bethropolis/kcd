@@ -21,11 +21,9 @@
 # Default: 1716
 # tcp_port = 1716
 
-# Broadcast identity packets over UDP so nearby devices can find this machine.
-# Set to false once all devices are paired to reach 0.0% idle CPU.
+# Broadcast is disabled by default. It starts automatically when you run
+# `kcd pair` (listen mode) and stops when pairing completes.
 # Paired phones reconnect automatically via the last known IP.
-# Default: true
-# enable_broadcast = true
 
 # ─── Pairing ──────────────────────────────────────────────────────────────────
 
