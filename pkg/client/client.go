@@ -91,6 +91,25 @@ func (c *Client) Devices() ([]device.DeviceInfo, error) {
 	return devices, nil
 }
 
+// PairListen enters listen mode: waits for an incoming pair request, auto-accepts
+// it, and returns the paired device info. Blocks up to 60 seconds.
+func (c *Client) PairListen() (*ipc.PairListenResult, error) {
+	// Use a longer timeout for the listen operation
+	savedTimeout := c.Timeout
+	c.Timeout = 70 * time.Second
+	defer func() { c.Timeout = savedTimeout }()
+
+	resp, err := c.Call(ipc.CmdPairListen, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ipc.PairListenResult
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &result)
+	}
+	return &result, nil
+}
+
 // Pair requests the daemon to pair with a specific device.
 func (c *Client) Pair(deviceID string) error {
 	_, err := c.Call(ipc.CmdPair, ipc.DevicePayload{DeviceID: deviceID})
@@ -154,6 +173,32 @@ func (c *Client) ShareFile(deviceID string, filePath string) error {
 func (c *Client) SftpMount(deviceID string) error {
 	_, err := c.Call(ipc.CmdSftpMount, ipc.DevicePayload{DeviceID: deviceID})
 	return err
+}
+
+// SftpInfo returns the cached SFTP connection details for a device.
+func (c *Client) SftpInfo(deviceID string) (*ipc.SftpInfoResponse, error) {
+	resp, err := c.Call(ipc.CmdSftpInfo, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	var info ipc.SftpInfoResponse
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &info)
+	}
+	return &info, nil
+}
+
+// SftpVolumes returns the list of available storage volumes from a device.
+func (c *Client) SftpVolumes(deviceID string) ([]ipc.StorageVolumeResponse, error) {
+	resp, err := c.Call(ipc.CmdSftpVolumes, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	var volumes []ipc.StorageVolumeResponse
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &volumes)
+	}
+	return volumes, nil
 }
 
 // SftpMountLocal requests the daemon to request SFTP credentials from the

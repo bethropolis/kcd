@@ -23,6 +23,7 @@ type PluginConfig struct {
 	PauseMusic        bool `toml:"pausemusic"`
 	SendNotifications bool `toml:"sendnotifications"`
 	SMS               bool `toml:"sms"`
+	Presenter         bool `toml:"presenter"`
 }
 
 type BatteryConfig struct {
@@ -93,6 +94,7 @@ func (p *PluginConfig) Defaults() {
 	p.PauseMusic = true
 	p.SendNotifications = true
 	p.SMS = true
+	p.Presenter = true
 }
 
 func (c *BatteryConfig) Defaults() {

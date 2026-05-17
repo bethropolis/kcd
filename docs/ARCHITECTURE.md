@@ -60,7 +60,7 @@ The broadcast interval is adaptive: when `shouldReduce()` returns true (all know
 
 ### mDNS / Zeroconf (`_kdeconnect._udp`)
 
-At startup the `Broadcaster` registers the local device as a Zeroconf service with the `grandcat/zeroconf` library. TXT records carry `id`, `name`, `type`, and `protocol` fields per the KDE Connect spec.
+At startup the `Broadcaster` registers the local device as a Zeroconf service with the `libp2p/zeroconf/v2` library. TXT records carry `id`, `name`, `type`, and `protocol` fields per the KDE Connect spec.
 
 `Listener.runMdnsDiscovery` browses `_kdeconnect._udp.local.` and synthesises a `protocol.Packet` for every discovered peer — feeding it through the same `onDeviceFound` callback used by UDP. This makes mDNS transparent to the rest of the stack.
 

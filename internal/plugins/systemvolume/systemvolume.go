@@ -55,9 +55,11 @@ type SinkInfo struct {
 	MaxVolume   int    `json:"maxVolume"`
 }
 
-func (p *SystemVolumePlugin) Name() string            { return "SystemVolume" }
-func (p *SystemVolumePlugin) Timeout() time.Duration  { return 5 * time.Second }
-func (p *SystemVolumePlugin) IncomingTypes() []string { return []string{"kdeconnect.systemvolume"} }
+func (p *SystemVolumePlugin) Name() string           { return "SystemVolume" }
+func (p *SystemVolumePlugin) Timeout() time.Duration { return 5 * time.Second }
+func (p *SystemVolumePlugin) IncomingTypes() []string {
+	return []string{"kdeconnect.systemvolume.request"}
+}
 func (p *SystemVolumePlugin) OutgoingTypes() []string { return []string{"kdeconnect.systemvolume"} }
 
 func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -203,5 +205,20 @@ func (p *SystemVolumePlugin) setVolumeStr(name string, volumeStr string, muted b
 	return nil
 }
 
-func (p *SystemVolumePlugin) OnConnect(dev device.Sender)    {}
+func (p *SystemVolumePlugin) OnConnect(dev device.Sender) {
+	if p.backend == "" {
+		return
+	}
+	go func() {
+		sinks := p.getSinks()
+		type sinkListBody struct {
+			SinkList []SinkInfo `json:"sinkList"`
+		}
+		pkt, err := protocol.NewPacket("kdeconnect.systemvolume", sinkListBody{SinkList: sinks})
+		if err != nil {
+			return
+		}
+		_ = dev.Send(pkt)
+	}()
+}
 func (p *SystemVolumePlugin) OnDisconnect(dev device.Sender) {}

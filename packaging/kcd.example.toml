@@ -29,11 +29,10 @@
 
 # ─── Pairing ──────────────────────────────────────────────────────────────────
 
-# Automatically accept every incoming pair request without prompting.
-# Useful for headless servers and containers.
-# ⚠  Only enable this on trusted networks — any nearby device can pair silently.
-# Default: false
-# auto_accept_pairing = false
+# Pairing is interactive. Run `kcd pair` (no arguments) to enter listen mode:
+# it waits for any incoming pair request and auto-accepts it.
+#
+# To initiate pairing to a specific device, run `kcd pair <device-id>`.
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -106,6 +105,12 @@ mousepad = true
 
 # Browse the phone's filesystem over SFTP.
 # Optional: requires sshfs for the `kcd sftp mount` command.
+# Commands:
+#   kcd sftp request <id>   — Ask the phone to start its SFTP server
+#   kcd sftp info <id>      — Show cached connection details and volumes
+#   kcd sftp volumes <id>   — List available storage volumes (multiPaths)
+#   kcd sftp mount <id>     — Request credentials, mount via sshfs, open
+#   kcd sftp unmount <id>   — Unmount a previously mounted filesystem
 sftp = true
 
 # Ring the phone to locate it.
@@ -123,6 +128,11 @@ sendnotifications = true
 # Send SMS messages via a connected phone.
 # Note: receiving SMS threads is not yet supported.
 sms = true
+
+# Presenter remote — control slideshow presentations from the phone.
+# Gyroscope-based pointer: requires xdotool (X11) or ydotool (Wayland).
+# Screen size detection: requires xdpyinfo (X11) or wlr-randr (Wayland).
+presenter = true
 
 # ─── RunCommand: exposed commands ─────────────────────────────────────────────
 # Shell commands that the RunCommand plugin makes available to your phone.

@@ -18,8 +18,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const dbusTimeout = 500 * time.Millisecond
-
 type trackedPlayer struct {
 	busName     string
 	uniqueName  string
@@ -41,7 +39,6 @@ type MPRISPlugin struct {
 	lastTracks  map[string]trackIdentity
 	lastStates  map[string]*NowPlaying
 	artRequests map[string]time.Time
-	prevVolume  int
 }
 
 type trackIdentity struct {
@@ -60,7 +57,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 		logger.Info("mpris: connected to D-Bus session bus")
 	}
 
-	return &MPRISPlugin{
+	p := &MPRISPlugin{
 		tlsConfig:   tlsConfig,
 		logger:      logger.With(zap.String("plugin", "mpris")),
 		dbus:        dbusConn,
@@ -69,8 +66,16 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 		lastTracks:  make(map[string]trackIdentity),
 		lastStates:  make(map[string]*NowPlaying),
 		artRequests: make(map[string]time.Time),
-		prevVolume:  -1,
 	}
+
+	// Start the watcher immediately (like C++ does in constructor).
+	// Devices are registered lazily as packets arrive.
+	watchCtx, cancel := context.WithCancel(context.Background())
+	p.watchCancel = cancel
+	p.watching = true
+	p.startWatcher(watchCtx)
+
+	return p
 }
 
 func (p *MPRISPlugin) Name() string           { return "MPRIS" }
@@ -120,12 +125,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
 		p.devices[dev.ID()] = dev
-		if !p.watching {
-			p.watching = true
-			watchCtx, cancel := context.WithCancel(context.Background())
-			p.watchCancel = cancel
-			p.startWatcher(watchCtx)
-		}
 	}
 	p.mu.Unlock()
 
@@ -245,15 +244,14 @@ func (p *MPRISPlugin) addPlayer(busName, uniqueName, displayName, shortName stri
 		displayName: displayName,
 		shortName:   shortName,
 	}
-	p.lastStates[displayName] = &NowPlaying{
-		Player:     displayName,
-		CanControl: true,
-	}
 	p.mu.Unlock()
 
 	p.logger.Debug("mpris: added player", zap.String("displayName", displayName), zap.String("busName", busName))
 
 	if state, err := p.playerState(displayName); err == nil {
+		p.mu.Lock()
+		p.lastStates[displayName] = state
+		p.mu.Unlock()
 		p.broadcast(state)
 	}
 
@@ -347,13 +345,6 @@ func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.devices, dev.ID())
-	if len(p.devices) == 0 && p.watching {
-		p.watching = false
-		if p.watchCancel != nil {
-			p.watchCancel()
-			p.watchCancel = nil
-		}
-	}
 }
 
 type DebugPlayerInfo struct {
@@ -370,6 +361,10 @@ type DebugPlayerInfo struct {
 	Length         int64  `json:"length"`
 	AlbumArtUrl    string `json:"albumArtUrl"`
 	CanSeek        bool   `json:"canSeek"`
+	CanGoNext      bool   `json:"canGoNext"`
+	CanGoPrevious  bool   `json:"canGoPrevious"`
+	CanPlay        bool   `json:"canPlay"`
+	CanPause       bool   `json:"canPause"`
 	Error          string `json:"error,omitempty"`
 }
 
@@ -410,6 +405,10 @@ func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 			info.Length = state.Length
 			info.AlbumArtUrl = state.AlbumArtUrl
 			info.CanSeek = state.CanSeek
+			info.CanGoNext = state.CanGoNext
+			info.CanGoPrevious = state.CanGoPrevious
+			info.CanPlay = state.CanPlay
+			info.CanPause = state.CanPause
 		} else {
 			info.Error = err.Error()
 		}

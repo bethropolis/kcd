@@ -24,7 +24,8 @@ type Config struct {
 	TCPPort           int                      `toml:"tcp_port"`
 	EnableBroadcast   bool                     `toml:"enable_broadcast"`    // Toggle UDP discovery broadcast
 	LogLevel          string                   `toml:"log_level"`           // "debug", "info", "warn", "error" (or "quiet")
-	AutoAcceptPairing bool                     `toml:"auto_accept_pairing"` // Auto-accept incoming pair requests (headless mode)
+	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
+	// Old config values are silently ignored by the TOML parser.
 	Plugins           PluginConfig             `toml:"plugins"`
 	Commands          map[string]string        `toml:"commands"`
 	Notifications     NotificationConfig       `toml:"notifications"`

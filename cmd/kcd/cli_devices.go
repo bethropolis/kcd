@@ -47,21 +47,37 @@ var devicesCmd = &cli.Command{
 
 var pairCmd = &cli.Command{
 
-	Name:      "pair",
-	Usage:     "Initiate pairing with a remote device",
-	ArgsUsage: "<device-id>",
+	Name:  "pair",
+	Usage: "Initiate pairing with a remote device",
+	Description: `With a device ID: send a pair request to that device.
+
+Without a device ID: enter listen mode. Waits for any incoming pair
+request and auto-accepts it. Press Ctrl+C to cancel.`,
+	ArgsUsage: "[device-id]",
 	Action: func(c *cli.Context) error {
-		if c.NArg() < 1 {
-			return fmt.Errorf("missing device ID")
-		}
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		if err := cl.Pair(c.Args().First()); err != nil {
+
+		if c.NArg() >= 1 {
+			if err := cl.Pair(c.Args().First()); err != nil {
+				return err
+			}
+			fmt.Println("Pairing request sent")
+			return nil
+		}
+
+		// Listen mode — wait for any incoming pair request
+		fmt.Println("Listening for pair requests… (Ctrl+C to cancel)")
+		result, err := cl.PairListen()
+		if err != nil {
 			return err
 		}
-		fmt.Println("Pairing request sent")
+		fmt.Printf("Paired with %s (%s)\n", result.DeviceName, result.DeviceID)
+		if result.VerificationKey != "" {
+			fmt.Printf("Verification code: %s\n", result.VerificationKey)
+		}
 		return nil
 	},
 }

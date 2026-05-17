@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
 	"github.com/bethropolis/kcd/internal/plugins/mousepad"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
+	"github.com/bethropolis/kcd/internal/plugins/presenter"
 	"github.com/bethropolis/kcd/internal/plugins/notification"
 	"github.com/bethropolis/kcd/internal/plugins/pair"
 	"github.com/bethropolis/kcd/internal/plugins/ping"
@@ -29,7 +30,7 @@ import (
 )
 
 func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger *zap.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
-	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.AutoAcceptPairing, cfg.Pairing, saveDevices, bus, logger)
+	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
 	if cfg.Plugins.Battery {
 		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger))
@@ -61,11 +62,14 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
 	}
+	if cfg.Plugins.Presenter {
+		plugins.Register(presenter.NewPresenterPlugin(logger))
+	}
 	if cfg.Plugins.SFTP {
 		plugins.Register(sftp.NewSftpPlugin(cfg.SFTP, bus, logger))
 	}
 	if cfg.Plugins.FindMyPhone {
-		plugins.Register(&findmyphone.FindMyPhonePlugin{})
+		plugins.Register(findmyphone.NewFindMyPhonePlugin())
 	}
 	if cfg.Plugins.LockDevice {
 		plugins.Register(lockdevice.NewLockDevicePlugin(logger))

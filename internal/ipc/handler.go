@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -48,6 +49,8 @@ func (h *Handler) HandleRequest(req Request) Response {
 		return h.handleDevices()
 	case CmdPair:
 		return h.handlePair(req.Payload)
+	case CmdPairListen:
+		return h.handlePairListen()
 	case CmdUnpair:
 		return h.handleUnpair(req.Payload)
 	case CmdPing:
@@ -162,6 +165,54 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 	h.saveDevices()
 
 	return Response{OK: true}
+}
+
+func (h *Handler) handlePairListen() Response {
+	// Check for any device already in StatePairRequestedByPeer
+	for _, dev := range h.devices.List() {
+		if dev.State() == device.StatePairRequestedByPeer {
+			return h.pairAcceptResult(dev, "")
+		}
+	}
+
+	if h.bus == nil || h.pairPlugin == nil {
+		return Response{OK: false, Error: "pair listen requires event bus and pair plugin"}
+	}
+
+	sub := h.bus.Subscribe(0, events.TypePairRequested)
+	defer sub.Close()
+
+	select {
+	case ev, ok := <-sub.C:
+		if !ok {
+			return Response{OK: false, Error: "event bus closed"}
+		}
+		dev, ok := h.devices.Get(ev.DeviceID)
+		if !ok {
+			return Response{OK: false, Error: "device disappeared"}
+		}
+		var vKey string
+		if m, ok := ev.Payload.(map[string]interface{}); ok {
+			if k, ok := m["verificationKey"].(string); ok {
+				vKey = k
+			}
+		}
+		return h.pairAcceptResult(dev, vKey)
+	case <-time.After(60 * time.Second):
+		return Response{OK: false, Error: "timed out waiting for pair request (60s)"}
+	}
+}
+
+func (h *Handler) pairAcceptResult(dev *device.Device, vKey string) Response {
+	if err := h.pairPlugin.AcceptPairing(dev); err != nil {
+		return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
+	}
+	data, _ := json.Marshal(PairListenResult{
+		DeviceID:        dev.ID(),
+		DeviceName:      dev.Name(),
+		VerificationKey: vKey,
+	})
+	return Response{OK: true, Data: data}
 }
 
 func (h *Handler) handlePing(payload []byte) Response {

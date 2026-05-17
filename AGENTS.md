@@ -232,7 +232,7 @@ Discovery is dual-mode and runs concurrently. Both paths call the same `onDevice
 | Method | How | When it works |
 |---|---|---|
 | UDP broadcast | Sends identity to `255.255.255.255:1716` + per-interface directed broadcasts | Same LAN, simple home networks |
-| mDNS / Zeroconf | Registers `_kdeconnect._udp.local.` via `grandcat/zeroconf`; browses for peers | Restricted networks, Docker, corporate Wi-Fi, newer Android |
+| mDNS / Zeroconf | Registers `_kdeconnect._udp.local.` via `libp2p/zeroconf/v2`; browses for peers | Restricted networks, Docker, corporate Wi-Fi, newer Android |
 
 The broadcast interval is adaptive. When `shouldReduce()` returns true (all paired devices already connected), the UDP interval increases to 60 seconds. Setting `enable_broadcast = false` in config disables UDP entirely — the daemon reaches 0.0% idle CPU. Paired phones reconnect automatically via remembered IP.
 
@@ -309,7 +309,7 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 | OOM on large file transfer | File buffered instead of streamed | Use `io.LimitReader` + `io.Copy` in share plugin |
 | Cert fingerprint mismatch loop | Phone was reinstalled or cert regenerated | Delete the device entry from `devices.json`, re-pair |
 | MPRIS plugin disabled silently | D-Bus session bus not available | Expected — MPRIS logs a `Warn` and continues without it |
-| mDNS not advertising | `grandcat/zeroconf` registration error | Check for port conflicts on mDNS port 5353; log level debug shows the error |
+| mDNS not advertising | `libp2p/zeroconf/v2` registration error | Check for port conflicts on mDNS port 5353; log level debug shows the error |
 | Desktop notifications show no icon | `libnotify < 0.8.0` | Upgrade to libnotify ≥ 0.8 (Ubuntu 22.04+, Fedora 36+) |
 | `kcd sftp mount` shows "permission denied" | sshfs path misconfiguration | Ensure kcd version includes the chroot fix — mount root is `user@ip:` not `user@ip:/storage/emulated/0` |
 | Paired device never auto-reconnects | Broadcast disabled and no IP cached | Connect manually once (`kcd connect <ip>`) to prime `LastIP`; subsequent drops will auto-reconnect |
@@ -323,6 +323,6 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 - KDE Connect meta / plugin list: https://github.com/KDE/kdeconnect-meta
 - `godbus` (D-Bus bindings): https://pkg.go.dev/github.com/godbus/dbus/v5
 - MPRIS2 spec: https://specifications.freedesktop.org/mpris-spec/latest/
-- `grandcat/zeroconf` (mDNS): https://github.com/grandcat/zeroconf
+- `libp2p/zeroconf/v2` (mDNS): https://github.com/libp2p/zeroconf
 - `urfave/cli/v2` (CLI framework): https://cli.urfave.org/v2/
 - `go.uber.org/zap` (logging): https://pkg.go.dev/go.uber.org/zap

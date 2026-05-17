@@ -12,305 +12,36 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/plugins/clipboard"
-	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
-	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"github.com/bethropolis/kcd/internal/plugins/notification"
-	"github.com/bethropolis/kcd/internal/plugins/sftp"
-	"github.com/bethropolis/kcd/internal/plugins/share"
-	"github.com/bethropolis/kcd/internal/plugins/sms"
-	"github.com/bethropolis/kcd/internal/plugins/telephony"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
 
 func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, ctx context.Context, tlsCfg *tls.Config, logger *zap.Logger, startedAt time.Time) {
-	// Apply notification filters from config.
 	if cfg.Plugins.Notification {
 		if notifPl, ok := plugins.GetByName("Notification"); ok {
 			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications)
 		}
 	}
 
-	// Register Plugin IPC handlers
 	if cfg.Plugins.Battery {
-		handler.Register(ipc.CmdBattery, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			charge, charging := dev.GetBattery()
-			data, _ := json.Marshal(map[string]interface{}{
-				"charge":   charge,
-				"charging": charging,
-			})
-			return ipc.Response{OK: true, Data: data}
-		})
+		registerBatteryRoutes(handler, devices)
 	}
-
 	if cfg.Plugins.Clipboard {
-		handler.Register(ipc.CmdClipboardPush, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			pl, ok := plugins.GetByName("Clipboard")
-			if !ok {
-				return ipc.Response{OK: false, Error: "clipboard plugin not enabled"}
-			}
-			if err := clipboard.Push(context.Background(), dev, pl.(*clipboard.ClipboardPlugin)); err != nil {
-				return ipc.Response{OK: false, Error: "clipboard push failed: " + err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
+		registerClipboardRoutes(handler, devices, plugins)
 	}
-
 	if cfg.Plugins.RunCommand {
-		handler.Register(ipc.CmdRunList, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			pkt, _ := protocol.NewPacket("kdeconnect.runcommand.request", map[string]bool{"requestCommandList": true})
-			if err := dev.Send(pkt); err != nil {
-				return ipc.Response{OK: false, Error: "failed to send runcommand list request"}
-			}
-			return ipc.Response{OK: true}
-		})
-		handler.Register(ipc.CmdRunExec, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			pkt, _ := protocol.NewPacket("kdeconnect.runcommand.request", map[string]string{"key": p.Key})
-			if err := dev.Send(pkt); err != nil {
-				return ipc.Response{OK: false, Error: "failed to send runcommand exec request"}
-			}
-			return ipc.Response{OK: true}
-		})
+		registerRunCommandRoutes(handler, devices)
 	}
-
 	if cfg.Plugins.Share {
-		handler.Register(ipc.CmdShare, func(req ipc.Request) ipc.Response {
-			var p ipc.SharePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			pl, ok := plugins.GetByName("Share")
-			if !ok {
-				return ipc.Response{OK: false, Error: "share plugin not enabled"}
-			}
-			sharePl, ok := pl.(*share.SharePlugin)
-			if !ok {
-				return ipc.Response{OK: false, Error: "invalid share plugin type"}
-			}
-			if err := sharePl.SendFile(context.Background(), dev, p.FilePath); err != nil {
-				return ipc.Response{OK: false, Error: "share failed: " + err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
+		registerShareRoutes(handler, devices, plugins)
 	}
-
 	if cfg.Plugins.SFTP {
-		handler.Register(ipc.CmdSftpMount, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SFTP")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sftp.SftpPlugin).RequestMount(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-		handler.Register(ipc.CmdSftpMountLocal, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SFTP")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			// RequestAndMount: sends the SFTP request to the phone, waits for
-			// credentials, mounts via sshfs, and opens xdg-open automatically.
-			browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev)
-			if err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			data, _ := json.Marshal(map[string]string{"path": browsePath})
-			return ipc.Response{OK: true, Data: data}
-		})
-		handler.Register(ipc.CmdSftpUnmount, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SFTP")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-			}
-			if err := pl.(*sftp.SftpPlugin).Unmount(p.DeviceID); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
+		registerSftpRoutes(handler, devices, plugins)
 	}
-
-	if cfg.Plugins.SMS {
-		handler.Register(ipc.CmdSendSMS, func(req ipc.Request) ipc.Response {
-			var p ipc.SMSPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SMS")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sms.SMSPlugin).SendSMS(dev, p.PhoneNumber, p.Message); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-	}
-
-	if cfg.Plugins.Telephony {
-		handler.Register(ipc.CmdCallMute, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("Telephony")
-			if !ok {
-				return ipc.Response{OK: false, Error: "telephony plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*telephony.TelephonyPlugin).Mute(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-	}
-
-	if cfg.Plugins.FindMyPhone {
-		handler.Register(ipc.CmdFindMyPhone, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("FindMyPhone")
-			if !ok {
-				return ipc.Response{OK: false, Error: "findmyphone plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*findmyphone.FindMyPhonePlugin).Ring(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-	}
-
-	if cfg.Plugins.LockDevice {
-		handler.Register(ipc.CmdLock, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("LockDevice")
-			if !ok {
-				return ipc.Response{OK: false, Error: "lockdevice plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*lockdevice.LockDevicePlugin).Lock(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-		handler.Register(ipc.CmdUnlock, func(req ipc.Request) ipc.Response {
-			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("LockDevice")
-			if !ok {
-				return ipc.Response{OK: false, Error: "lockdevice plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*lockdevice.LockDevicePlugin).Unlock(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-	}
-
-	if cfg.Plugins.Notification {
-		handler.Register(ipc.CmdNotifyReply, func(req ipc.Request) ipc.Response {
-			var p ipc.NotifyReplyPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("Notification")
-			if !ok {
-				return ipc.Response{OK: false, Error: "notification plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*notification.NotificationPlugin).RequestReply(dev, p.ReplyID, p.Message); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
-		})
-	}
+	registerCommRoutes(handler, cfg, devices, plugins)
+	registerDeviceRoutes(handler, cfg, devices, plugins)
 
 	handler.Register(ipc.CmdConnect, func(req ipc.Request) ipc.Response {
 		var p ipc.ConnectPayload
@@ -334,7 +65,6 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		return ipc.Response{OK: true}
 	})
 
-	// CmdStatus — runtime info
 	handler.Register(ipc.CmdStatus, func(req ipc.Request) ipc.Response {
 		uptime := time.Since(startedAt)
 		h := int(uptime.Hours())
@@ -368,7 +98,6 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		return ipc.Response{OK: true, Data: data}
 	})
 
-	// CmdMprisStatus — MPRIS debug info
 	handler.Register(ipc.CmdMprisStatus, func(req ipc.Request) ipc.Response {
 		pl, ok := plugins.GetByName("MPRIS")
 		if !ok {
@@ -378,5 +107,4 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		data, _ := json.Marshal(status)
 		return ipc.Response{OK: true, Data: data}
 	})
-
 }

@@ -24,7 +24,6 @@ const (
 type PairPlugin struct {
 	devices        *device.Registry
 	localCert      *x509.Certificate
-	autoAccept     bool
 	onStateChanged func() // callback to persist state
 	logger         *zap.Logger
 	bus            *events.Bus
@@ -35,11 +34,10 @@ type PairPlugin struct {
 }
 
 // NewPairPlugin creates a new pairing plugin.
-func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin {
+func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin {
 	return &PairPlugin{
 		devices:          devices,
 		localCert:        localCert,
-		autoAccept:       autoAccept,
 		cfg:              cfg,
 		onStateChanged:   onStateChanged,
 		logger:           logger.Named("pair"),
@@ -155,13 +153,7 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 				zap.String("code", vKey))
 		}
 
-		if p.autoAccept {
-			// Auto-accept mode: immediately accept
-			p.logger.Info("auto-accepting pair request", zap.String("device_id", dev.ID()))
-			return p.AcceptPairing(dev)
-		}
-
-		// Manual mode: set state and wait for user to accept via CLI
+		// Set state and wait for user to accept via CLI
 		dev.SetState(device.StatePairRequestedByPeer)
 		if p.onStateChanged != nil {
 			p.onStateChanged()

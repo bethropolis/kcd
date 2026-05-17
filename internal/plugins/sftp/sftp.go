@@ -51,6 +51,30 @@ type SftpBody struct {
 	// chrooted to its storage root, so this path is used as a navigation target
 	// WITHIN the mounted filesystem, not as the sshfs remote path.
 	Path string `json:"path"`
+	// MultiPaths lists all available storage root paths on the device
+	// (e.g. internal storage, SD card). Populated by Android API 30+.
+	MultiPaths []string `json:"multiPaths,omitempty"`
+	// PathNames provides human-readable labels for each path in MultiPaths.
+	PathNames []string `json:"pathNames,omitempty"`
+	// ErrorMessage is set when the device cannot start the SFTP server
+	// (e.g. missing storage permissions).
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+// StorageVolume describes a single browsable storage root on the device.
+type StorageVolume struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// SftpInfo holds the complete cached SFTP connection details for a device.
+type SftpInfo struct {
+	IP       string          `json:"ip"`
+	Port     json.Number     `json:"port"`
+	User     string          `json:"user"`
+	Password string          `json:"password"`
+	Path     string          `json:"path"`
+	Volumes  []StorageVolume `json:"volumes,omitempty"`
 }
 
 func (p *SftpPlugin) Name() string            { return "SFTP" }
@@ -64,6 +88,19 @@ func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.
 		return err
 	}
 
+	if body.ErrorMessage != "" {
+		p.logger.Warn("SFTP server error from device",
+			zap.String("device_id", dev.ID()),
+			zap.String("error", body.ErrorMessage),
+		)
+		if p.bus != nil {
+			p.bus.Publish(events.TypeSftpMount, dev.ID(), map[string]interface{}{
+				"error": body.ErrorMessage,
+			})
+		}
+		return nil
+	}
+
 	p.mu.Lock()
 	p.lastBody[dev.ID()] = body
 	p.mu.Unlock()
@@ -71,15 +108,28 @@ func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.
 	safeURI := fmt.Sprintf("sftp://%s@%s:%s%s", body.User, body.IP, body.Port.String(), body.Path)
 	p.logger.Info("SFTP server available", zap.String("uri", safeURI))
 
+	evtPayload := map[string]interface{}{
+		"uri":      fmt.Sprintf("sftp://%s:%s@%s:%s%s", body.User, body.Password, body.IP, body.Port.String(), body.Path),
+		"ip":       body.IP,
+		"port":     body.Port.String(),
+		"user":     body.User,
+		"password": body.Password,
+		"path":     body.Path,
+	}
+	if len(body.MultiPaths) > 0 {
+		volumes := make([]map[string]string, 0, len(body.MultiPaths))
+		for i, mp := range body.MultiPaths {
+			name := mp
+			if i < len(body.PathNames) {
+				name = body.PathNames[i]
+			}
+			volumes = append(volumes, map[string]string{"name": name, "path": mp})
+		}
+		evtPayload["volumes"] = volumes
+	}
+
 	if p.bus != nil {
-		p.bus.Publish(events.TypeSftpMount, dev.ID(), map[string]string{
-			"uri":      fmt.Sprintf("sftp://%s:%s@%s:%s%s", body.User, body.Password, body.IP, body.Port.String(), body.Path),
-			"ip":       body.IP,
-			"port":     body.Port.String(),
-			"user":     body.User,
-			"password": body.Password,
-			"path":     body.Path,
-		})
+		p.bus.Publish(events.TypeSftpMount, dev.ID(), evtPayload)
 	}
 
 	return nil
@@ -240,6 +290,52 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 	}
 
 	return browsePath, nil
+}
+
+// Info returns the cached SFTP connection details for a device.
+// Returns nil if no credentials have been received yet.
+func (p *SftpPlugin) Info(deviceID string) *SftpInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	body, ok := p.lastBody[deviceID]
+	if !ok {
+		return nil
+	}
+	info := &SftpInfo{
+		IP:       body.IP,
+		Port:     body.Port,
+		User:     body.User,
+		Password: body.Password,
+		Path:     body.Path,
+	}
+	for i, mp := range body.MultiPaths {
+		name := mp
+		if i < len(body.PathNames) {
+			name = body.PathNames[i]
+		}
+		info.Volumes = append(info.Volumes, StorageVolume{Name: name, Path: mp})
+	}
+	return info
+}
+
+// Volumes returns the list of available storage volumes from cached credentials.
+// Returns nil if no credentials or no multiPaths data.
+func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	body, ok := p.lastBody[deviceID]
+	if !ok || len(body.MultiPaths) == 0 {
+		return nil
+	}
+	volumes := make([]StorageVolume, 0, len(body.MultiPaths))
+	for i, mp := range body.MultiPaths {
+		name := mp
+		if i < len(body.PathNames) {
+			name = body.PathNames[i]
+		}
+		volumes = append(volumes, StorageVolume{Name: name, Path: mp})
+	}
+	return volumes
 }
 
 func (p *SftpPlugin) OnConnect(_ device.Sender)    {}

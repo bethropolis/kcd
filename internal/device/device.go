@@ -66,9 +66,6 @@ func (d *Device) SetBus(bus *events.Bus) {
 	d.bus = bus
 }
 
-// Send attempts to enqueue a packet for delivery to the device.
-// If the send channel is full, the packet is dropped to avoid blocking.
-
 // Connect establishes a connection for the device and starts the reader and writer loops.
 func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet), onConnect func(*Device), onDisconnect func(*Device)) {
 	d.mu.Lock()
@@ -188,10 +185,6 @@ func (d *Device) disconnectConn(conn *transport.Conn) {
 		bus.Publish(events.TypeDeviceDisconnected, d.id, nil)
 	}
 }
-
-// readLoop reads packets from the network and routes them.
-
-// writerLoop drains the send channel and writes packets to the network.
 
 // UpdateBattery updates the battery state of the device.
 func (d *Device) UpdateBattery(charge int, charging bool) {

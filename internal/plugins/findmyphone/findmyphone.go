@@ -13,6 +13,10 @@ import (
 // FindMyPhonePlugin sends a ring request to the paired device.
 type FindMyPhonePlugin struct{}
 
+func NewFindMyPhonePlugin() *FindMyPhonePlugin {
+	return &FindMyPhonePlugin{}
+}
+
 func (p *FindMyPhonePlugin) Name() string            { return "FindMyPhone" }
 func (p *FindMyPhonePlugin) Timeout() time.Duration  { return 5 * time.Second }
 func (p *FindMyPhonePlugin) IncomingTypes() []string { return []string{} }
