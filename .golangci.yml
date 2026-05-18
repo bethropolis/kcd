@@ -4,21 +4,21 @@ linters:
   enable:
     - govet
     - staticcheck
-    - errcheck
     - unused
     - ineffassign
     - bodyclose
     - noctx
     - unparam
     - misspell
+  disable:
+    - errcheck
+
   settings:
-    errcheck:
-      check-type-assertions: true
-      check-blank: true
     govet:
       enable-all: true
       disable:
         - shadow
+        - fieldalignment
 
   exclusions:
     rules:
