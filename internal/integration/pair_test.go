@@ -27,7 +27,6 @@ func TestPairFlowIntegration(t *testing.T) {
 	cfg.KeyFile = dir + "/key.pem"
 	cfg.DeviceID = "test-daemon-pair"
 	cfg.LogLevel = "debug"
-	cfg.AutoAcceptPairing = true
 	// Minimal plugins
 	cfg.Plugins.Battery = false
 	cfg.Plugins.Notification = false
@@ -92,6 +91,14 @@ func TestPairFlowIntegration(t *testing.T) {
 	}
 	if err := peer.SendPacket(conn, pairPkt); err != nil {
 		t.Fatalf("send pair: %v", err)
+	}
+
+	// Give the daemon a moment to process the pair request
+	time.Sleep(100 * time.Millisecond)
+
+	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
+	if err := cl.Pair("mock-peer"); err != nil {
+		t.Fatalf("accept pair: %v", err)
 	}
 
 	select {

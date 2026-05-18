@@ -28,7 +28,6 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	cfg.KeyFile = dir + "/key.pem"
 	cfg.DeviceID = "test-daemon-battery"
 	cfg.LogLevel = "debug"
-	cfg.AutoAcceptPairing = true
 	// Minimal plugins
 	cfg.Plugins.Battery = true
 	cfg.Plugins.Notification = false
