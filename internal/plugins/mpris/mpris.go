@@ -42,11 +42,7 @@ type MPRISPlugin struct {
 }
 
 type trackIdentity struct {
-	title     string
-	artist    string
-	album     string
 	rawArtUrl string
-	timestamp int64
 }
 
 func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {

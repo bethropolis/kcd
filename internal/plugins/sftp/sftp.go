@@ -283,7 +283,7 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 			if cmd == "" {
 				cmd = "xdg-open"
 			}
-			if err := exec.Command(cmd, browsePath).Start(); err != nil {
+			if err := exec.CommandContext(context.Background(), cmd, browsePath).Start(); err != nil {
 				p.logger.Debug("auto-open failed", zap.String("command", cmd), zap.Error(err))
 			}
 		}()
@@ -364,7 +364,7 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 		tool = "fusermount"
 	}
 
-	if out, err := exec.Command(tool, "-u", mountPoint).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), tool, "-u", mountPoint).CombinedOutput(); err != nil {
 		// Put the mount point back so the caller can retry.
 		p.mu.Lock()
 		p.mountPoints[deviceID] = mountPoint

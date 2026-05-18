@@ -101,9 +101,9 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	go func() {
 		var cmd *exec.Cmd
 		if p.isWayland {
-			cmd = exec.Command("wl-copy")
+			cmd = exec.CommandContext(context.Background(), "wl-copy")
 		} else {
-			cmd = exec.Command("xclip", "-selection", "clipboard")
+			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
 		}
 
 		cmd.Stdin = strings.NewReader(body.Content)
@@ -166,9 +166,9 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 
 		var cmd *exec.Cmd
 		if p.isWayland {
-			cmd = exec.Command("wl-copy", "--type", mimeType)
+			cmd = exec.CommandContext(context.Background(), "wl-copy", "--type", mimeType)
 		} else {
-			cmd = exec.Command("xclip", "-selection", "clipboard", "-t", mimeType, "-i")
+			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-t", mimeType, "-i")
 		}
 		cmd.Stdin = t
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -180,7 +180,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 }
 
 // downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, logger *zap.Logger) error {
+func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, _ *zap.Logger) error {
 	addr := fmt.Sprintf("%s:%d", ip.String(), port)
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{
@@ -212,9 +212,9 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	var cmd *exec.Cmd
 	if p.isWayland {
-		cmd = exec.Command("wl-paste", "-n")
+		cmd = exec.CommandContext(ctx, "wl-paste", "-n")
 	} else {
-		cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
+		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
 	}
 
 	out, err := cmd.Output()

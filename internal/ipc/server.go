@@ -40,7 +40,8 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Always attempt to remove the old socket if it exists
 	_ = os.Remove(s.path)
 
-	l, err := net.Listen("unix", s.path)
+	var lc net.ListenConfig
+	l, err := lc.Listen(ctx, "unix", s.path)
 	if err != nil {
 		return err
 	}

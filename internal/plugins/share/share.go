@@ -119,9 +119,9 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		go func() {
 			var cmd *exec.Cmd
 			if os.Getenv("WAYLAND_DISPLAY") != "" {
-				cmd = exec.Command("wl-copy")
+				cmd = exec.CommandContext(context.Background(), "wl-copy")
 			} else {
-				cmd = exec.Command("xclip", "-selection", "clipboard")
+				cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
 			}
 			cmd.Stdin = strings.NewReader(body.Text)
 			_ = cmd.Run()

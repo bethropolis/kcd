@@ -100,25 +100,24 @@ func ReadPacket(r *bufio.Reader) (*Packet, error) {
 	// ReadSlice is zero-allocation: it points directly to the reader's internal buffer.
 	line, err := r.ReadSlice('\n')
 	if err != nil {
-		if err == bufio.ErrBufferFull {
-			// The packet is larger than the default 4KB buffer (e.g. embedded art).
-			// Fall back to ReadBytes, which allocates a new slice to fit the rest.
-			rest, errBytes := r.ReadBytes('\n')
-
-			// Make a copy of line since ReadSlice data is volatile
+		switch err {
+		case bufio.ErrBufferFull:
+			rest, readErr := r.ReadBytes('\n')
+			if readErr != nil {
+				return nil, fmt.Errorf("protocol: read full line after buffer full: %w", readErr)
+			}
 			fullLine := make([]byte, len(line)+len(rest))
 			copy(fullLine, line)
 			copy(fullLine[len(line):], rest)
 			line = fullLine
-			err = errBytes
-		} else if err == io.EOF {
+		case io.EOF:
 			if len(line) == 0 {
 				return nil, fmt.Errorf("protocol: read: %w", err)
 			}
 			if len(line) > 0 && line[len(line)-1] != '\n' {
 				return nil, fmt.Errorf("protocol: read: truncated packet missing newline")
 			}
-		} else {
+		default:
 			return nil, fmt.Errorf("protocol: read: %w", err)
 		}
 	}

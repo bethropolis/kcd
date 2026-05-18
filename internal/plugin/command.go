@@ -33,12 +33,10 @@ func GetDBusEnv() []string {
 
 // NewPlayerctlCmd creates an exec.Cmd for playerctl with the correct environment.
 func NewPlayerctlCmd(ctx context.Context, args ...string) *exec.Cmd {
-	var cmd *exec.Cmd
-	if ctx != nil {
-		cmd = exec.CommandContext(ctx, "playerctl", args...)
-	} else {
-		cmd = exec.Command("playerctl", args...)
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	cmd := exec.CommandContext(ctx, "playerctl", args...)
 	cmd.Env = GetDBusEnv()
 	return cmd
 }

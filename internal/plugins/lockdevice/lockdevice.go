@@ -64,11 +64,11 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 	// Phone is requesting a lock/unlock action.
 	go func() {
 		if body.SetLocked {
-			if err := exec.Command("loginctl", "lock-session").Run(); err != nil {
+			if err := exec.CommandContext(context.Background(), "loginctl", "lock-session").Run(); err != nil {
 				p.logger.Warn("lockdevice: lock-session failed", zap.Error(err))
 			}
 		} else {
-			if err := exec.Command("loginctl", "unlock-session").Run(); err != nil {
+			if err := exec.CommandContext(context.Background(), "loginctl", "unlock-session").Run(); err != nil {
 				p.logger.Warn("lockdevice: unlock-session failed", zap.Error(err))
 			}
 		}
@@ -83,7 +83,7 @@ func (p *LockDevicePlugin) getLocked() bool {
 	if sessionID == "" {
 		sessionID = "auto" // loginctl will guess the current session
 	}
-	out, err := exec.Command("loginctl", "show-session", sessionID, "-p", "LockedHint").Output()
+	out, err := exec.CommandContext(context.Background(), "loginctl", "show-session", sessionID, "-p", "LockedHint").Output()
 	if err != nil {
 		return false
 	}
@@ -92,12 +92,12 @@ func (p *LockDevicePlugin) getLocked() bool {
 
 // Lock triggers an immediate session lock from the daemon/IPC side.
 func (p *LockDevicePlugin) Lock(dev device.Sender) error {
-	return exec.Command("loginctl", "lock-session").Run()
+	return exec.CommandContext(context.Background(), "loginctl", "lock-session").Run()
 }
 
 // Unlock triggers an immediate session unlock from the daemon/IPC side.
 func (p *LockDevicePlugin) Unlock(dev device.Sender) error {
-	return exec.Command("loginctl", "unlock-session").Run()
+	return exec.CommandContext(context.Background(), "loginctl", "unlock-session").Run()
 }
 
 func (p *LockDevicePlugin) OnConnect(dev device.Sender)    {}

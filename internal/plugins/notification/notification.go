@@ -49,7 +49,7 @@ func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus,
 
 	// Probe --print-id support by checking --help output.
 	// This is side-effect-free and immune to version string format changes.
-	if out, err := exec.Command("notify-send", "--help").CombinedOutput(); err == nil {
+	if out, err := exec.CommandContext(context.Background(), "notify-send", "--help").CombinedOutput(); err == nil {
 		p.canCloseNotifs = strings.Contains(string(out), "--print-id")
 	}
 
@@ -129,7 +129,7 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		if body.ID != "" {
 			if desktopID, ok := p.notifIDs.LoadAndDelete(body.ID); ok {
 				go func() {
-					_ = exec.Command("gdbus", "call", "--session",
+					_ = exec.CommandContext(context.Background(), "gdbus", "call", "--session",
 						"--dest", "org.freedesktop.Notifications",
 						"--object-path", "/org/freedesktop/Notifications",
 						"--method", "org.freedesktop.Notifications.CloseNotification",
@@ -295,7 +295,7 @@ func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, i
 		args = append(args, title, text)
 	}
 
-	out, err := exec.Command("notify-send", args...).Output()
+	out, err := exec.CommandContext(context.Background(), "notify-send", args...).Output()
 	if err == nil && p.canCloseNotifs && id != "" {
 		if desktopID := strings.TrimSpace(string(out)); desktopID != "" {
 			p.notifIDs.Store(id, desktopID)

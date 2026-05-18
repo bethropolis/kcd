@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"testing"
@@ -34,7 +35,9 @@ func TestConn_WriteReadPacket(t *testing.T) {
 	// Run TLS server
 	go func() {
 		tlsServer := tls.Server(serverNet, serverCfg)
-		if err := tlsServer.Handshake(); err != nil {
+		hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tlsServer.HandshakeContext(hctx); err != nil {
 			errCh <- err
 			return
 		}
@@ -52,7 +55,9 @@ func TestConn_WriteReadPacket(t *testing.T) {
 
 	// Run TLS client
 	tlsClient := tls.Client(clientNet, clientCfg)
-	if err := tlsClient.Handshake(); err != nil {
+	hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tlsClient.HandshakeContext(hctx); err != nil {
 		t.Fatalf("client handshake failed: %v", err)
 	}
 

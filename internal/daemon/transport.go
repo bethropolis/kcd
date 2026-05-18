@@ -68,9 +68,9 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	}
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+func runTransport(ctx context.Context, cfg *tls.Config, _ *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	// TCP Listener
-	tcpListener, err := transport.Listen(":1716")
+	tcpListener, err := transport.Listen(ctx, ":1716")
 	if err != nil {
 		logger.Error("failed to start TCP listener", zap.Error(err))
 		return

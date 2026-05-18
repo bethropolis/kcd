@@ -22,17 +22,21 @@ type Client struct {
 
 // Call dialed the daemon, sends a request, and returns the response.
 func (c *Client) Call(cmd string, payload interface{}) (*ipc.Response, error) {
-	conn, err := net.Dial("unix", c.SocketPath)
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	dialer := net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
 		return nil, fmt.Errorf("kcd daemon not running or socket error: %w", err)
 	}
 	defer conn.Close()
 
-	if c.Timeout > 0 {
-		conn.SetDeadline(time.Now().Add(c.Timeout))
-	} else {
-		conn.SetDeadline(time.Now().Add(5 * time.Second))
-	}
+	conn.SetDeadline(time.Now().Add(timeout))
 
 	var rawPayload []byte
 	if payload != nil {
@@ -308,7 +312,8 @@ func (c *Client) MprisStatus() (*ipc.MprisStatusResponse, error) {
 
 // WatchFile subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
-	conn, err := net.Dial("unix", c.SocketPath)
+	dialer := net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
 		return fmt.Errorf("kcd daemon not running or socket error: %w", err)
 	}

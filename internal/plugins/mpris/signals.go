@@ -144,7 +144,6 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 				if trackChanged {
 					p.lastTracks[displayName] = trackIdentity{
 						rawArtUrl: rawArtUrl,
-						timestamp: time.Now().UnixNano(),
 					}
 				}
 				p.mu.Unlock()

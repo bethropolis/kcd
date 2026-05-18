@@ -57,7 +57,7 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 
 	limitReader := io.LimitReader(conn, size)
 
-	var r io.Reader = limitReader
+	r := limitReader
 	if onProgress != nil {
 		r = io.TeeReader(limitReader, &progressWriter{total: size, callback: onProgress})
 	}
@@ -129,7 +129,7 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	)
 
 	tlsConn := tls.Server(conn, tlsConfig)
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(acceptCtx); err != nil {
 		if err == io.EOF {
 			logger.Debug("share: TLS handshake aborted by remote device (EOF)",
 				zap.String("remote_addr", conn.RemoteAddr().String()),

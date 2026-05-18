@@ -125,7 +125,9 @@ func (p *SystemVolumePlugin) getSinks() []SinkInfo {
 
 func (p *SystemVolumePlugin) getSinksWpctl() []SinkInfo {
 	// Get current volume from wpctl: wpctl get-volume @DEFAULT_AUDIO_SINK@
-	out, err := exec.Command("wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@").Output()
 	if err != nil {
 		return nil
 	}
@@ -150,7 +152,9 @@ func (p *SystemVolumePlugin) getSinksWpctl() []SinkInfo {
 }
 
 func (p *SystemVolumePlugin) getSinksPactl() []SinkInfo {
-	out, err := exec.Command("pactl", "get-sink-volume", "@DEFAULT_SINK@").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "pactl", "get-sink-volume", "@DEFAULT_SINK@").Output()
 	if err != nil {
 		return nil
 	}
@@ -164,7 +168,9 @@ func (p *SystemVolumePlugin) getSinksPactl() []SinkInfo {
 			}
 		}
 	}
-	muteOut, _ := exec.Command("pactl", "get-sink-mute", "@DEFAULT_SINK@").Output()
+	muteCtx, muteCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer muteCancel()
+	muteOut, _ := exec.CommandContext(muteCtx, "pactl", "get-sink-mute", "@DEFAULT_SINK@").Output()
 	muted := strings.Contains(string(muteOut), "yes")
 	return []SinkInfo{{
 		Name:        "@DEFAULT_SINK@",
@@ -180,27 +186,29 @@ func (p *SystemVolumePlugin) setVolume(name string, volume int, muted bool) erro
 	return p.setVolumeStr(name, strconv.Itoa(volume), muted)
 }
 
-func (p *SystemVolumePlugin) setVolumeStr(name string, volumeStr string, muted bool) error {
+func (p *SystemVolumePlugin) setVolumeStr(_ string, volumeStr string, muted bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	switch p.backend {
 	case "wpctl":
 		pct := volumeStr + "%"
-		if err := exec.Command("wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", pct).Run(); err != nil {
+		if err := exec.CommandContext(ctx, "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", pct).Run(); err != nil {
 			return err
 		}
 		muteArg := "0"
 		if muted {
 			muteArg = "1"
 		}
-		return exec.Command("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", muteArg).Run()
+		return exec.CommandContext(ctx, "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", muteArg).Run()
 	case "pactl":
-		if err := exec.Command("pactl", "set-sink-volume", "@DEFAULT_SINK@", volumeStr+"%").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "pactl", "set-sink-volume", "@DEFAULT_SINK@", volumeStr+"%").Run(); err != nil {
 			return err
 		}
 		muteArg := "false"
 		if muted {
 			muteArg = "true"
 		}
-		return exec.Command("pactl", "set-sink-mute", "@DEFAULT_SINK@", muteArg).Run()
+		return exec.CommandContext(ctx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", muteArg).Run()
 	}
 	return nil
 }

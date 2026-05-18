@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
@@ -12,8 +13,9 @@ type Listener struct {
 }
 
 // Listen starts a TCP listener on the given TCP address.
-func Listen(addr string) (*Listener, error) {
-	l, err := net.Listen("tcp", addr)
+func Listen(ctx context.Context, addr string) (*Listener, error) {
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("transport: listen on %s: %w", addr, err)
 	}

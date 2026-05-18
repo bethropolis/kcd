@@ -3,11 +3,13 @@ package testutil
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -29,7 +31,10 @@ func NewMockPeer(t *testing.T, tlsConfig *tls.Config) *MockPeer {
 // TCP initiator acts as TLS server).
 func (p *MockPeer) Dial(serverAddr string) net.Conn {
 	p.t.Helper()
-	conn, err := net.Dial("tcp", serverAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", serverAddr)
 	if err != nil {
 		p.t.Fatalf("mockpeer: dial %s: %v", serverAddr, err)
 	}
@@ -53,7 +58,9 @@ func (p *MockPeer) Dial(serverAddr string) net.Conn {
 
 	// Upgrade to TLS as server (TCP initiator = TLS server per KDE Connect spec).
 	tlsConn := tls.Server(conn, p.tlsConfig)
-	if err := tlsConn.Handshake(); err != nil {
+	handshakeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		p.t.Fatalf("mockpeer: tls handshake: %v", err)
 	}
 	return tlsConn

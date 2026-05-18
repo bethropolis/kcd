@@ -95,7 +95,7 @@ func (p *PairPlugin) Handle(ctx context.Context, sender device.Sender, pkt *prot
 	return p.handleUnpairRequest(ctx, dev)
 }
 
-func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, body protocol.PairBody) error {
+func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, body protocol.PairBody) error {
 	state := dev.State()
 
 	switch state {
@@ -165,7 +165,7 @@ func (p *PairPlugin) handlePairRequest(ctx context.Context, dev *device.Device, 
 	return nil
 }
 
-func (p *PairPlugin) handleUnpairRequest(ctx context.Context, dev *device.Device) error {
+func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) error {
 	state := dev.State()
 
 	switch state {

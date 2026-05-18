@@ -14,29 +14,29 @@ import (
 
 // Config holds all daemon configuration.
 type Config struct {
-	DeviceID          string                   `toml:"device_id"`
-	DeviceName        string                   `toml:"device_name"`
-	DeviceType        string                   `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
-	CertFile          string                   `toml:"cert_file"`
-	KeyFile           string                   `toml:"key_file"`
-	SocketPath        string                   `toml:"socket_path"`
-	DownloadDir       string                   `toml:"download_dir"`
-	TCPPort           int                      `toml:"tcp_port"`
+	DeviceID    string `toml:"device_id"`
+	DeviceName  string `toml:"device_name"`
+	DeviceType  string `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
+	CertFile    string `toml:"cert_file"`
+	KeyFile     string `toml:"key_file"`
+	SocketPath  string `toml:"socket_path"`
+	DownloadDir string `toml:"download_dir"`
+	TCPPort     int    `toml:"tcp_port"`
 	// EnableBroadcast was removed — broadcast starts automatically with `kcd pair` (listen mode)
-	LogLevel          string                   `toml:"log_level"`           // "debug", "info", "warn", "error" (or "quiet")
+	LogLevel string `toml:"log_level"` // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
 	// Old config values are silently ignored by the TOML parser.
-	Plugins           PluginConfig             `toml:"plugins"`
-	Commands          map[string]string        `toml:"commands"`
-	Notifications     NotificationConfig       `toml:"notifications"`
-	Battery           BatteryConfig            `toml:"battery"`
-	Notification      NotificationPluginConfig `toml:"notification_plugin"`
-	Share             ShareConfig              `toml:"share"`
-	SFTP              SFTPConfig               `toml:"sftp"`
-	Ping              PingConfig               `toml:"ping"`
-	Pairing           PairingConfig            `toml:"pairing"`
-	Mousepad          MousepadConfig           `toml:"mousepad"`
-	ConfigPath        string                   `toml:"-"` // populated at load time, never written to disk
+	Plugins       PluginConfig             `toml:"plugins"`
+	Commands      map[string]string        `toml:"commands"`
+	Notifications NotificationConfig       `toml:"notifications"`
+	Battery       BatteryConfig            `toml:"battery"`
+	Notification  NotificationPluginConfig `toml:"notification_plugin"`
+	Share         ShareConfig              `toml:"share"`
+	SFTP          SFTPConfig               `toml:"sftp"`
+	Ping          PingConfig               `toml:"ping"`
+	Pairing       PairingConfig            `toml:"pairing"`
+	Mousepad      MousepadConfig           `toml:"mousepad"`
+	ConfigPath    string                   `toml:"-"` // populated at load time, never written to disk
 }
 
 // PluginConfig toggles individual plugins on or off.

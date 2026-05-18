@@ -29,11 +29,15 @@ func StartTestDaemon(t *testing.T, cfg *config.Config) (context.CancelFunc, *cli
 
 	// Poll until the IPC socket is ready (up to 3 seconds).
 	deadline := time.Now().Add(3 * time.Second)
+	var d net.Dialer
 	for time.Now().Before(deadline) {
-		if conn, err := net.Dial("unix", cfg.SocketPath); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		if conn, err := d.DialContext(ctx, "unix", cfg.SocketPath); err == nil {
+			cancel()
 			conn.Close()
 			break
 		}
+		cancel()
 		time.Sleep(50 * time.Millisecond)
 	}
 

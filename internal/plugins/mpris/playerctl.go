@@ -82,15 +82,3 @@ func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
 	}
 	return pos
 }
-
-func (p *MPRISPlugin) getPlayerArtUrl(busName string) string {
-	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
-	var meta map[string]dbus.Variant
-	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Metadata").Store(&meta); err != nil {
-		return ""
-	}
-	if v, ok := meta["mpris:artUrl"]; ok {
-		return v.Value().(string)
-	}
-	return ""
-}

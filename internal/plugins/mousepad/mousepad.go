@@ -317,7 +317,7 @@ func (p *MousepadPlugin) execKeyFallback(keyName string) {
 }
 
 func (p *MousepadPlugin) runCmd(name string, arg ...string) {
-	if out, err := exec.Command(name, arg...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), name, arg...).CombinedOutput(); err != nil {
 		p.logger.Debug("command failed", zap.String("cmd", name), zap.Error(err), zap.String("output", string(out)))
 	}
 }

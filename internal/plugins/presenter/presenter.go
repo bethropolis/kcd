@@ -44,10 +44,10 @@ type PresenterBody struct {
 // NewPresenterPlugin creates a new presenter remote plugin.
 func NewPresenterPlugin(logger *zap.Logger) *PresenterPlugin {
 	p := &PresenterPlugin{
-		logger:  logger.With(zap.String("plugin", "Presenter")),
-		xPos:    0.5,
-		yPos:    0.5,
-		moveCh:  make(chan PresenterBody, 1),
+		logger: logger.With(zap.String("plugin", "Presenter")),
+		xPos:   0.5,
+		yPos:   0.5,
+		moveCh: make(chan PresenterBody, 1),
 	}
 	p.detectScreen()
 	go p.worker()
@@ -72,7 +72,7 @@ func (p *PresenterPlugin) Timeout() time.Duration  { return 2 * time.Second }
 func (p *PresenterPlugin) IncomingTypes() []string { return []string{"kdeconnect.presenter"} }
 func (p *PresenterPlugin) OutgoingTypes() []string { return nil }
 
-func (p *PresenterPlugin) OnConnect(_ device.Sender)   {}
+func (p *PresenterPlugin) OnConnect(_ device.Sender)    {}
 func (p *PresenterPlugin) OnDisconnect(_ device.Sender) {}
 
 // Handle dispatches a presenter packet to the worker goroutine.
@@ -138,7 +138,7 @@ func (p *PresenterPlugin) handleBody(body PresenterBody) {
 // getScreenSize attempts to detect the screen resolution via xdpyinfo (X11)
 // or wlr-randr (Wayland). Returns 0x0 if neither is available.
 func getScreenSize() (int, int) {
-	out, err := exec.Command("xdpyinfo").Output()
+	out, err := exec.CommandContext(context.Background(), "xdpyinfo").Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "dimensions:") {
@@ -150,7 +150,7 @@ func getScreenSize() (int, int) {
 		}
 	}
 
-	out, err = exec.Command("wlr-randr").Output()
+	out, err = exec.CommandContext(context.Background(), "wlr-randr").Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
@@ -169,10 +169,10 @@ func getScreenSize() (int, int) {
 // moveCursor moves the system cursor to the given absolute screen coordinates.
 // Prefers ydotool (Wayland) with xdotool as fallback (X11).
 func moveCursor(x, y int) {
-	cmd := exec.Command("ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y))
+	cmd := exec.CommandContext(context.Background(), "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y))
 	if err := cmd.Run(); err == nil {
 		return
 	}
 
-	exec.Command("xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y)).Run()
+	exec.CommandContext(context.Background(), "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y)).Run()
 }

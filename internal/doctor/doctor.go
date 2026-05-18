@@ -2,6 +2,7 @@
 package doctor
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/exec"
@@ -66,7 +67,10 @@ func Run() []Check {
 
 func checkDaemon() Check {
 	socketPath := config.DefaultSocketPath()
-	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
+	dialer := net.Dialer{Timeout: 1 * time.Second}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err == nil {
 		conn.Close()
 		return Check{Name: "daemon running", Pass: true}
@@ -94,7 +98,8 @@ func checkUDPPort(daemonRunning bool) Check {
 	if daemonRunning {
 		return Check{Name: "port 1716/udp open", Pass: true}
 	}
-	l, err := net.ListenPacket("udp", ":1716")
+	var lc net.ListenConfig
+	l, err := lc.ListenPacket(context.Background(), "udp", ":1716")
 	if err != nil {
 		return Check{Name: "port 1716/udp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
 	}
@@ -106,7 +111,8 @@ func checkTCPPort(daemonRunning bool) Check {
 	if daemonRunning {
 		return Check{Name: "port 1716/tcp open", Pass: true}
 	}
-	l, err := net.Listen("tcp", ":1716")
+	var lc net.ListenConfig
+	l, err := lc.Listen(context.Background(), "tcp", ":1716")
 	if err != nil {
 		return Check{Name: "port 1716/tcp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,7 +70,7 @@ func clipboardWatch() error {
 	fmt.Println("Watching for clipboard changes (Ctrl+C to stop)…")
 
 	for {
-		cmd := exec.Command("wl-paste", "--watch", self, "clipboard")
+		cmd := exec.CommandContext(context.Background(), "wl-paste", "--watch", self, "clipboard")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
