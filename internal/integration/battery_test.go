@@ -91,7 +91,13 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	pairPkt, _ := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
 	_ = peer.SendPacket(conn, pairPkt)
 
-	// Wait a moment for pairing to be processed
+	// Give daemon time to process the pair request
+	time.Sleep(100 * time.Millisecond)
+
+	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
+	if err := cl.Pair("mock-peer"); err != nil {
+		t.Fatalf("accept pair: %v", err)
+	}
 	time.Sleep(100 * time.Millisecond)
 
 	// Send battery packet
