@@ -74,6 +74,7 @@ clipboard = true
 notification = true
 
 # Receive files and URLs from the phone, and send files to it.
+# Note: directory transfer is not supported (individual files only).
 share = true
 
 # Expose local shell commands to the phone.
@@ -114,17 +115,22 @@ sftp = true
 # Ring the phone to locate it.
 findmyphone = true
 
+# Let the phone ring this machine to locate it.
+findthisdevice = true
+
 # Lock / unlock the desktop session via loginctl.
 lockdevice = true
 
 # Control desktop audio volume from the phone via D-Bus / PulseAudio-PipeWire.
 systemvolume = true
 
-# Send desktop notifications to the phone.
-sendnotifications = true
-
-# Send SMS messages via a connected phone.
-# Note: receiving SMS threads is not yet supported.
+# Send and receive SMS messages via a connected phone.
+# Commands:
+#   kcd sms send <id> <phone> <msg>        — Send an SMS
+#   kcd sms conversations <id>             — List all conversations (results via `kcd watch --events sms.incoming`)
+#   kcd sms conversation <id> <thread>     — Show a specific conversation
+#   kcd sms attachment <id> <part> <uid>   — Request an MMS attachment file
+# See the [sms] section below for notification settings.
 sms = true
 
 # Presenter remote — control slideshow presentations from the phone.
@@ -207,6 +213,11 @@ suspend = "systemctl suspend"
 
 [pairing]
 # timeout_secs = 30             # how long to wait for a pairing response
+
+# ─── SMS: notification settings ──────────────────────────────────────────────
+
+[sms]
+# notify_incoming = true       # show a desktop notification on incoming SMS
 
 # ─── Mousepad: remote input settings ─────────────────────────────────────────
 

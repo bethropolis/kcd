@@ -36,6 +36,7 @@ type Config struct {
 	Ping          PingConfig               `toml:"ping"`
 	Pairing       PairingConfig            `toml:"pairing"`
 	Mousepad      MousepadConfig           `toml:"mousepad"`
+	SMS           SMSConfig                `toml:"sms"`
 	ConfigPath    string                   `toml:"-"` // populated at load time, never written to disk
 }
 
@@ -68,6 +69,7 @@ func Defaults() *Config {
 	c.Ping.Defaults()
 	c.Pairing.Defaults()
 	c.Mousepad.Defaults()
+	c.SMS.Defaults()
 
 	return c
 }

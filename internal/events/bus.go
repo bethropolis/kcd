@@ -34,6 +34,9 @@ const (
 	TypeSftpMount            EventType = "sftp.mount"
 	TypeNotificationCanceled EventType = "notification.canceled"
 	TypeVolumeUpdate         EventType = "volume.update"
+	TypeSMSIncoming          EventType = "sms.incoming"
+	TypeSMSAttachment        EventType = "sms.attachment"
+	TypeRingReceived         EventType = "ring.received"
 )
 
 const (

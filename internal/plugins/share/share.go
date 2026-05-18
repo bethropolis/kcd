@@ -215,7 +215,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	}
 
 	if stat.IsDir() {
-		return fmt.Errorf("share: directory transfer not supported yet")
+		return fmt.Errorf("share: directory transfer is not supported")
 	}
 
 	// Bind to an available side-channel port (using config range)

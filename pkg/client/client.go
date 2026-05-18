@@ -297,6 +297,28 @@ func (c *Client) SendSMS(deviceID, phoneNumber, message string) error {
 	return err
 }
 
+// SmsRequestConversations asks a device to send a list of all SMS conversations.
+func (c *Client) SmsRequestConversations(deviceID string) error {
+	_, err := c.Call(ipc.CmdSmsRequestConvs, ipc.DevicePayload{DeviceID: deviceID})
+	return err
+}
+
+// SmsRequestConversation asks a device to send messages from a specific thread.
+func (c *Client) SmsRequestConversation(deviceID string, threadID int64) error {
+	_, err := c.Call(ipc.CmdSmsRequestConv, ipc.SMSConvPayload{DeviceID: deviceID, ThreadID: threadID})
+	return err
+}
+
+// SmsRequestAttachment asks a device to send an MMS attachment file.
+func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdentifier string) error {
+	_, err := c.Call(ipc.CmdSmsRequestAttachment, ipc.SMSAttachmentPayload{
+		DeviceID:         deviceID,
+		PartID:           partID,
+		UniqueIdentifier: uniqueIdentifier,
+	})
+	return err
+}
+
 // MprisStatus returns MPRIS plugin debug information.
 func (c *Client) MprisStatus() (*ipc.MprisStatusResponse, error) {
 	res, err := c.Call(ipc.CmdMprisStatus, nil)

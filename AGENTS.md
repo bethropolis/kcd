@@ -102,6 +102,7 @@ error message may be confusing.
 | Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin` |
 | Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin` |
 | SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin` |
+| SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *SMSPlugin` |
 
 ### Interface
 
@@ -290,7 +291,6 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 
 | Area | Status |
 |---|---|
-| **SMS receive** | Not implemented. `SMSPlugin.IncomingTypes()` returns `[]string{}`. Sending SMS works. This gap is known and accepted — no plans to implement. |
 | **Mousepad keyboard** special keys | Intentionally unhandled — absent from the KDE Connect spec. |
 
 ---

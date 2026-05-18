@@ -32,6 +32,63 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 			}
 			return ipc.Response{OK: true}
 		})
+
+		handler.Register(ipc.CmdSmsRequestConvs, func(req ipc.Request) ipc.Response {
+			var p ipc.DevicePayload
+			if err := json.Unmarshal(req.Payload, &p); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+			pl, ok := plugins.GetByName("SMS")
+			if !ok {
+				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
+			}
+			dev, ok := devices.Get(p.DeviceID)
+			if !ok {
+				return ipc.Response{OK: false, Error: "device not found"}
+			}
+			if err := pl.(*sms.SMSPlugin).RequestConversations(dev); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
+
+		handler.Register(ipc.CmdSmsRequestConv, func(req ipc.Request) ipc.Response {
+			var p ipc.SMSConvPayload
+			if err := json.Unmarshal(req.Payload, &p); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+			pl, ok := plugins.GetByName("SMS")
+			if !ok {
+				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
+			}
+			dev, ok := devices.Get(p.DeviceID)
+			if !ok {
+				return ipc.Response{OK: false, Error: "device not found"}
+			}
+			if err := pl.(*sms.SMSPlugin).RequestConversation(dev, p.ThreadID, p.RangeStartTimestamp, p.NumberToRequest); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
+
+		handler.Register(ipc.CmdSmsRequestAttachment, func(req ipc.Request) ipc.Response {
+			var p ipc.SMSAttachmentPayload
+			if err := json.Unmarshal(req.Payload, &p); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+			pl, ok := plugins.GetByName("SMS")
+			if !ok {
+				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
+			}
+			dev, ok := devices.Get(p.DeviceID)
+			if !ok {
+				return ipc.Response{OK: false, Error: "device not found"}
+			}
+			if err := pl.(*sms.SMSPlugin).RequestAttachment(dev, p.PartID, p.UniqueIdentifier); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
 	}
 	if cfg.Plugins.Telephony {
 		handler.Register(ipc.CmdCallMute, func(req ipc.Request) ipc.Response {

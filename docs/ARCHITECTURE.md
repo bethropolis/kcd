@@ -189,10 +189,9 @@ Plugin execution is wrapped in a context with the plugin's declared `Timeout()` 
 | `pair` | `kdeconnect.pair` | Manages the pairing handshake and certificate fingerprint verification |
 | `ping` | `kdeconnect.ping` | Fires `ping.received`; can be sent outbound |
 | `runcommand` | `kdeconnect.runcommand` | Executes commands from the `[commands]` config table |
-| `sendnotification` | — | Sends `kdeconnect.notification` outbound |
+| `sms` | `kdeconnect.sms.messages`, `kdeconnect.sms.attachment_file` | Sends `kdeconnect.sms.request`, `kdeconnect.sms.request_conversations`, `kdeconnect.sms.request_conversation`, `kdeconnect.sms.request_attachment` |
 | `sftp` | `kdeconnect.sftp` | Parses `multiPaths`, `pathNames`, and `errorMessage` from the phone's response. `Info()` returns cached credentials + `StorageVolume` slices; `Volumes()` lists storage roots with human-readable names. `Handle()` logs errors when the phone returns `errorMessage` (e.g. missing storage permission). Mounts at server root to avoid chroot double-path bug; tracks mounts in `mountPoints` map; `Unmount()` calls `fusermount3`/`fusermount` |
 | `share` | `kdeconnect.share.request` | Streaming file receive + URL/text handling; fires progress events |
-| `sms` | — | Sends `kdeconnect.sms.request` outbound (receive not yet implemented) |
 | `systemvolume` | `kdeconnect.systemvolume` | Accepts `bus`; publishes `volume.update` on volume/mute changes |
 | `telephony` | `kdeconnect.telephony` | Fires `telephony.ringing`, `.missed`, `.canceled` |
 | `connectivity` | `kdeconnect.connectivity_report` | Fires `connectivity.update` |
@@ -238,6 +237,8 @@ Each `Subscriber` holds a buffered channel (capacity 64). If a subscriber falls 
 | `connectivity.update` | Signal strength report |
 | `volume.update` | Desktop volume changed from phone |
 | `sftp.mount` | SFTP credentials received |
+| `sms.incoming` | SMS message received from phone (batch, one event per message) |
+| `sms.attachment` | MMS attachment file downloaded to cache directory |
 
 ---
 
@@ -297,7 +298,10 @@ kcd call mute <id>                 — mute an incoming call
 kcd findmyphone <id>               — ring the phone
 kcd lock <id>                      — lock the desktop
 kcd unlock <id>                    — unlock the desktop
-kcd sms <id> <number> <msg>        — send an SMS
+kcd sms send <id> <number> <msg>    — send an SMS
+kcd sms conversations <id>          — request all conversations (results via `kcd watch`)
+kcd sms conversation <id> <thread>  — request a specific conversation thread
+kcd sms attachment <id> <part> <uid> — request an MMS attachment file
 kcd watch [--events=...] [--json]  — stream live events
 ```
 
@@ -348,8 +352,7 @@ kcd/
 │   │   ├── pair/
 │   │   ├── ping/
 │   │   ├── runcommand/
-│   │   ├── sendnotification/
-│   │   ├── sftp/
+    │   │   ├── sftp/
 │   │   ├── share/
 │   │   ├── sms/
 │   │   ├── systemvolume/

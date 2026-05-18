@@ -6,33 +6,36 @@ import "encoding/json"
 
 // Supported IPC command constants.
 const (
-	CmdDevices        = "devices"
-	CmdPair           = "pair"
-	CmdPairListen     = "pair_listen"
-	CmdUnpair         = "unpair"
-	CmdPing           = "ping"
-	CmdBattery        = "battery"
-	CmdClipboardPush  = "clipboard_push"
-	CmdRunList        = "run_list"
-	CmdRunExec        = "run_exec"
-	CmdShare          = "share"
-	CmdConnect        = "connect"
-	CmdBroadcastStart = "broadcast_start"
-	CmdBroadcastStop  = "broadcast_stop"
-	CmdWatch          = "watch"
-	CmdSftpMount      = "sftp_mount"
-	CmdSftpInfo       = "sftp_info"
-	CmdSftpVolumes    = "sftp_volumes"
-	CmdNotifyReply    = "notify_reply"
-	CmdCallMute       = "call_mute"
-	CmdFindMyPhone    = "findmyphone"
-	CmdLock           = "lock"
-	CmdUnlock         = "unlock"
-	CmdSendSMS        = "send_sms"
-	CmdSftpMountLocal = "sftp_mount_local"
-	CmdSftpUnmount    = "sftp_unmount"
-	CmdStatus         = "status"
-	CmdMprisStatus    = "mpris_status"
+	CmdDevices              = "devices"
+	CmdPair                 = "pair"
+	CmdPairListen           = "pair_listen"
+	CmdUnpair               = "unpair"
+	CmdPing                 = "ping"
+	CmdBattery              = "battery"
+	CmdClipboardPush        = "clipboard_push"
+	CmdRunList              = "run_list"
+	CmdRunExec              = "run_exec"
+	CmdShare                = "share"
+	CmdConnect              = "connect"
+	CmdBroadcastStart       = "broadcast_start"
+	CmdBroadcastStop        = "broadcast_stop"
+	CmdWatch                = "watch"
+	CmdSftpMount            = "sftp_mount"
+	CmdSftpInfo             = "sftp_info"
+	CmdSftpVolumes          = "sftp_volumes"
+	CmdNotifyReply          = "notify_reply"
+	CmdCallMute             = "call_mute"
+	CmdFindMyPhone          = "findmyphone"
+	CmdLock                 = "lock"
+	CmdUnlock               = "unlock"
+	CmdSendSMS              = "send_sms"
+	CmdSmsRequestConvs      = "sms_request_conversations"
+	CmdSmsRequestConv       = "sms_request_conversation"
+	CmdSmsRequestAttachment = "sms_request_attachment"
+	CmdSftpMountLocal       = "sftp_mount_local"
+	CmdSftpUnmount          = "sftp_unmount"
+	CmdStatus               = "status"
+	CmdMprisStatus          = "mpris_status"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -89,6 +92,21 @@ type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`
 	PhoneNumber string `json:"phoneNumber"`
 	Message     string `json:"message"`
+}
+
+// SMSConvPayload is used for CmdSmsRequestConv.
+type SMSConvPayload struct {
+	DeviceID            string `json:"deviceId"`
+	ThreadID            int64  `json:"threadID"`
+	RangeStartTimestamp int64  `json:"rangeStartTimestamp,omitempty"`
+	NumberToRequest     int64  `json:"numberToRequest,omitempty"`
+}
+
+// SMSAttachmentPayload is used for CmdSmsRequestAttachment.
+type SMSAttachmentPayload struct {
+	DeviceID         string `json:"deviceId"`
+	PartID           int64  `json:"partID"`
+	UniqueIdentifier string `json:"uniqueIdentifier"`
 }
 
 // StatusResponse is returned by CmdStatus.

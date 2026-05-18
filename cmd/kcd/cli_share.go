@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/urfave/cli/v2"
@@ -22,6 +23,9 @@ var shareCmd = &cli.Command{
 		absPath, err := filepath.Abs(c.Args().Get(1))
 		if err != nil {
 			return fmt.Errorf("invalid file path: %w", err)
+		}
+		if stat, err := os.Stat(absPath); err == nil && stat.IsDir() {
+			return fmt.Errorf("share: directory transfer is not supported")
 		}
 		if err := cl.ShareFile(c.Args().Get(0), absPath); err != nil {
 			return err

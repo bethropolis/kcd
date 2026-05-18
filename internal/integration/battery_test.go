@@ -43,7 +43,6 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	cfg.Plugins.FindMyPhone = false
 	cfg.Plugins.LockDevice = false
 	cfg.Plugins.SystemVolume = false
-	cfg.Plugins.SendNotifications = false
 	cfg.Plugins.SMS = false
 
 	// Pre-generate cert so daemon doesn't need to write to disk

@@ -42,7 +42,6 @@ func TestPairFlowIntegration(t *testing.T) {
 	cfg.Plugins.FindMyPhone = false
 	cfg.Plugins.LockDevice = false
 	cfg.Plugins.SystemVolume = false
-	cfg.Plugins.SendNotifications = false
 	cfg.Plugins.SMS = false
 
 	if err := os.MkdirAll(dir, 0700); err != nil {

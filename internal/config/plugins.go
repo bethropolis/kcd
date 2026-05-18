@@ -6,24 +6,24 @@ import (
 )
 
 type PluginConfig struct {
-	Battery           bool `toml:"battery"`
-	Clipboard         bool `toml:"clipboard"`
-	Notification      bool `toml:"notification"`
-	Share             bool `toml:"share"`
-	RunCommand        bool `toml:"runcommand"`
-	MPRIS             bool `toml:"mpris"`
-	Ping              bool `toml:"ping"`
-	Telephony         bool `toml:"telephony"`
-	Connectivity      bool `toml:"connectivity"`
-	Mousepad          bool `toml:"mousepad"`
-	SFTP              bool `toml:"sftp"`
-	FindMyPhone       bool `toml:"findmyphone"`
-	LockDevice        bool `toml:"lockdevice"`
-	SystemVolume      bool `toml:"systemvolume"`
-	PauseMusic        bool `toml:"pausemusic"`
-	SendNotifications bool `toml:"sendnotifications"`
-	SMS               bool `toml:"sms"`
-	Presenter         bool `toml:"presenter"`
+	Battery        bool `toml:"battery"`
+	Clipboard      bool `toml:"clipboard"`
+	Notification   bool `toml:"notification"`
+	Share          bool `toml:"share"`
+	RunCommand     bool `toml:"runcommand"`
+	MPRIS          bool `toml:"mpris"`
+	Ping           bool `toml:"ping"`
+	Telephony      bool `toml:"telephony"`
+	Connectivity   bool `toml:"connectivity"`
+	Mousepad       bool `toml:"mousepad"`
+	SFTP           bool `toml:"sftp"`
+	FindMyPhone    bool `toml:"findmyphone"`
+	LockDevice     bool `toml:"lockdevice"`
+	SystemVolume   bool `toml:"systemvolume"`
+	PauseMusic     bool `toml:"pausemusic"`
+	SMS            bool `toml:"sms"`
+	Presenter      bool `toml:"presenter"`
+	FindThisDevice bool `toml:"findthisdevice"`
 }
 
 type BatteryConfig struct {
@@ -76,6 +76,11 @@ type MousepadConfig struct {
 	Backend string `toml:"backend"`
 }
 
+type SMSConfig struct {
+	// NotifyIncoming shows a desktop notification when an SMS is received.
+	NotifyIncoming bool `toml:"notify_incoming"`
+}
+
 func (p *PluginConfig) Defaults() {
 	p.Battery = true
 	p.Clipboard = true
@@ -92,9 +97,9 @@ func (p *PluginConfig) Defaults() {
 	p.LockDevice = true
 	p.SystemVolume = true
 	p.PauseMusic = true
-	p.SendNotifications = true
 	p.SMS = true
 	p.Presenter = true
+	p.FindThisDevice = true
 }
 
 func (c *BatteryConfig) Defaults() {
@@ -140,4 +145,8 @@ func (c *PairingConfig) Defaults() {
 
 func (c *MousepadConfig) Defaults() {
 	c.Backend = "auto"
+}
+
+func (c *SMSConfig) Defaults() {
+	c.NotifyIncoming = true
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
+	"github.com/bethropolis/kcd/internal/plugins/findthisdevice"
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
 	"github.com/bethropolis/kcd/internal/plugins/mousepad"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
@@ -20,7 +21,6 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/ping"
 	"github.com/bethropolis/kcd/internal/plugins/presenter"
 	"github.com/bethropolis/kcd/internal/plugins/runcommand"
-	"github.com/bethropolis/kcd/internal/plugins/sendnotification"
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/plugins/sms"
@@ -71,17 +71,17 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	if cfg.Plugins.FindMyPhone {
 		plugins.Register(findmyphone.NewFindMyPhonePlugin())
 	}
+	if cfg.Plugins.FindThisDevice {
+		plugins.Register(findthisdevice.NewFindThisDevicePlugin(bus, logger))
+	}
 	if cfg.Plugins.LockDevice {
 		plugins.Register(lockdevice.NewLockDevicePlugin(logger))
 	}
 	if cfg.Plugins.SystemVolume {
 		plugins.Register(systemvolume.NewSystemVolumePlugin(bus, logger))
 	}
-	if cfg.Plugins.SendNotifications {
-		plugins.Register(sendnotification.NewSendNotificationPlugin(logger, devices))
-	}
 	if cfg.Plugins.SMS {
-		plugins.Register(sms.NewSMSPlugin())
+		plugins.Register(sms.NewSMSPlugin(cfg.SMS, bus, tlsCfg, logger))
 	}
 
 	return pairPlugin
