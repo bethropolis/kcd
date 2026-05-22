@@ -15,7 +15,7 @@ import (
 var devicesCmd = &cli.Command{
 
 	Name:  "devices",
-	Usage: "List all known and reachable devices",
+	Usage: "List known devices",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:  "json",
@@ -25,6 +25,10 @@ var devicesCmd = &cli.Command{
 			Name:    "watch",
 			Aliases: []string{"w"},
 			Usage:   "Stream device changes in real time",
+		},
+		&cli.BoolFlag{
+			Name:  "connected",
+			Usage: "Only show currently connected devices",
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -38,6 +42,15 @@ var devicesCmd = &cli.Command{
 		devices, err := cl.Devices()
 		if err != nil {
 			return err
+		}
+		if c.Bool("connected") {
+			filtered := make([]device.DeviceInfo, 0, len(devices))
+			for _, d := range devices {
+				if d.Connected {
+					filtered = append(filtered, d)
+				}
+			}
+			devices = filtered
 		}
 		if c.Bool("json") {
 			data, _ := json.MarshalIndent(devices, "", "  ")
