@@ -33,6 +33,12 @@ var mprisCmd = &cli.Command{
 		{
 			Name:  "list",
 			Usage: "List active media players on remote devices",
+			Flags: []cli.Flag{
+				&cli.BoolFlag{
+					Name:  "json",
+					Usage: "Output as JSON",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				cl, err := getClient(c)
 				if err != nil {
@@ -41,6 +47,11 @@ var mprisCmd = &cli.Command{
 				remote, err := cl.MprisRemote()
 				if err != nil {
 					return fmt.Errorf("mpris: %w", err)
+				}
+				if c.Bool("json") {
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					return enc.Encode(remote.Players)
 				}
 				if len(remote.Players) == 0 {
 					fmt.Println("No remote media players found")
