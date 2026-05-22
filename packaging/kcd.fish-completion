@@ -24,6 +24,21 @@ except:
 " 2>/dev/null
 end
 
+# Query the running daemon for only currently connected devices.
+function __kcd_connected_devices
+    kcd devices --json 2>/dev/null \
+        | python3 -c "
+import sys, json
+try:
+    devs = json.load(sys.stdin)
+    for d in devs:
+        if d.get('connected'):
+            print(d.get('id','') + '\t' + d.get('name','') + ' (' + d.get('state','') + ')')
+except:
+    pass
+" 2>/dev/null
+end
+
 # Return true when we are completing the first positional argument (device-id)
 # for a subcommand, i.e. exactly one token after the subcommand name.
 function __kcd_needs_device
@@ -109,6 +124,8 @@ complete -c kcd -n "__fish_seen_subcommand_from devices" \
     -l json  -d 'Output in JSON format'
 complete -c kcd -n "__fish_seen_subcommand_from devices" \
     -l watch -s w -d 'Stream device changes in real time'
+complete -c kcd -n "__fish_seen_subcommand_from devices" \
+    -l connected -d 'Only show currently connected devices'
 
 # ---------------------------------------------------------------------------
 # connect  <ip-address>
@@ -119,9 +136,15 @@ complete -c kcd -n "__fish_seen_subcommand_from devices" \
 # pair / unpair / ping / battery / findmyphone / lock / unlock / clipboard
 #   — all take a single <device-id>
 # ---------------------------------------------------------------------------
-for _cmd in pair unpair ping battery findmyphone lock unlock clipboard
+# pair — uses all devices (including unpaired discovered ones)
+complete -c kcd -n "__fish_seen_subcommand_from pair && __kcd_at_arg 2" \
+    -a '(__kcd_devices)' -d 'Device ID'
+
+# unpair / ping / battery / findmyphone / lock / unlock / clipboard
+#   — only make sense with connected devices
+for _cmd in unpair ping battery findmyphone lock unlock clipboard
     complete -c kcd -n "__fish_seen_subcommand_from $_cmd && __kcd_at_arg 2" \
-        -a '(__kcd_devices)' -d 'Device ID'
+        -a '(__kcd_connected_devices)' -d 'Device ID'
 end
 
 # ---------------------------------------------------------------------------
@@ -166,14 +189,14 @@ complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcomma
 
 for _sub in request mount unmount
     complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
-        -a '(__kcd_devices)' -d 'Device ID'
+        -a '(__kcd_connected_devices)' -d 'Device ID'
 end
 
 # ---------------------------------------------------------------------------
 # reply  <device-id> <reply-id> <message>
 # ---------------------------------------------------------------------------
 complete -c kcd -n "__fish_seen_subcommand_from reply && __kcd_at_arg 2" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 # reply-id and message are free-form — no completions
 
 # ---------------------------------------------------------------------------
@@ -182,13 +205,13 @@ complete -c kcd -n "__fish_seen_subcommand_from reply && __kcd_at_arg 2" \
 complete -c kcd -n "__fish_seen_subcommand_from call && not __fish_seen_subcommand_from mute" \
     -a mute -d 'Silence an incoming call'
 complete -c kcd -n "__fish_seen_subcommand_from call && __fish_seen_subcommand_from mute && __kcd_at_arg 3" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 
 # ---------------------------------------------------------------------------
 # share  <device-id>  <file-path>
 # ---------------------------------------------------------------------------
 complete -c kcd -n "__fish_seen_subcommand_from share && __kcd_at_arg 2" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 # Re-enable file completions for the file-path argument (position 3)
 complete -c kcd -n "__fish_seen_subcommand_from share && __kcd_at_arg 3" \
     -F -d 'File to send'
@@ -202,16 +225,16 @@ complete -c kcd -n "__fish_seen_subcommand_from run && not __fish_seen_subcomman
     -a exec -d 'Execute a remote command by key'
 
 complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_from list && __kcd_at_arg 3" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_from exec && __kcd_at_arg 3" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 # command-key at position 4 is free-form
 
 # ---------------------------------------------------------------------------
 # sms  <device-id>  <phone-number>  <message>
 # ---------------------------------------------------------------------------
 complete -c kcd -n "__fish_seen_subcommand_from sms && __kcd_at_arg 2" \
-    -a '(__kcd_devices)' -d 'Device ID'
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 # phone-number and message are free-form
 
 # ---------------------------------------------------------------------------
