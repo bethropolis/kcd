@@ -7,8 +7,8 @@ set -e
 # that might be running. 
 if command -v systemctl >/dev/null 2>&1; then
     echo "Stopping any running kcd services..."
-    # Find active instances
-    systemctl list-units "kcd@*.service" --no-legend --plain | awk '{print $1}' | while read -r unit; do
+    # System-level kcd services (template or plain)
+    systemctl list-units "kcd@*.service" "kcd.service" --no-legend --plain | awk '{print $1}' | while read -r unit; do
         if [ -n "$unit" ]; then
             echo "Stopping and disabling $unit..."
             systemctl stop "$unit" || true

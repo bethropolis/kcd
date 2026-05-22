@@ -84,7 +84,7 @@ nfpms:
     bindir: /usr/bin
     contents:
       - src: packaging/kcd-pkg.service
-        dst: /usr/lib/systemd/user/kcd@.service
+        dst: /usr/lib/systemd/user/kcd.service
         type: config|noreplace
       - src: packaging/kcd-system.service
         dst: /usr/lib/systemd/system/kcd.service
