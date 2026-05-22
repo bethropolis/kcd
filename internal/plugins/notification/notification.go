@@ -96,13 +96,14 @@ func (p *NotificationPlugin) resolveAction(appName string) string {
 
 // NotificationBody represents the fields of a notification packet.
 type NotificationBody struct {
-	ID             string `json:"id"`
-	AppName        string `json:"appName"`
-	Title          string `json:"title"`
-	Text           string `json:"text"`
-	IsCancel       bool   `json:"isCancel,omitempty"`
-	Silent         bool   `json:"silent,omitempty"`
-	RequestReplyId string `json:"requestReplyId,omitempty"`
+	ID             string   `json:"id"`
+	AppName        string   `json:"appName"`
+	Title          string   `json:"title"`
+	Text           string   `json:"text"`
+	IsCancel       bool     `json:"isCancel,omitempty"`
+	IsClearable    bool     `json:"isClearable,omitempty"`
+	Silent         bool     `json:"silent,omitempty"`
+	RequestReplyId string   `json:"requestReplyId,omitempty"`
 }
 
 func (p *NotificationPlugin) Name() string           { return "Notification" }
@@ -145,6 +146,11 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	}
 
 	if body.Silent {
+		return nil
+	}
+
+	// Skip non-clearable notifications (media playback, foreground services).
+	if p.cfg.SkipNonClearable && !body.IsClearable {
 		return nil
 	}
 
