@@ -429,6 +429,9 @@ func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Ev
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return fmt.Errorf("stream read error: %w", err)
 		}
 

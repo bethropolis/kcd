@@ -82,7 +82,7 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 	var err error
 
 	for port := cfg.PortMin; port <= cfg.PortMax; port++ {
-		ln, err = lc.Listen(ctx, "tcp", fmt.Sprintf("0.0.0.0:%d", port))
+		ln, err = lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
 			return ln, port, nil
 		}

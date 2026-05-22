@@ -129,6 +129,9 @@ var watchCmd = &cli.Command{
 
 			// If err != nil, the connection failed or disconnected
 			if !isJSON && err != nil {
+				if err == context.Canceled {
+					return nil
+				}
 				fmt.Fprintf(os.Stderr, "Daemon disconnected or not running: %v. Reconnecting in %v...\n", err, backoff)
 			}
 
