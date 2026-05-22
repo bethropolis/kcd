@@ -155,12 +155,14 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 		if err := h.pairPlugin.Unpair(dev); err != nil {
 			return Response{OK: false, Error: "failed to unpair: " + err.Error()}
 		}
+		dev.Disconnect()
 		return Response{OK: true}
 	}
 
 	// Fallback
 	pkt, _ := protocol.NewPairPacket(protocol.PairReject)
 	_ = dev.Send(pkt)
+	dev.Disconnect()
 	h.devices.Remove(p.DeviceID)
 	h.saveDevices()
 
