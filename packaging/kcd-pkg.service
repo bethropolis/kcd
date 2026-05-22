@@ -23,23 +23,14 @@ TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5
 
-# ── Filesystem hardening ──────────────────────────────────────────────────────
-# The entire filesystem is read-only except for the paths listed below.
-ProtectSystem=strict
-ProtectHome=read-only
-
-# Writable paths the daemon actually needs.
-#   %h/.config/kcd      — kcd.toml, cert.pem, key.pem
-#   %h/.local/state/kcd — devices.json (persisted pairs)
-#   %h/Downloads/kcd    — received files (override via download_dir in config)
-ReadWritePaths=%h/.config/kcd %h/.local/state/kcd %h/Downloads/kcd
-
 # IPC socket directory, created automatically by systemd under $XDG_RUNTIME_DIR.
 RuntimeDirectory=kcd
 RuntimeDirectoryMode=0700
 
 # ── Process hardening ─────────────────────────────────────────────────────────
-PrivateTmp=true
+# Namespace-based hardening (ProtectSystem, PrivateTmp, etc.) is intentionally
+# omitted — unprivileged user services cannot reliably set up mount namespaces,
+# which would cause startup failures on many distributions.
 NoNewPrivileges=true
 MemoryMax=128M
 TasksMax=64
