@@ -180,6 +180,7 @@ suspend = "systemctl suspend"
 # icon_cache_dir = ""           # persistent path for icons, defaults to temp
 # max_body_length = 0           # 0 = no limit (truncates with … if set)
 # expire_ms = -1                # notification timeout in milliseconds, -1 = default
+# skip_non_clearable = false    # skip non-dismissible notifications (media playback, etc.)
 
 # ─── Share: file transfer settings ────────────────────────────────────────────
 
