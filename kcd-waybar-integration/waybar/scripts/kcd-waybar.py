@@ -44,13 +44,14 @@ ICONS_BAT = ((80, "󰁹"), (60, "󰁾"), (40, "󰁼"), (20, "󰁺"), (0, "󰁻")
 # ---------------------------------------------------------------------------
 
 class Device:
-    __slots__ = ("name", "type", "charge", "charging", "connected")
+    __slots__ = ("name", "type", "charge", "charging", "connected", "now_playing")
     def __init__(self, name="", type="phone", charge=0, charging=False, connected=True):
         self.name = name
         self.type = type
         self.charge = charge
         self.charging = charging
         self.connected = connected
+        self.now_playing = None  # dict with {title, artist, player, isPlaying}
 
 
 devices: dict[str, Device] = {}
@@ -105,6 +106,15 @@ def render() -> None:
             continue
         state = f"charging {d.charge}%" if d.charging else f"battery {d.charge}%"
         lines.append(f"{d.name}  {state}  ({d.type})")
+        if d.now_playing and d.now_playing.get("title"):
+            icon = "▶" if d.now_playing.get("isPlaying") else "⏹"
+            title = d.now_playing["title"]
+            artist = d.now_playing.get("artist") or ""
+            player = d.now_playing.get("player") or ""
+            if artist:
+                lines.append(f"   {icon} {title} — {artist}")
+            else:
+                lines.append(f"   {icon} {title}")
 
     print(
         json.dumps(
@@ -153,6 +163,7 @@ def connect_watch():
                 "device.connected",
                 "device.disconnected",
                 "battery.update",
+                "mpris.update",
                 "pair.request",
                 "pair.accepted",
             ]
@@ -208,6 +219,17 @@ def handle_event(ev: dict) -> None:
             devices[did] = Device(name=did)
         devices[did].charge = int(payload.get("charge", 0))
         devices[did].charging = bool(payload.get("charging", False))
+        render()
+
+    elif etype == "mpris.update":
+        if did not in devices:
+            devices[did] = Device(name=did)
+        devices[did].now_playing = {
+            "title": payload.get("title"),
+            "artist": payload.get("artist"),
+            "player": payload.get("player"),
+            "isPlaying": payload.get("isPlaying", False),
+        }
         render()
 
     elif etype == "pair.request":
