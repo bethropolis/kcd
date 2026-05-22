@@ -19,7 +19,7 @@
 | **Notifications** | Forward phone notifications to the desktop via `notify-send`<br>> Desktop notification icons require `libnotify ≥ 0.8.0` (Ubuntu 22.04+, Fedora 36+). Older versions receive text-only notifications. |
 | **Share** | Receive files and URLs from the phone; send local files to it |
 | **RunCommand** | Execute pre-configured local shell commands triggered from your phone |
-| **MPRIS** | Control desktop media players (VLC, Spotify, etc.) via D-Bus |
+| **MPRIS** | Control desktop media players via D-Bus **and** control phone music (play/pause/next/prev/volume/seek) from the desktop CLI |
 | **Mousepad** | Use the phone as a wireless trackpad and keyboard |
 | **Find My Phone** | Ring the phone to locate it |
 | **Telephony** | Get call and SMS notifications on the desktop |
@@ -306,6 +306,7 @@ done
 | `telephony.missed` | `contactName`, `phoneNumber` | Missed call |
 | `telephony.canceled` | — | Call ended |
 | `connectivity.update` | `signal`, `networkType` | Signal strength report |
+| `mpris.update` | `player`, `title`, `artist`, `album`, `isPlaying`, `pos`, `length`, `volume` | Phone now playing state changed |
 | `volume.update` | `name`, `volume`, `muted` | Desktop volume changed from phone |
 | `sftp.mount` | `uri`, `ip`, `port`, `user`, `password`, `path` | SFTP credentials received |
 

@@ -258,6 +258,153 @@ bindsym Super+c exec kcd clipboard
 
 ---
 
+## mpris
+
+Control media playback on remote devices (phones) and show their now-playing state.
+
+All action subcommands (`play`, `pause`, `toggle`, `next`, `prev`, `stop`, `volume`, `seek`) support **auto-device** and **auto-player** — omit `--device` and `--player` and they automatically target the first connected phone with cached MPRIS state.
+
+### mpris list
+
+List active media players on remote devices. Refreshes state by sending `requestPlayerList` to all connected phones.
+
+```
+kcd mpris list [--json]
+```
+
+**Flags**
+
+| Flag | Description |
+|---|---|
+| `--json` | Output as a JSON array |
+
+**Examples**
+
+```bash
+# Human-readable
+kcd mpris list
+
+# JSON for scripting
+kcd mpris list --json | jq -r '.[] | "\(.player): \(.title)"'
+```
+
+### mpris status
+
+Show currently playing media on remote devices, with position, volume, and artist info.
+
+```
+kcd mpris status [--device <id>] [--json]
+```
+
+**Flags**
+
+| Flag | Description |
+|---|---|
+| `--device` | Target device ID (omit for auto-detect) |
+| `--json` | Output as a JSON array |
+
+**Examples**
+
+```bash
+kcd mpris status
+kcd mpris status --json | jq -r '.[].title'
+```
+
+### mpris play / pause / toggle
+
+Control playback on the phone.
+
+```
+kcd mpris play    [--device <id>] [--player <name>]
+kcd mpris pause   [--device <id>] [--player <name>]
+kcd mpris toggle  [--device <id>] [--player <name>]
+```
+
+**Flags**
+
+| Flag | Description |
+|---|---|
+| `--device` | Target device ID (omit for auto-detect) |
+| `--player`, `-p` | Player name (omit for auto-fill from cached state) |
+
+### mpris next / prev
+
+Skip to the next or previous track. After skipping, an automatic `Play` action is sent to handle phone-side MPRIS implementations that stop after a track change.
+
+```
+kcd mpris next       [--device <id>] [--player <name>]
+kcd mpris previous   [--device <id>] [--player <name>]
+kcd mpris prev       [--device <id>] [--player <name>]  (alias)
+```
+
+### mpris stop
+
+Stop playback on the phone.
+
+```
+kcd mpris stop [--device <id>] [--player <name>]
+```
+
+### mpris volume
+
+Set the phone's media volume (0–100).
+
+```
+kcd mpris volume [--device <id>] [--player <name>] <0-100>
+```
+
+**Example**
+
+```bash
+kcd mpris volume 50
+```
+
+### mpris seek
+
+Seek to a position or by an offset on the phone.
+
+```
+kcd mpris seek [--device <id>] [--player <name>] <offset>
+```
+
+Offset formats:
+- `+30s` — forward 30 seconds
+- `-10s` — back 10 seconds
+- `1m30s` — absolute 1 minute 30 seconds
+- `45` — absolute 45 seconds (bare number)
+
+**Examples**
+
+```bash
+kcd mpris seek +30s
+kcd mpris seek -10s
+kcd mpris seek 1m30s
+```
+
+### Scripting examples
+
+```bash
+# Get current track title (exit 0 on success)
+kcd mpris status --json | jq -r '.[].title'
+
+# Toggle playback and check result
+kcd mpris toggle
+kcd mpris status --json | jq -r '.[] | "playing=\(.isPlaying)"'
+
+# Next track, wait for state update, print new title
+kcd mpris next && sleep 2 && kcd mpris list --json | jq -r '.[] | "\(.title) - \(.artist)"'
+
+# Watch live track changes
+kcd watch --events=mpris.update
+
+# Sway keybinding: next track on the phone
+# bindsym XF86AudioNext exec kcd mpris next
+```
+
+> **Note:** The `mpris.update` event fires whenever the phone sends a now-playing state change (track change, play/pause toggle). Subscribe with `kcd watch --events=mpris.update`.
+
+---
+
 ## share
 
 Send a local file to a device.
@@ -527,6 +674,7 @@ kcd watch [--events <type,...>] [--json]
 | `telephony.missed` | Missed call: `{contactName, phoneNumber}` |
 | `telephony.canceled` | Call ended |
 | `connectivity.update` | Signal strength: `{signal, networkType}` |
+| `mpris.update` | Now playing: `{player, title, artist, album, isPlaying, pos, length, volume}` |
 | `sftp.mount` | SFTP credentials: `{uri, ip, port, user, password, path, multiPaths, pathNames, errorMessage}` |
 
 ### Examples
