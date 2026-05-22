@@ -10,6 +10,8 @@
 
 # Test binary, built with `go test -c`
 *.test
+__pycache__/
+
 
 # Code coverage profiles and other test artifacts
 *.out
