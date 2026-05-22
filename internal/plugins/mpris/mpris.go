@@ -12,6 +12,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/godbus/dbus/v5"
@@ -28,6 +29,7 @@ type trackedPlayer struct {
 type MPRISPlugin struct {
 	tlsConfig *tls.Config
 	logger    *zap.Logger
+	bus       *events.Bus
 	mu        sync.RWMutex
 	devices   map[string]device.Sender
 	dbus      *dbus.Conn
@@ -35,17 +37,25 @@ type MPRISPlugin struct {
 	watchCancel context.CancelFunc
 	watching    bool
 
-	players     map[string]*trackedPlayer
-	lastTracks  map[string]trackIdentity
-	lastStates  map[string]*NowPlaying
-	artRequests map[string]time.Time
+	players          map[string]*trackedPlayer
+	lastTracks       map[string]trackIdentity
+	lastStates       map[string]*NowPlaying
+	artRequests      map[string]time.Time
+	remoteStates     map[string]*NowPlaying            // deviceID → last known state
+	positionTrackers map[string]*remotePositionTracker // deviceID → position extrapolation
 }
 
 type trackIdentity struct {
 	rawArtUrl string
 }
 
-func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
+type remotePositionTracker struct {
+	lastPosition   int64
+	lastPositionAt time.Time
+	playing        bool
+}
+
+func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		logger.Warn("mpris: failed to connect to D-Bus session bus", zap.Error(err))
@@ -54,14 +64,17 @@ func NewMPRISPlugin(tlsConfig *tls.Config, logger *zap.Logger) *MPRISPlugin {
 	}
 
 	p := &MPRISPlugin{
-		tlsConfig:   tlsConfig,
-		logger:      logger.With(zap.String("plugin", "mpris")),
-		dbus:        dbusConn,
-		devices:     make(map[string]device.Sender),
-		players:     make(map[string]*trackedPlayer),
-		lastTracks:  make(map[string]trackIdentity),
-		lastStates:  make(map[string]*NowPlaying),
-		artRequests: make(map[string]time.Time),
+		tlsConfig:        tlsConfig,
+		logger:           logger.With(zap.String("plugin", "mpris")),
+		bus:              bus,
+		dbus:             dbusConn,
+		devices:          make(map[string]device.Sender),
+		players:          make(map[string]*trackedPlayer),
+		lastTracks:       make(map[string]trackIdentity),
+		lastStates:       make(map[string]*NowPlaying),
+		artRequests:      make(map[string]time.Time),
+		remoteStates:     make(map[string]*NowPlaying),
+		positionTrackers: make(map[string]*remotePositionTracker),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
@@ -79,20 +92,49 @@ func (p *MPRISPlugin) Timeout() time.Duration { return 5 * time.Second }
 func (p *MPRISPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
 }
-func (p *MPRISPlugin) OutgoingTypes() []string { return []string{"kdeconnect.mpris"} }
+func (p *MPRISPlugin) OutgoingTypes() []string {
+	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
+}
 
 type MPRISRequest struct {
-	RequestPlayerList bool   `json:"requestPlayerList,omitempty"`
-	RequestNowPlaying bool   `json:"requestNowPlaying,omitempty"`
-	RequestVolume     bool   `json:"requestVolume,omitempty"`
-	Player            string `json:"player,omitempty"`
-	Action            string `json:"action,omitempty"`
-	SetVolume         *int   `json:"setVolume,omitempty"`
-	Seek              *int64 `json:"Seek,omitempty"`
-	SetPosition       *int64 `json:"SetPosition,omitempty"`
-	SetShuffle        *bool  `json:"setShuffle,omitempty"`
-	SetLoopStatus     string `json:"setLoopStatus,omitempty"`
-	AlbumArtUrl       string `json:"albumArtUrl,omitempty"`
+	// Request fields
+	RequestPlayerList bool `json:"requestPlayerList,omitempty"`
+	RequestNowPlaying bool `json:"requestNowPlaying,omitempty"`
+	RequestVolume     bool `json:"requestVolume,omitempty"`
+
+	// Action fields
+	Player        string `json:"player,omitempty"`
+	Action        string `json:"action,omitempty"`
+	SetVolume     *int   `json:"setVolume,omitempty"`
+	Seek          *int64 `json:"Seek,omitempty"`
+	SetPosition   *int64 `json:"SetPosition,omitempty"`
+	SetShuffle    *bool  `json:"setShuffle,omitempty"`
+	SetLoopStatus string `json:"setLoopStatus,omitempty"`
+
+	// Album art
+	AlbumArtUrl string `json:"albumArtUrl,omitempty"`
+
+	// Player list from remote device
+	PlayerList []string `json:"playerList,omitempty"`
+
+	// NowPlaying fields — populated when phone sends state update
+	Title          string `json:"title,omitempty"`
+	Artist         string `json:"artist,omitempty"`
+	Album          string `json:"album,omitempty"`
+	Url            string `json:"url,omitempty"`
+	Length         int64  `json:"length,omitempty"`
+	Pos            int64  `json:"pos,omitempty"`
+	IsPlaying      bool   `json:"isPlaying,omitempty"`
+	Volume         int    `json:"volume,omitempty"`
+	CanControl     bool   `json:"canControl,omitempty"`
+	CanGoNext      bool   `json:"canGoNext,omitempty"`
+	CanGoPrevious  bool   `json:"canGoPrevious,omitempty"`
+	CanPause       bool   `json:"canPause,omitempty"`
+	CanPlay        bool   `json:"canPlay,omitempty"`
+	CanSeek        bool   `json:"canSeek,omitempty"`
+	PlaybackStatus string `json:"playbackStatus,omitempty"`
+	Shuffle        *bool  `json:"shuffle,omitempty"`
+	LoopStatus     string `json:"loopStatus,omitempty"`
 }
 
 type NowPlaying struct {
@@ -138,6 +180,16 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return p.sendPlayerList(dev)
 	}
 
+	// Incoming playerList from remote device — request status for each player
+	if len(body.PlayerList) > 0 {
+		p.logger.Debug("mpris: received player list from remote", zap.Strings("players", body.PlayerList))
+		for _, player := range body.PlayerList {
+			player := player
+			go p.requestPlayerStatus(dev, player)
+		}
+		return nil
+	}
+
 	if body.Player == "" {
 		return nil
 	}
@@ -153,6 +205,45 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 
 	if body.Action != "" || body.Seek != nil || body.SetPosition != nil || body.SetVolume != nil || body.SetShuffle != nil || body.SetLoopStatus != "" {
 		go p.handleAction(body.Player, body.Action, body.Seek, body.SetPosition, body.SetVolume, body.SetShuffle, body.SetLoopStatus)
+		return nil
+	}
+
+	// Incoming NowPlaying state update from a remote device
+	if body.Title != "" || body.Artist != "" || body.Album != "" || body.IsPlaying || body.PlaybackStatus != "" {
+		state := &NowPlaying{
+			Player:         body.Player,
+			Title:          body.Title,
+			Artist:         body.Artist,
+			Album:          body.Album,
+			AlbumArtUrl:    body.AlbumArtUrl,
+			Url:            body.Url,
+			Length:         body.Length,
+			Pos:            body.Pos,
+			IsPlaying:      body.IsPlaying,
+			Volume:         body.Volume,
+			CanControl:     body.CanControl,
+			CanGoNext:      body.CanGoNext,
+			CanGoPrevious:  body.CanGoPrevious,
+			CanPause:       body.CanPause,
+			CanPlay:        body.CanPlay,
+			CanSeek:        body.CanSeek,
+			PlaybackStatus: body.PlaybackStatus,
+			Shuffle:        body.Shuffle,
+			LoopStatus:     body.LoopStatus,
+		}
+		p.mu.Lock()
+		p.remoteStates[dev.ID()] = state
+		tracker, ok := p.positionTrackers[dev.ID()]
+		if !ok {
+			tracker = &remotePositionTracker{}
+			p.positionTrackers[dev.ID()] = tracker
+		}
+		tracker.lastPosition = body.Pos
+		tracker.lastPositionAt = time.Now()
+		tracker.playing = body.IsPlaying
+		p.mu.Unlock()
+		p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+		return nil
 	}
 
 	return nil
@@ -335,12 +426,36 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 }
 
-func (p *MPRISPlugin) OnConnect(dev device.Sender) {}
+func (p *MPRISPlugin) OnConnect(dev device.Sender) {
+	p.logger.Info("mpris: device connected, requesting player list", zap.String("device_id", dev.ID()))
+	go p.requestPlayerListPeriodic(dev)
+}
+
+func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
+	if !dev.IsConnected() {
+		return
+	}
+	p.requestPlayerList(dev)
+	timer := time.NewTimer(3 * time.Second)
+	<-timer.C
+	if !dev.IsConnected() {
+		return
+	}
+	p.requestPlayerList(dev)
+	timer.Reset(7 * time.Second)
+	<-timer.C
+	if !dev.IsConnected() {
+		return
+	}
+	p.requestPlayerList(dev)
+}
 
 func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.devices, dev.ID())
+	delete(p.remoteStates, dev.ID())
+	delete(p.positionTrackers, dev.ID())
 }
 
 type DebugPlayerInfo struct {
@@ -417,4 +532,122 @@ func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 		Players:        players,
 		PlayerMappings: playerMappings,
 	}
+}
+
+// SendAction sends a media control action to a remote device.
+// Sends on both kdeconnect.mpris (for Android's old MprisPlugin) and
+// kdeconnect.mpris.request (for MprisReceiverPlugin) to maximise compatibility.
+func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek *int64, volume *int) error {
+	body := MPRISRequest{
+		Player:    player,
+		Action:    action,
+		SetVolume: volume,
+		Seek:      seek,
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
+	if err != nil {
+		return err
+	}
+	if err := dev.Send(pkt); err != nil {
+		return err
+	}
+	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt2)
+}
+
+// requestPlayerList sends a request for the remote device's active player list.
+func (p *MPRISPlugin) requestPlayerList(dev device.Sender) error {
+	body := MPRISRequest{RequestPlayerList: true}
+	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
+	if err != nil {
+		return err
+	}
+	if err := dev.Send(pkt); err != nil {
+		return err
+	}
+	// Also send as kdeconnect.mpris for phone-side MprisReceiverPlugin/MprisPlugin.
+	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt2)
+}
+
+// requestPlayerStatus sends a requestNowPlaying + requestVolume for a specific player.
+func (p *MPRISPlugin) requestPlayerStatus(dev device.Sender, player string) error {
+	body := MPRISRequest{
+		Player:            player,
+		RequestNowPlaying: true,
+		RequestVolume:     true,
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}
+
+// RequestState sends a requestNowPlaying to refresh remote state.
+func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
+	if player == "" {
+		return p.requestPlayerList(dev)
+	}
+	return p.requestPlayerStatus(dev, player)
+}
+
+// RemoteState returns the last known NowPlaying state for a remote device,
+// with position extrapolated from the last update time if playing.
+func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	state := p.remoteStates[deviceID]
+	if state == nil {
+		return nil
+	}
+	copy := *state
+	if tracker, ok := p.positionTrackers[deviceID]; ok && tracker.playing {
+		elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
+		copy.Pos = tracker.lastPosition + elapsed
+	}
+	return &copy
+}
+
+// RemoteStates returns all known remote device player states,
+// with positions extrapolated from the last update time.
+func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	result := make(map[string]*NowPlaying, len(p.remoteStates))
+	for id, state := range p.remoteStates {
+		if state == nil {
+			continue
+		}
+		copy := *state
+		if tracker, ok := p.positionTrackers[id]; ok && tracker.playing {
+			elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
+			copy.Pos = tracker.lastPosition + elapsed
+		}
+		result[id] = &copy
+	}
+	return result
+}
+
+// ActivePlayers returns the list of player names from all remote device states.
+func (p *MPRISPlugin) ActivePlayers() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	seen := make(map[string]struct{})
+	for _, state := range p.remoteStates {
+		if state != nil && state.Player != "" {
+			seen[state.Player] = struct{}{}
+		}
+	}
+	players := make([]string, 0, len(seen))
+	for name := range seen {
+		players = append(players, name)
+	}
+	return players
 }

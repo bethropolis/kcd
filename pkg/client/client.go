@@ -332,6 +332,52 @@ func (c *Client) MprisStatus() (*ipc.MprisStatusResponse, error) {
 	return &resp, nil
 }
 
+// MprisAction sends a media control action to a remote device.
+// deviceID may be empty to auto-select the first connected device.
+func (c *Client) MprisAction(deviceID, player, action string) error {
+	_, err := c.Call(ipc.CmdMprisAction, ipc.MprisActionPayload{
+		DeviceID: deviceID,
+		Player:   player,
+		Action:   action,
+	})
+	return err
+}
+
+// MprisVolume sends a volume change to a remote device's player.
+func (c *Client) MprisVolume(deviceID, player string, volume int) error {
+	v := volume
+	_, err := c.Call(ipc.CmdMprisAction, ipc.MprisActionPayload{
+		DeviceID: deviceID,
+		Player:   player,
+		Volume:   &v,
+	})
+	return err
+}
+
+// MprisSeek sends a seek command to a remote device's player.
+func (c *Client) MprisSeek(deviceID, player string, seek int64) error {
+	s := seek
+	_, err := c.Call(ipc.CmdMprisAction, ipc.MprisActionPayload{
+		DeviceID: deviceID,
+		Player:   player,
+		Seek:     &s,
+	})
+	return err
+}
+
+// MprisRemote returns the list of remote MPRIS players with their current state.
+func (c *Client) MprisRemote() (*ipc.MprisRemoteResponse, error) {
+	res, err := c.Call(ipc.CmdMprisRemote, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ipc.MprisRemoteResponse
+	if err := json.Unmarshal(res.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decode mpris remote: %w", err)
+	}
+	return &resp, nil
+}
+
 // WatchFile subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
 	dialer := net.Dialer{}

@@ -90,6 +90,25 @@ var watchCmd = &cli.Command{
 					case events.TypeNotificationCanceled:
 						payload, _ := ev.Payload.(map[string]interface{})
 						fmt.Printf("[%s] notification cancelled: %s\n", ev.DeviceID, payload["id"])
+					case events.TypeMprisUpdate:
+						payload, _ := ev.Payload.(map[string]interface{})
+						state := "⏹"
+						if isPlaying, _ := payload["isPlaying"].(bool); isPlaying {
+							state = "▶"
+						} else if ps, _ := payload["playbackStatus"].(string); ps == "Paused" {
+							state = "⏸"
+						}
+						player, _ := payload["player"].(string)
+						title, _ := payload["title"].(string)
+						artist, _ := payload["artist"].(string)
+						fmt.Printf("[%s] %s %s", ev.DeviceID, state, player)
+						if title != "" {
+							fmt.Printf(" - %s", title)
+						}
+						if artist != "" {
+							fmt.Printf(" (%s)", artist)
+						}
+						fmt.Println()
 					default:
 						fmt.Printf("[%s] %s\n", ev.DeviceID, ev.Type)
 					}

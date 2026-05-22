@@ -36,6 +36,8 @@ const (
 	CmdSftpUnmount          = "sftp_unmount"
 	CmdStatus               = "status"
 	CmdMprisStatus          = "mpris_status"
+	CmdMprisAction          = "mpris_action"
+	CmdMprisRemote          = "mpris_remote"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -163,4 +165,37 @@ type MprisStatusResponse struct {
 	DeviceCount    int               `json:"deviceCount"`
 	Players        []MprisPlayerInfo `json:"players"`
 	PlayerMappings map[string]string `json:"playerMappings"`
+}
+
+type MprisActionPayload struct {
+	DeviceID string `json:"deviceId"`
+	Player   string `json:"player,omitempty"`
+	Action   string `json:"action,omitempty"`
+	Volume   *int   `json:"volume,omitempty"`
+	Seek     *int64 `json:"seek,omitempty"`
+}
+
+type MprisRemotePlayer struct {
+	DeviceID       string `json:"deviceId"`
+	Player         string `json:"player"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist"`
+	Album          string `json:"album"`
+	AlbumArtUrl    string `json:"albumArtUrl"`
+	Url            string `json:"url,omitempty"`
+	Length         int64  `json:"length"`
+	Pos            int64  `json:"pos"`
+	IsPlaying      bool   `json:"isPlaying"`
+	Volume         int    `json:"volume"`
+	PlaybackStatus string `json:"playbackStatus"`
+	CanSeek        bool   `json:"canSeek"`
+	CanGoNext      bool   `json:"canGoNext"`
+	CanGoPrevious  bool   `json:"canGoPrevious"`
+	CanPlay        bool   `json:"canPlay"`
+	CanPause       bool   `json:"canPause"`
+	CanControl     bool   `json:"canControl"`
+}
+
+type MprisRemoteResponse struct {
+	Players []MprisRemotePlayer `json:"players"`
 }
