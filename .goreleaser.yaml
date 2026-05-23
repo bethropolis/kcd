@@ -108,40 +108,22 @@ aurs:
 
       install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/kcd-bin/LICENSE"
 
-dockers:
-  - image_templates:
-      - "ghcr.io/bethropolis/kcd:{{.Version}}-amd64"
-      - "ghcr.io/bethropolis/kcd:latest-amd64"
-    use: docker
-    goos: linux
-    goarch: amd64
+dockers_v2:
+  - images:
+      - "ghcr.io/bethropolis/kcd"
+    tags:
+      - "v{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-
-  - image_templates:
-      - "ghcr.io/bethropolis/kcd:{{.Version}}-arm64"
-      - "ghcr.io/bethropolis/kcd:latest-arm64"
-    use: docker
-    goos: linux
-    goarch: arm64
-    dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-
-docker_manifests:
-  - name_template: "ghcr.io/bethropolis/kcd:{{.Version}}"
-    image_templates:
-      - "ghcr.io/bethropolis/kcd:{{.Version}}-amd64"
-      - "ghcr.io/bethropolis/kcd:{{.Version}}-arm64"
-  - name_template: "ghcr.io/bethropolis/kcd:latest"
-    image_templates:
-      - "ghcr.io/bethropolis/kcd:latest-amd64"
-      - "ghcr.io/bethropolis/kcd:latest-arm64"
+    ids:
+      - kcd
+    labels:
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
 
 nfpms:
   - id: packages

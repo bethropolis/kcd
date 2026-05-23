@@ -19,7 +19,8 @@ COPY --from=base --chown=65534:65534 /out/state /state
 COPY --from=base --chown=65534:65534 /out/data /data
 COPY --from=base --chown=65534:65534 /out/run /run
 
-COPY kcd /usr/bin/kcd
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/kcd /usr/bin/kcd
 
 VOLUME ["/config", "/state", "/data"]
 
