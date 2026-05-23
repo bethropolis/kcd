@@ -1,4 +1,4 @@
-# kcd — Headless KDE Connect Daemon
+# kcd - Headless KDE Connect Daemon
 
 [![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
 [![Protocol](https://img.shields.io/badge/KDE%20Connect-v8-4CAF50?style=for-the-badge&logoColor=white)](https://valent.andyholmes.ca/documentation/protocol.html)
@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/bethropolis/kcd?style=for-the-badge&logo=github&color=181717&logoColor=white)](https://github.com/bethropolis/kcd/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/bethropolis/kcd/ci.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/bethropolis/kcd/actions/workflows/ci.yml)
 [![GHCR](https://img.shields.io/badge/container-ghcr.io-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/bethropolis/kcd/pkgs/container/kcd)
-[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS-6e40c9?style=for-the-badge&logoColor=white)](https://github.com/bethropolis/kcd)
+[![Platforms](https://img.shields.io/badge/Platform-Linux-6e40c9?style=for-the-badge&logoColor=white)](https://github.com/bethropolis/kcd)
 
 `kcd` is a lightweight, headless implementation of the [KDE Connect protocol v8](https://kdeconnect.kde.org/) written in Go. It lets Linux servers, containers, and minimal desktop environments participate in the KDE Connect ecosystem without a GUI, a full KDE installation, or heavy D-Bus dependencies.
 
@@ -34,7 +34,8 @@
 
 Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
 
-> **Broadcast is off by default.** It only runs during `kcd pair` (listen mode) and stops immediately after. The UDP/mDNS **listener** stays always-on, so paired devices reconnect automatically via remembered IPs at 0.0% idle CPU.
+> [!NOTE]
+> Broadcast is off by default. It only runs during `kcd pair` (listen mode) and stops immediately after. The UDP/mDNS **listener** stays always-on, so paired devices reconnect automatically via remembered IPs at 0.0% idle CPU.
 
 ---
 
@@ -57,6 +58,10 @@ Install from the AUR using your preferred helper:
 yay -S kcd-bin
 ```
 
+### Container
+
+Multi-arch images on GHCR: [`docs/CONTAINER.md`](docs/CONTAINER.md)
+
 ### Binary releases
 
 Download the latest pre-built binary from [GitHub Releases](https://github.com/bethropolis/kcd/releases).
@@ -66,7 +71,7 @@ Download the latest pre-built binary from [GitHub Releases](https://github.com/b
 
 ## Firewall
 
-KDE Connect requires three port ranges to be open on the local machine:
+KDE Connect needs three port ranges open:
 
 | Port | Protocol | Direction | Purpose |
 |---|---|---|---|
@@ -74,17 +79,13 @@ KDE Connect requires three port ranges to be open on the local machine:
 | 1716 | TCP | bidirectional | Encrypted control channel |
 | 1739–1764 | TCP | inbound | File transfer side-channels |
 
+> **Installed via .deb, .rpm, or AUR?** The firewall rules are already in place
+> — nothing to do on your end. These steps are only needed for manual installs.
+
 ### UFW (Ubuntu / Debian)
 ```bash
 sudo cp packaging/ufw-kcd /etc/ufw/applications.d/kcd
 sudo ufw allow kcd
-```
-
-Or manually:
-```bash
-sudo ufw allow 1716/udp
-sudo ufw allow 1716/tcp
-sudo ufw allow 1739:1764/tcp
 ```
 
 ### firewalld (Fedora / RHEL)
@@ -94,21 +95,38 @@ sudo firewall-cmd --permanent --add-service=kcd
 sudo firewall-cmd --reload
 ```
 
+### Manual
+```bash
+sudo ufw allow 1716/udp
+sudo ufw allow 1716/tcp
+sudo ufw allow 1739:1764/tcp
+```
+
 ---
 
 ## Quick Start
 
 ### 1. Start the daemon
 
-```bash
-# Run directly in the foreground
-kcd daemon
+If you installed via the script, `.deb`, `.rpm`, or AUR, the systemd user service
+is already set up — enable and start it:
 
-# Or install and enable the systemd user unit
-cp packaging/kcd-user.service ~/.config/systemd/user/kcd.service
-systemctl --user daemon-reload
+```bash
 systemctl --user enable --now kcd
 ```
+
+Check that it's running:
+
+```bash
+systemctl --user status kcd
+```
+
+To run in the foreground instead (for testing):
+
+```bash
+kcd daemon
+```
+
 
 ### 2. Discover your phone
 
@@ -133,10 +151,8 @@ Two ways to pair:
 kcd pair a1b2c3d4_e5f6_7890_abcd_ef1234567890
 ```
 
-Accept on your phone. Watch for confirmation:
-```bash
-kcd watch --events=pair.accepted
-```
+you can accept the pair request on your phone
+
 
 **B. Listen mode — accept any incoming request (headless/server):**
 ```bash
@@ -144,6 +160,7 @@ kcd pair
 ```
 
 Broadcast starts automatically so the phone can find the PC. Accept on the phone, the CLI confirms and exits. Broadcast stops immediately. Press Ctrl+C to cancel.
+
 
 ### 4. Use it
 
@@ -169,12 +186,12 @@ kcd watch
 # Watch device connect/disconnect live
 kcd devices --watch
 
-# SFTP — browse the phone's filesystem
-kcd sftp request <id>    # Request credentials from the phone
-kcd sftp info <id>       # Show cached credentials and storage volumes
-kcd sftp volumes <id>    # List available storage roots (multiPaths)
-kcd sftp mount <id>      # Mount via sshfs and open in file manager
-kcd sftp unmount <id>    # Unmount a previously mounted filesystem
+# List MPRIS players on the phone and control playback
+kcd mpris list
+kcd mpris play
+kcd mpris pause
+kcd mpris next
+kcd mpris previous
 ```
 
 ---
@@ -237,13 +254,7 @@ See [`packaging/kcd.example.toml`](packaging/kcd.example.toml) for the full anno
 
 ### Nautilus / GNOME Files
 
-Right-click any file in Nautilus to send it directly to a paired device:
-
-```bash
-mkdir -p ~/.local/share/nautilus-python/extensions
-cp packaging/nautilus-kcd.py ~/.local/share/nautilus-python/extensions/
-nautilus -q   # Restart Nautilus to load the extension
-```
+Most of the installation methods, add the [kcd nautilus plugin](packaging/nautilus-kcd.py) which allows you to right-click any file in Nautilus to send it directly to a paired device.
 
 ### Waybar (phone battery widget)
 
@@ -257,7 +268,7 @@ Add to `~/.config/waybar/config`:
 }
 ```
 
-A ready-made config snippet and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
+A ready-made config snippet, python script and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
 
 ### Tiling WM shortcuts (Sway / Hyprland)
 
@@ -266,7 +277,12 @@ A ready-made config snippet and stylesheet are in [`kcd-waybar-integration/`](kc
 bindsym Super+c exec kcd clipboard
 
 # Ring the phone
-bindsym Super+Shift+f exec kcd findmyphone $(kcd devices --json | jq -r '.[0].ID')
+bindsym Super+Shift+f exec kcd findmyphone
+
+# Control phone music playback
+bindsym Super+Shift+period exec kcd mpris next
+bindsym Super+Shift+comma exec kcd mpris previous
+bindsym Super+Shift+m exec kcd mpris toggle
 ```
 
 ### Custom event scripts
@@ -347,6 +363,17 @@ kcd connect 192.168.1.100
 
 ---
 
+## Further Reading
+
+| Document | Description |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, plugin system, event bus, IPC protocol |
+| [`docs/CLI.md`](docs/CLI.md) | Full CLI reference and sub-commands |
+| [`docs/CONTAINER.md`](docs/CONTAINER.md) | Running kcd in Docker / Podman |
+| [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
+
+---
+
 ## License
 
-MIT
+[MIT](./LICENSE)
