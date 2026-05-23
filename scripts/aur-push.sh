@@ -79,7 +79,10 @@ if git diff --cached --quiet; then
 else
     # Derive version from the PKGBUILD itself (avoid tag parsing fragility).
     version=$(grep -oP "^pkgver=\K.+" PKGBUILD | head -1 | sed 's/_/-/g')
-    git commit -m "Update to v${version}"
+    git \
+        -c user.name="kcd bot" \
+        -c user.email="bot@kcd.invalid" \
+        commit -m "Update to v${version}"
     git push
     echo "aur-push: pushed v${version} to AUR"
 fi
