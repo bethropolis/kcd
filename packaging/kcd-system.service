@@ -36,18 +36,12 @@ Environment="HOME=/home/%i"
 Environment="XDG_CONFIG_HOME=/home/%i/.config"
 Environment="XDG_STATE_HOME=/home/%i/.local/state"
 Environment="XDG_CACHE_HOME=/home/%i/.cache"
-# XDG_RUNTIME_DIR is user-session-specific; the daemon creates it if absent.
-Environment="XDG_RUNTIME_DIR=/run/user/%U"
 
-# ── Filesystem hardening ──────────────────────────────────────────────────────
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/%i/.config/kcd /home/%i/.local/state/kcd /home/%i/Downloads/kcd
-
+# IPC socket directory, created automatically by systemd under $XDG_RUNTIME_DIR.
 RuntimeDirectory=kcd
 RuntimeDirectoryMode=0700
 
-PrivateTmp=true
+# ── Process hardening ─────────────────────────────────────────────────────────
 NoNewPrivileges=true
 MemoryMax=128M
 TasksMax=64
