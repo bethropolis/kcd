@@ -184,7 +184,7 @@ Plugin execution is wrapped in a context with the plugin's declared `Timeout()` 
 | `findmyphone` | `kdeconnect.findmyphone.request` | Runs `paplay` or `aplay` |
 | `lockdevice` | `kdeconnect.lock.request` | Calls `loginctl lock/unlock-session` |
 | `mousepad` | `kdeconnect.mousepad.request` | `ydotool` (Wayland) / `xdotool` (X11) |
-| `mpris` | `kdeconnect.mpris.request` | Subprocess via `playerctl`; controls any MPRIS2 player. Requires `playerctl` in `$PATH`. Player-list polling (D-Bus fallback); does not implement `mprisremote` (phone→desktop). |
+| `mpris` | `kdeconnect.mpris.request`, `kdeconnect.mpris` | Native D-Bus via `godbus`; controls any MPRIS2 player. Discovers players via D-Bus `NameOwnerChanged` signals. Receives phone NowPlaying via `kdeconnect.mpris` (requires Android notification access). Dual-sends `mpris.request` + `mpris` for legacy compatibility. |
 | `notification` | `kdeconnect.notification` | Downloads icon payload over TLS side-channel; per-app filter via `SetFilters()`; `notify-send --help` probe for `--print-id` support; `tlsConfig` + `logger` required in constructor |
 | `pair` | `kdeconnect.pair` | Manages the pairing handshake and certificate fingerprint verification |
 | `ping` | `kdeconnect.ping` | Fires `ping.received`; can be sent outbound |
@@ -371,7 +371,7 @@ kcd/
 
 **No CGo.** The entire daemon is pure Go. This keeps cross-compilation trivial and the binary fully static-linkable.
 
-**No GUI / D-Bus session bus dependency.** D-Bus is only used optionally by the MPRIS plugin for event-driven updates. All other plugins use subprocess calls (`playerctl`, `wpctl`, `notify-send`, `wl-copy`, `ydotool`, etc.) so the daemon can run in a headless session or inside a container.
+**No GUI / D-Bus session bus dependency.** D-Bus is used optionally by the MPRIS and SystemVolume plugins (both fail gracefully if the session bus is unavailable). The MPRIS plugin uses native Go D-Bus bindings (`godbus`) — not the `playerctl` CLI — for full media player discovery and control. Other plugins use subprocess calls (`wpctl`, `notify-send`, `wl-copy`, `ydotool`, etc.) so the daemon can run in a headless session or inside a container.
 
 **Pool-based packet allocation.** `protocol.PacketPool` eliminates per-packet heap allocation on the TCP read loop — important when receiving high-frequency events like mousepad movement.
 

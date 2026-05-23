@@ -216,6 +216,11 @@ release:
 
     ### Installation
 
+    **Arch Linux:**
+    ```bash
+    yay -S kcd-bin
+    ```
+
     **Quick install (Linux amd64):**
     ```bash
     curl -sSL https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.tar.gz | tar -xz

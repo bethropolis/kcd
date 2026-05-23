@@ -49,6 +49,14 @@ cd kcd
 ```
 
 
+### Arch Linux
+
+Install from the AUR using your preferred helper:
+
+```bash
+yay -S kcd-bin
+```
+
 ### Binary releases
 
 Download the latest pre-built binary from [GitHub Releases](https://github.com/bethropolis/kcd/releases).
