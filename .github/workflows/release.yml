@@ -39,3 +39,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUR_KEY: ${{ secrets.AUR_KEY }}
+
+      - name: Push to AUR
+        run: scripts/aur-push.sh
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}

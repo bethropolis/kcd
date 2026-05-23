@@ -69,6 +69,7 @@ aurs:
       - "bethropolis <bethropolis at gmail dot com>"
     license: "MIT"
     private_key: "{{ .Env.AUR_KEY }}"
+    skip_upload: true
     git_url: "ssh://aur@aur.archlinux.org/kcd-bin.git"
     provides:
       - kcd
