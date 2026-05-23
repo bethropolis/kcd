@@ -47,9 +47,6 @@ func Run() []Check {
 		checks = append(checks, checkBin("wtype", "wtype", "install wtype for Wayland keyboard input"))
 	}
 
-	// playerctl
-	checks = append(checks, checkBin("playerctl", "playerctl", "install playerctl for MPRIS media control"))
-
 	// port 1716/udp open
 	checks = append(checks, checkUDPPort(daemonCheck.Pass))
 

@@ -34,8 +34,9 @@ type MPRISPlugin struct {
 	devices   map[string]device.Sender
 	dbus      *dbus.Conn
 
-	watchCancel context.CancelFunc
-	watching    bool
+	watchCancel     context.CancelFunc
+	watching        bool
+	telephonyCancel context.CancelFunc
 
 	players          map[string]*trackedPlayer
 	lastTracks       map[string]trackIdentity
@@ -43,6 +44,9 @@ type MPRISPlugin struct {
 	artRequests      map[string]time.Time
 	remoteStates     map[string]*NowPlaying            // deviceID → last known state
 	positionTrackers map[string]*remotePositionTracker // deviceID → position extrapolation
+
+	pauseMusic        bool
+	callPausedPlayers []string // names of local players paused during a call
 }
 
 type trackIdentity struct {
@@ -55,7 +59,7 @@ type remotePositionTracker struct {
 	playing        bool
 }
 
-func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *MPRISPlugin {
+func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger *zap.Logger) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		logger.Warn("mpris: failed to connect to D-Bus session bus", zap.Error(err))
@@ -64,17 +68,19 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) 
 	}
 
 	p := &MPRISPlugin{
-		tlsConfig:        tlsConfig,
-		logger:           logger.With(zap.String("plugin", "mpris")),
-		bus:              bus,
-		dbus:             dbusConn,
-		devices:          make(map[string]device.Sender),
-		players:          make(map[string]*trackedPlayer),
-		lastTracks:       make(map[string]trackIdentity),
-		lastStates:       make(map[string]*NowPlaying),
-		artRequests:      make(map[string]time.Time),
-		remoteStates:     make(map[string]*NowPlaying),
-		positionTrackers: make(map[string]*remotePositionTracker),
+		tlsConfig:         tlsConfig,
+		logger:            logger.With(zap.String("plugin", "mpris")),
+		bus:               bus,
+		dbus:              dbusConn,
+		pauseMusic:        pauseMusic,
+		devices:           make(map[string]device.Sender),
+		players:           make(map[string]*trackedPlayer),
+		lastTracks:        make(map[string]trackIdentity),
+		lastStates:        make(map[string]*NowPlaying),
+		artRequests:       make(map[string]time.Time),
+		remoteStates:      make(map[string]*NowPlaying),
+		positionTrackers:  make(map[string]*remotePositionTracker),
+		callPausedPlayers: make([]string, 0),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
@@ -83,6 +89,13 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) 
 	p.watchCancel = cancel
 	p.watching = true
 	p.startWatcher(watchCtx)
+
+	// Subscribe to telephony events for pause-music-on-call.
+	if p.pauseMusic && p.dbus != nil {
+		telephonyCtx, telephonyCancel := context.WithCancel(context.Background())
+		p.telephonyCancel = telephonyCancel
+		go p.watchTelephony(telephonyCtx)
+	}
 
 	return p
 }
@@ -633,6 +646,76 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 		result[id] = &copy
 	}
 	return result
+}
+
+// watchTelephony subscribes to telephony events and pauses/resumes
+// local MPRIS players when calls start/end.
+func (p *MPRISPlugin) watchTelephony(ctx context.Context) {
+	sub := p.bus.Subscribe(events.DefaultSubscriberCap,
+		events.TypeTelephonyRinging,
+		events.TypeTelephonyTalking,
+		events.TypeTelephonyCanceled)
+	defer sub.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-sub.C:
+			p.handleTelephonyEvent(ev)
+		}
+	}
+}
+
+func (p *MPRISPlugin) handleTelephonyEvent(ev events.Event) {
+	switch ev.Type {
+	case events.TypeTelephonyRinging, events.TypeTelephonyTalking:
+		p.pauseAllPlayers()
+	case events.TypeTelephonyCanceled:
+		p.resumePausedPlayers()
+	}
+}
+
+// pauseAllPlayers pauses every currently-playing local MPRIS player.
+// It only acts once per call — repeated ringing/talking events are no-ops
+// while callPausedPlayers is non-empty.
+func (p *MPRISPlugin) pauseAllPlayers() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.callPausedPlayers) > 0 {
+		return // already paused for an active call
+	}
+
+	for name, pl := range p.players {
+		state, err := p.playerStateDBus(pl.busName, name)
+		if err != nil {
+			continue
+		}
+		if !state.IsPlaying {
+			continue
+		}
+		obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
+		if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Pause").Err; err == nil {
+			p.callPausedPlayers = append(p.callPausedPlayers, name)
+		}
+	}
+}
+
+// resumePausedPlayers resumes every player that was paused by pauseAllPlayers.
+func (p *MPRISPlugin) resumePausedPlayers() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for _, name := range p.callPausedPlayers {
+		pl := p.players[name]
+		if pl == nil {
+			continue
+		}
+		obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
+		_ = dbusCall(obj, "org.mpris.MediaPlayer2.Player.Play").Err
+	}
+	p.callPausedPlayers = p.callPausedPlayers[:0]
 }
 
 // ActivePlayers returns the list of player names from all remote device states.

@@ -29,6 +29,7 @@ const (
 	TypePingReceived         EventType = "ping.received"
 	TypeTelephonyRinging     EventType = "telephony.ringing"
 	TypeTelephonyMissed      EventType = "telephony.missed"
+	TypeTelephonyTalking     EventType = "telephony.talking"
 	TypeTelephonyCanceled    EventType = "telephony.canceled"
 	TypeConnectivityUpdate   EventType = "connectivity.update"
 	TypeSftpMount            EventType = "sftp.mount"

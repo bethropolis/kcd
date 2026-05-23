@@ -51,13 +51,13 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(ping.NewPingPlugin(cfg.Ping, bus, logger))
 	}
 	if cfg.Plugins.Telephony {
-		plugins.Register(telephony.NewTelephonyPluginWithOptions(bus, cfg.Plugins.PauseMusic, logger))
+		plugins.Register(telephony.NewTelephonyPlugin(bus, logger))
 	}
 	if cfg.Plugins.Connectivity {
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, logger))
+		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, cfg.Plugins.PauseMusic, logger))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
