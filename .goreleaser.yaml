@@ -86,6 +86,7 @@ aurs:
       - "xdotool: for X11 mousepad support"
       - "wtype: for Wayland keyboard emulation"
       - "python-nautilus: for Nautilus file manager integration"
+    install: packaging/kcd-bin.install
     package: |-
       install -Dm755 "./kcd" "${pkgdir}/usr/bin/kcd"
 
