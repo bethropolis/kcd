@@ -23,8 +23,17 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
       -o /out/kcd \
       ./cmd/kcd
 
+# Pre-create empty directories owned by nobody:nogroup (65534:65534)
+# so the runtime container can run unprivileged and still write to them.
+RUN mkdir -p /out/empty && \
+    for d in config state data run/kcd; do \
+        mkdir -p "/out/$d"; \
+    done && \
+    chown -R 65534:65534 /out/config /out/state /out/data /out/run
+
 # Smoke-test: binary must be statically linked
-RUN file /out/kcd | grep -q "statically linked" || \
+RUN apk add --no-cache file && \
+    file /out/kcd | grep -q "statically linked" || \
     (echo "ERROR: binary is not statically linked" && exit 1)
 
 # ─── Runtime ───────────────────────────────────────────────────────────────────
@@ -44,11 +53,21 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 # The binary
 COPY --from=builder /out/kcd /usr/bin/kcd
 
+# Pre-populate volume mount points with directories owned by nobody
+# so the container runs unprivileged without permission errors.
+COPY --from=builder --chown=65534:65534 /out/config /config
+COPY --from=builder --chown=65534:65534 /out/state /state
+COPY --from=builder --chown=65534:65534 /out/data /data
+COPY --from=builder --chown=65534:65534 /out/run /run
+
 # Volume mount points — must be provided at runtime
-# /config  → $XDG_CONFIG_HOME/kcd  (kcd.toml, cert.pem, key.pem)
-# /state   → $XDG_STATE_HOME/kcd   (devices.json — persisted pairs)
-# /data    → download_dir           (received files)
+# /config → $XDG_CONFIG_HOME/kcd  (kcd.toml, cert.pem, key.pem)
+# /state  → $XDG_STATE_HOME/kcd   (devices.json — persisted pairs)
+# /data   → download_dir           (received files)
 VOLUME ["/config", "/state", "/data"]
+
+# Drop privileges — nobody can still bind ports ≥1024 and write to volumes.
+USER 65534:65534
 
 # kcd reads these to find its paths without a real home directory
 ENV XDG_CONFIG_HOME=/config \

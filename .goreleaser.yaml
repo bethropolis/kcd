@@ -82,7 +82,7 @@ aurs:
       - "wl-clipboard: for Wayland clipboard sync"
       - "xclip: for X11 clipboard sync"
       - "sshfs: for SFTP mounting support"
-      - "playerctl: for MPRIS media control"
+
       - "ydotool: for Wayland mousepad support"
       - "xdotool: for X11 mousepad support"
       - "wtype: for Wayland keyboard emulation"
@@ -107,6 +107,41 @@ aurs:
       install -Dm644 "./packaging/ufw-kcd" "${pkgdir}/etc/ufw/applications.d/kcd"
 
       install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/kcd-bin/LICENSE"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/bethropolis/kcd:{{.Version}}-amd64"
+      - "ghcr.io/bethropolis/kcd:latest-amd64"
+    use: docker
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+  - image_templates:
+      - "ghcr.io/bethropolis/kcd:{{.Version}}-arm64"
+      - "ghcr.io/bethropolis/kcd:latest-arm64"
+    use: docker
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+docker_manifests:
+  - name_template: "ghcr.io/bethropolis/kcd:{{.Version}}"
+    image_templates:
+      - "ghcr.io/bethropolis/kcd:{{.Version}}-amd64"
+      - "ghcr.io/bethropolis/kcd:{{.Version}}-arm64"
+  - name_template: "ghcr.io/bethropolis/kcd:latest"
+    image_templates:
+      - "ghcr.io/bethropolis/kcd:latest-amd64"
+      - "ghcr.io/bethropolis/kcd:latest-arm64"
 
 nfpms:
   - id: packages
@@ -215,6 +250,11 @@ release:
     Headless KDE Connect daemon for Linux.
 
     ### Installation
+
+    **Docker:**
+    ```bash
+    docker pull ghcr.io/bethropolis/kcd:latest
+    ```
 
     **Arch Linux:**
     ```bash
