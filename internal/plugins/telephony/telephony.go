@@ -3,9 +3,6 @@ package telephony
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -16,19 +13,14 @@ import (
 )
 
 type TelephonyPlugin struct {
-	bus        *events.Bus
-	logger     *zap.Logger
-	pauseMusic bool
-
-	mu            sync.Mutex
-	pausedPlayers []string
+	bus    *events.Bus
+	logger *zap.Logger
 }
 
-func NewTelephonyPluginWithOptions(bus *events.Bus, pauseMusic bool, logger *zap.Logger) *TelephonyPlugin {
+func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger) *TelephonyPlugin {
 	return &TelephonyPlugin{
-		bus:        bus,
-		pauseMusic: pauseMusic,
-		logger:     logger.With(zap.String("plugin", "telephony")),
+		bus:    bus,
+		logger: logger.With(zap.String("plugin", "telephony")),
 	}
 }
 
@@ -61,38 +53,6 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	}
 
 	go func() {
-		// Pause music via playerctl
-		if p.pauseMusic {
-			if _, err := exec.LookPath("playerctl"); err == nil {
-				if body.IsCancel {
-					p.mu.Lock()
-					paused := p.pausedPlayers
-					p.pausedPlayers = nil
-					p.mu.Unlock()
-					for _, player := range paused {
-						_ = plugin.NewPlayerctlCmd(context.TODO(), "-p", player, "play").Run()
-					}
-				} else if body.Event == "ringing" || body.Event == "talking" {
-					p.mu.Lock()
-					if len(p.pausedPlayers) == 0 {
-						// Find playing players and pause them
-						out, _ := plugin.NewPlayerctlCmd(context.TODO(), "-a", "status", "-f", "{{playerName}} {{status}}").Output()
-						lines := strings.Split(string(out), "\n")
-						for _, line := range lines {
-							parts := strings.Fields(line)
-							if len(parts) >= 2 && parts[1] == "Playing" {
-								player := parts[0]
-								if err := plugin.NewPlayerctlCmd(context.TODO(), "-p", player, "pause").Run(); err == nil {
-									p.pausedPlayers = append(p.pausedPlayers, player)
-								}
-							}
-						}
-					}
-					p.mu.Unlock()
-				}
-			}
-		}
-
 		if body.IsCancel {
 			return
 		}
