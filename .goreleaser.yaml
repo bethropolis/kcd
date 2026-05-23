@@ -115,7 +115,7 @@ dockers:
     use: docker
     goos: linux
     goarch: amd64
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.source={{.GitURL}}"
@@ -127,7 +127,7 @@ dockers:
     use: docker
     goos: linux
     goarch: arm64
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.source={{.GitURL}}"

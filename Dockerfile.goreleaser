@@ -1,4 +1,39 @@
-FROM alpine:latest
-ARG TARGETPLATFORM
-COPY $TARGETPLATFORM/kcd /usr/bin/kcd
+# ─── Certificates + directories ────────────────────────────────────────────────
+FROM alpine:3.20 AS base
+RUN apk add --no-cache ca-certificates && \
+    mkdir -p /out/config /out/state /out/data /out/run/kcd && \
+    chown -R 65534:65534 /out/config /out/state /out/data /out/run
+
+# ─── Runtime ───────────────────────────────────────────────────────────────────
+FROM scratch
+
+LABEL org.opencontainers.image.title="kcd" \
+      org.opencontainers.image.description="Headless KDE Connect daemon" \
+      org.opencontainers.image.url="https://github.com/bethropolis/kcd" \
+      org.opencontainers.image.source="https://github.com/bethropolis/kcd" \
+      org.opencontainers.image.licenses="MIT"
+
+COPY --from=base /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=base --chown=65534:65534 /out/config /config
+COPY --from=base --chown=65534:65534 /out/state /state
+COPY --from=base --chown=65534:65534 /out/data /data
+COPY --from=base --chown=65534:65534 /out/run /run
+
+COPY kcd /usr/bin/kcd
+
+VOLUME ["/config", "/state", "/data"]
+
+USER 65534:65534
+
+ENV XDG_CONFIG_HOME=/config \
+    XDG_STATE_HOME=/state \
+    XDG_RUNTIME_DIR=/run \
+    XDG_CACHE_HOME=/tmp
+
+EXPOSE 1716/tcp 1716/udp 1739-1764/tcp
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/usr/bin/kcd", "devices"]
+
 ENTRYPOINT ["/usr/bin/kcd"]
+CMD ["daemon"]
