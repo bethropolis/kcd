@@ -60,6 +60,53 @@ archives:
       - packaging/kcd.zsh-completion
       - packaging/kcd.fish-completion
 
+aurs:
+  - name: kcd-bin
+    homepage: "https://github.com/bethropolis/kcd"
+    description: |
+      Lightweight, headless implementation of the KDE Connect protocol (v8) written in Go
+    maintainers:
+      - "bethropolis <bethropolis at gmail dot com>"
+    license: "MIT"
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/kcd-bin.git"
+    provides:
+      - kcd
+    conflicts:
+      - kcd
+    depends:
+      - glibc
+    optdepends:
+      - "libnotify: for desktop notifications"
+      - "wl-clipboard: for Wayland clipboard sync"
+      - "xclip: for X11 clipboard sync"
+      - "sshfs: for SFTP mounting support"
+      - "playerctl: for MPRIS media control"
+      - "ydotool: for Wayland mousepad support"
+      - "xdotool: for X11 mousepad support"
+      - "wtype: for Wayland keyboard emulation"
+      - "python-nautilus: for Nautilus file manager integration"
+    install: packaging/kcd-bin.install
+    package: |-
+      install -Dm755 "./kcd" "${pkgdir}/usr/bin/kcd"
+
+      install -Dm644 "./packaging/kcd-pkg.service" "${pkgdir}/usr/lib/systemd/user/kcd.service"
+      install -Dm644 "./packaging/kcd-system.service" "${pkgdir}/usr/lib/systemd/system/kcd@.service"
+
+      install -Dm644 "./packaging/kcd.example.toml" "${pkgdir}/usr/share/doc/kcd/kcd.example.toml"
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/kcd/README.md"
+
+      install -Dm644 "./packaging/kcd.bash-completion" "${pkgdir}/usr/share/bash-completion/completions/kcd"
+      install -Dm644 "./packaging/kcd.zsh-completion" "${pkgdir}/usr/share/zsh/site-functions/_kcd"
+      install -Dm644 "./packaging/kcd.fish-completion" "${pkgdir}/usr/share/fish/vendor_completions.d/kcd.fish"
+
+      install -Dm644 "./packaging/nautilus-kcd.py" "${pkgdir}/usr/share/nautilus-python/extensions/nautilus-kcd.py"
+
+      install -Dm644 "./packaging/firewalld-kcd.xml" "${pkgdir}/usr/lib/firewalld/services/kcd.xml"
+      install -Dm644 "./packaging/ufw-kcd" "${pkgdir}/etc/ufw/applications.d/kcd"
+
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/kcd-bin/LICENSE"
+
 nfpms:
   - id: packages
     package_name: kcd
