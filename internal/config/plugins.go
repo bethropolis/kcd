@@ -36,12 +36,12 @@ type BatteryConfig struct {
 }
 
 type NotificationPluginConfig struct {
-	Urgency         string `toml:"urgency"`
-	FetchIcons      bool   `toml:"fetch_icons"`
-	IconCacheDir    string `toml:"icon_cache_dir"`
-	MaxBodyLength   int    `toml:"max_body_length"`
-	ExpireMS        int    `toml:"expire_ms"`
-	SkipNonClearable bool  `toml:"skip_non_clearable"`
+	Urgency          string `toml:"urgency"`
+	FetchIcons       bool   `toml:"fetch_icons"`
+	IconCacheDir     string `toml:"icon_cache_dir"`
+	MaxBodyLength    int    `toml:"max_body_length"`
+	ExpireMS         int    `toml:"expire_ms"`
+	SkipNonClearable bool   `toml:"skip_non_clearable"`
 }
 
 type ShareConfig struct {
