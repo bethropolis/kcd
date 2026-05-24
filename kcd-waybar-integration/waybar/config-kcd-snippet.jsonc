@@ -9,7 +9,7 @@
 //
 
   "custom/kcd": {
-    "exec": "~/.config/waybar/scripts/kcd-waybar.py",
+    "exec": "~/.config/waybar/scripts/kcd-waybar.sh",
     "return-type": "json",
     "format": "{}",
     "on-click": "kcd ping $(kcd devices --connected --json | jq -r '.[0].id')",
