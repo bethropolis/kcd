@@ -17,6 +17,10 @@
 #       "restart-interval": 0
 #   }
 
+# Kill child processes (kcd watch) immediately when Waybar kills this script
+trap "exit" INT TERM
+trap "kill 0" EXIT
+
 CHARGE=0
 CHARGING="false"
 TITLE=""
