@@ -270,6 +270,7 @@ Add to `~/.config/waybar/config`:
 
 A ready-made config snippet, bash script and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
 
+
 ### Tiling Window Managers
 
 kcd fits into WM setups without pulling in KDE Plasma — single binary,

@@ -9,34 +9,12 @@
 # Falls back gracefully if the daemon isn't running.
 function __kcd_devices
     kcd devices --json 2>/dev/null \
-        | string match -r '"id":"([^"]+)","name":"([^"]+)"' \
-        | awk 'NR%3==0{id=$0} NR%3==1{id=$0} NR%3==2{print prev"\t"$0} {prev=$0}' 2>/dev/null
-    # Simpler fallback: just print IDs one per line
-    kcd devices --json 2>/dev/null \
-        | python3 -c "
-import sys, json
-try:
-    devs = json.load(sys.stdin)
-    for d in devs:
-        print(d.get('id','') + '\t' + d.get('name','') + ' (' + d.get('state','') + ')')
-except:
-    pass
-" 2>/dev/null
+        | jq -r '.[] | "\(.id)\t\(.name) (\(.state))"' 2>/dev/null
 end
 
-# Query the running daemon for only currently connected devices.
 function __kcd_connected_devices
     kcd devices --json 2>/dev/null \
-        | python3 -c "
-import sys, json
-try:
-    devs = json.load(sys.stdin)
-    for d in devs:
-        if d.get('connected'):
-            print(d.get('id','') + '\t' + d.get('name','') + ' (' + d.get('state','') + ')')
-except:
-    pass
-" 2>/dev/null
+        | jq -r '.[] | select(.connected == true) | "\(.id)\t\(.name) (\(.state))"' 2>/dev/null
 end
 
 # Return true when we are completing the first positional argument (device-id)
@@ -57,7 +35,7 @@ end
 
 # All top-level subcommands (for "don't complete subcommands twice" guards)
 set -l __kcd_cmds daemon devices connect pair unpair ping battery watch \
-    sftp reply call findmyphone lock unlock share clipboard run sms doctor status
+    sftp reply call findmyphone lock unlock share clipboard run sms mpris doctor status
 
 # ---------------------------------------------------------------------------
 # Disable file completion globally — we re-enable it only where needed
@@ -113,6 +91,8 @@ complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a sms         -d 'Send an SMS via a device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a mpris       -d 'Control media playback on remote devices'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a doctor      -d 'Check runtime dependencies and configuration'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a status      -d 'Show daemon status and runtime information'
@@ -148,6 +128,12 @@ for _cmd in unpair ping battery findmyphone lock unlock clipboard
 end
 
 # ---------------------------------------------------------------------------
+# clipboard  (just --watch flag; device-id handled above)
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from clipboard && not __fish_seen_subcommand_from watch" \
+    -l watch -s w -d 'Watch for clipboard changes and auto-sync to connected devices'
+
+# ---------------------------------------------------------------------------
 # watch
 # ---------------------------------------------------------------------------
 complete -c kcd -n "__fish_seen_subcommand_from watch" \
@@ -178,16 +164,20 @@ sftp.mount\t'SFTP filesystem mounted'
 volume.update\t'System volume changed'"
 
 # ---------------------------------------------------------------------------
-# sftp  request|mount|unmount  <device-id>
+# sftp  request|info|volumes|mount|unmount  <device-id>
 # ---------------------------------------------------------------------------
-complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
-    -a request  -d 'Request SFTP connection details'
-complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request info volumes mount unmount" \
+    -a request  -d 'Request SFTP connection details from the device'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request info volumes mount unmount" \
+    -a info     -d 'Show cached SFTP connection details'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request info volumes mount unmount" \
+    -a volumes  -d 'List available storage volumes on a device'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request info volumes mount unmount" \
     -a mount    -d 'Mount phone filesystem via sshfs'
-complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request mount unmount" \
+complete -c kcd -n "__fish_seen_subcommand_from sftp && not __fish_seen_subcommand_from request info volumes mount unmount" \
     -a unmount  -d 'Unmount a previously mounted phone filesystem'
 
-for _sub in request mount unmount
+for _sub in request info volumes mount unmount
     complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
         -a '(__kcd_connected_devices)' -d 'Device ID'
 end
@@ -231,11 +221,69 @@ complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_fr
 # command-key at position 4 is free-form
 
 # ---------------------------------------------------------------------------
-# sms  <device-id>  <phone-number>  <message>
+# sms  send|conversations|conversation|attachment  <device-id> [...]
 # ---------------------------------------------------------------------------
-complete -c kcd -n "__fish_seen_subcommand_from sms && __kcd_at_arg 2" \
+complete -c kcd -n "__fish_seen_subcommand_from sms && not __fish_seen_subcommand_from send conversations conversation attachment" \
+    -a send -d 'Send an SMS message'
+complete -c kcd -n "__fish_seen_subcommand_from sms && not __fish_seen_subcommand_from send conversations conversation attachment" \
+    -a conversations -d 'List recent conversations'
+complete -c kcd -n "__fish_seen_subcommand_from sms && not __fish_seen_subcommand_from send conversations conversation attachment" \
+    -a conversation -d 'Show a specific conversation thread'
+complete -c kcd -n "__fish_seen_subcommand_from sms && not __fish_seen_subcommand_from send conversations conversation attachment" \
+    -a attachment -d 'Request MMS attachment data'
+
+# sms send <device-id> <phone-number> <message>
+complete -c kcd -n "__fish_seen_subcommand_from sms && __fish_seen_subcommand_from send && __kcd_at_arg 3" \
     -a '(__kcd_connected_devices)' -d 'Device ID'
-# phone-number and message are free-form
+# sms conversations <device-id>
+complete -c kcd -n "__fish_seen_subcommand_from sms && __fish_seen_subcommand_from conversations && __kcd_at_arg 3" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
+# sms conversation <device-id> <thread-id>
+complete -c kcd -n "__fish_seen_subcommand_from sms && __fish_seen_subcommand_from conversation && __kcd_at_arg 3" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
+# sms attachment <device-id> <part-id> <unique-id>
+complete -c kcd -n "__fish_seen_subcommand_from sms && __fish_seen_subcommand_from attachment && __kcd_at_arg 3" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
+
+# ---------------------------------------------------------------------------
+# mpris  list|status|play|pause|toggle|next|previous|stop|volume|seek|raw
+# ---------------------------------------------------------------------------
+# mpris subcommands (no args)
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a list     -d 'List active media players on remote devices'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a status   -d 'Show currently playing media'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a play     -d 'Start playback'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a pause    -d 'Pause playback'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a toggle   -d 'Toggle play/pause'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a next     -d 'Skip to next track'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a previous -d 'Go to previous track'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a stop     -d 'Stop playback'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a volume   -d 'Set player volume (0-100)'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a seek     -d 'Seek to position or by offset'
+complete -c kcd -n "__fish_seen_subcommand_from mpris && not __fish_seen_subcommand_from list status play pause toggle next previous prev stop volume seek raw" \
+    -a raw      -d 'Dump raw MPRIS debug state (local players)'
+
+# mpris flags
+for _sub in list status
+    complete -c kcd -n "__fish_seen_subcommand_from mpris && __fish_seen_subcommand_from $_sub" \
+        -l json -d 'Output in JSON format'
+end
+
+for _sub in play pause toggle next previous prev stop volume seek status
+    complete -c kcd -n "__fish_seen_subcommand_from mpris && __fish_seen_subcommand_from $_sub" \
+        -l device -d 'Target device ID' -r -a '(__kcd_connected_devices)'
+    complete -c kcd -n "__fish_seen_subcommand_from mpris && __fish_seen_subcommand_from $_sub" \
+        -l player -s p -d 'Player name' -r
+end
 
 # ---------------------------------------------------------------------------
 # status
