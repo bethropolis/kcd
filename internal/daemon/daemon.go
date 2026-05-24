@@ -174,8 +174,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 					rc := pl.(*runcommand.RunCommandPlugin)
 					rc.Mu.Lock()
 					rc.Commands = newCfg.Commands
+					rc.CommandsPerDevice = newCfg.CommandsPerDevice
 					rc.Mu.Unlock()
-					logger.Info("reloaded commands", zap.Int("count", len(newCfg.Commands)))
+					logger.Info("reloaded commands",
+						zap.Int("global", len(newCfg.Commands)),
+						zap.Int("per_device", len(newCfg.CommandsPerDevice)),
+					)
 				}
 
 				// Reload notification filters.

@@ -3,6 +3,7 @@ package connectivity
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -11,11 +12,16 @@ import (
 )
 
 type ConnectivityPlugin struct {
-	bus *events.Bus
+	bus         *events.Bus
+	mu          sync.Mutex
+	lastReports map[string]ConnectivityBody
 }
 
 func NewConnectivityPlugin(bus *events.Bus) *ConnectivityPlugin {
-	return &ConnectivityPlugin{bus: bus}
+	return &ConnectivityPlugin{
+		bus:         bus,
+		lastReports: make(map[string]ConnectivityBody),
+	}
 }
 
 type SignalStrength struct {
@@ -43,10 +49,38 @@ func (p *ConnectivityPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		return err
 	}
 
-	if p.bus != nil {
+	if p.shouldPublish(dev.ID(), body) && p.bus != nil {
 		p.bus.Publish(events.TypeConnectivityUpdate, dev.ID(), body)
 	}
 	return nil
+}
+
+func (p *ConnectivityPlugin) shouldPublish(deviceID string, body ConnectivityBody) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	last, ok := p.lastReports[deviceID]
+	if ok && connectivityEqual(last, body) {
+		return false
+	}
+	if p.lastReports == nil {
+		p.lastReports = make(map[string]ConnectivityBody)
+	}
+	p.lastReports[deviceID] = body
+	return true
+}
+
+func connectivityEqual(a, b ConnectivityBody) bool {
+	if len(a.SignalStrengths) != len(b.SignalStrengths) {
+		return false
+	}
+	for key, av := range a.SignalStrengths {
+		bv, ok := b.SignalStrengths[key]
+		if !ok || av != bv {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *ConnectivityPlugin) OnConnect(dev device.Sender) {
@@ -55,4 +89,8 @@ func (p *ConnectivityPlugin) OnConnect(dev device.Sender) {
 	dev.Send(pkt)
 }
 
-func (p *ConnectivityPlugin) OnDisconnect(dev device.Sender) {}
+func (p *ConnectivityPlugin) OnDisconnect(dev device.Sender) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.lastReports, dev.ID())
+}

@@ -3,6 +3,10 @@ package battery
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
@@ -43,26 +47,45 @@ type BatteryBody struct {
 	ThresholdEvent int  `json:"thresholdEvent"`
 }
 
-func (p *BatteryPlugin) Name() string            { return "Battery" }
-func (p *BatteryPlugin) Timeout() time.Duration  { return 5 * time.Second }
-func (p *BatteryPlugin) IncomingTypes() []string { return []string{"kdeconnect.battery"} }
-func (p *BatteryPlugin) OutgoingTypes() []string { return []string{"kdeconnect.battery.request"} }
+func (p *BatteryPlugin) Name() string           { return "Battery" }
+func (p *BatteryPlugin) Timeout() time.Duration { return 5 * time.Second }
+func (p *BatteryPlugin) IncomingTypes() []string {
+	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
+}
+func (p *BatteryPlugin) OutgoingTypes() []string {
+	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
+}
 
-// Handle processes incoming battery updates.
+// Handle processes incoming battery packets.
 func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
-	var body BatteryBody
-	if err := json.Unmarshal(pkt.Body, &body); err != nil {
-		return err
-	}
+	switch pkt.Type {
+	case "kdeconnect.battery":
+		var body BatteryBody
+		if err := json.Unmarshal(pkt.Body, &body); err != nil {
+			return err
+		}
 
-	// Update the device's cached battery state.
-	// UpdateBattery also publishes TypeBatteryUpdate via the device's own bus reference.
-	dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
+		dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
 
-	// Handle threshold events — these warrant a desktop notification in addition
-	// to the standard battery.update event.
-	if body.ThresholdEvent != thresholdNone {
-		p.handleThreshold(dev, body)
+		if body.ThresholdEvent != thresholdNone {
+			p.handleThreshold(dev, body)
+		}
+
+	case "kdeconnect.battery.request":
+		// The phone is asking for our local battery state.
+		charge, charging, err := readLocalBattery()
+		if err != nil {
+			p.logger.Debug("local battery unavailable, skipping response", zap.Error(err))
+			return nil
+		}
+		pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
+			CurrentCharge: charge,
+			IsCharging:    charging,
+		})
+		if err != nil {
+			return err
+		}
+		return dev.Send(pkt)
 	}
 
 	return nil
@@ -108,12 +131,80 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 	}
 }
 
-// OnConnect requests the current battery state immediately on connection.
+// OnConnect requests the phone's battery and sends our local battery state.
 func (p *BatteryPlugin) OnConnect(dev device.Sender) {
+	// Ask phone for its battery.
 	pkt, _ := protocol.NewPacket("kdeconnect.battery.request", map[string]any{
 		"request": true,
+	})
+	dev.Send(pkt)
+
+	// Send our local battery to the phone.
+	charge, charging, err := readLocalBattery()
+	if err != nil {
+		p.logger.Debug("local battery unavailable on connect", zap.Error(err))
+		return
+	}
+	pkt, _ = protocol.NewPacket("kdeconnect.battery", BatteryBody{
+		CurrentCharge: charge,
+		IsCharging:    charging,
 	})
 	dev.Send(pkt)
 }
 
 func (p *BatteryPlugin) OnDisconnect(_ device.Sender) {}
+
+// powerSupplyRoots lists paths to check for battery sysfs entries.
+var powerSupplyRoots = []string{
+	"/sys/class/power_supply",
+	"/sys/devices/platform/subsystem/power_supply",
+}
+
+// readLocalBattery reads the local battery state from sysfs.
+// Returns charge (0-100), charging status, and any error.
+// If no battery is found, returns an error — callers should log and skip.
+func readLocalBattery() (int, bool, error) {
+	for _, root := range powerSupplyRoots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasPrefix(name, "BAT") {
+				continue
+			}
+			base := filepath.Join(root, name)
+
+			// Read capacity (0-100)
+			capRaw, err := os.ReadFile(filepath.Join(base, "capacity"))
+			if err != nil {
+				continue
+			}
+			capacity, err := strconv.Atoi(strings.TrimSpace(string(capRaw)))
+			if err != nil {
+				continue
+			}
+
+			// Read status (Charging/Discharging/Full/Unknown)
+			statusRaw, _ := os.ReadFile(filepath.Join(base, "status"))
+			status := strings.TrimSpace(string(statusRaw))
+			charging := status == "Charging"
+
+			return capacity, charging, nil
+		}
+	}
+
+	return 0, false, errNoBattery
+}
+
+// errNoBattery is returned when no battery sysfs entry is found.
+var errNoBattery = &noBatteryError{}
+
+type noBatteryError struct{}
+
+func (e *noBatteryError) Error() string { return "no battery found" }
+func (e *noBatteryError) Is(target error) bool {
+	_, ok := target.(*noBatteryError)
+	return ok
+}

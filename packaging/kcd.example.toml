@@ -150,6 +150,11 @@ suspend = "systemctl suspend"
 # reboot  = "systemctl reboot"
 # screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
 
+# Per-device commands override the global set for specific paired devices.
+# Use the device ID shown in `kcd devices`.
+# [commands_per_device."<device-id>"]
+# screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
+
 # ─── Notification filters ─────────────────────────────────────────────────────
 # Control which phone app notifications appear on the desktop.
 # Keys are Android app package names. Values: "show" or "silent".
@@ -163,6 +168,9 @@ suspend = "systemctl suspend"
 # "*"                  = "show"
 
 # ─── Battery: notifications and thresholds ────────────────────────────────────
+# In addition to monitoring your phone's battery, the daemon also sends this
+# machine's battery state to connected devices. This happens once on connect
+# and whenever the phone explicitly requests it — no periodic polling.
 
 [battery]
 # notify_low = true

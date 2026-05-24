@@ -25,3 +25,10 @@ func RunCommandAsync(logger *zap.Logger, name string, args ...string) {
 		}
 	}()
 }
+
+// RunCommandSync executes a system command synchronously and returns its combined output and error.
+// The caller is responsible for applying timeouts via the context.
+func RunCommandSync(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.CombinedOutput()
+}
