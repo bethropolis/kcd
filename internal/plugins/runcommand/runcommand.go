@@ -14,13 +14,21 @@ import (
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {
-	Mu       sync.RWMutex // exported so daemon.go can lock it during reload
-	Commands map[string]string
-	logger   *zap.Logger
+	Mu                sync.RWMutex // exported so daemon.go can lock it during reload
+	Commands          map[string]string
+	CommandsPerDevice map[string]map[string]string // keyed by device ID
+	logger            *zap.Logger
 }
 
-func NewRunCommandPlugin(commands map[string]string, logger *zap.Logger) *RunCommandPlugin {
-	return &RunCommandPlugin{Commands: commands, logger: logger.With(zap.String("plugin", "runcommand"))}
+func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, logger *zap.Logger) *RunCommandPlugin {
+	if commandsPerDevice == nil {
+		commandsPerDevice = make(map[string]map[string]string)
+	}
+	return &RunCommandPlugin{
+		Commands:          commands,
+		CommandsPerDevice: commandsPerDevice,
+		logger:            logger.With(zap.String("plugin", "runcommand")),
+	}
 }
 
 // RequestBody represents a request from the phone.
@@ -55,10 +63,18 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 	if body.RequestCommandList {
 		p.Mu.RLock()
 		cmds := p.Commands
+		perDev := p.CommandsPerDevice[dev.ID()]
 		p.Mu.RUnlock()
-		// KDE Connect expects an object where each entry is a command config.
+
+		// Merge global + per-device commands. Per-device overrides global.
 		list := make(map[string]map[string]string)
 		for label, cmd := range cmds {
+			list[label] = map[string]string{
+				"name":    label,
+				"command": cmd,
+			}
+		}
+		for label, cmd := range perDev {
 			list[label] = map[string]string{
 				"name":    label,
 				"command": cmd,
@@ -77,9 +93,15 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 
 	if body.Key != "" {
 		p.Mu.RLock()
+		perDev := p.CommandsPerDevice[dev.ID()]
 		cmds := p.Commands
 		p.Mu.RUnlock()
-		cmdStr, ok := cmds[body.Key]
+
+		// Check per-device first, then global.
+		cmdStr, ok := perDev[body.Key]
+		if !ok {
+			cmdStr, ok = cmds[body.Key]
+		}
 		if !ok {
 			return nil
 		}
