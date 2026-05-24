@@ -270,20 +270,28 @@ Add to `~/.config/waybar/config`:
 
 A ready-made config snippet, bash script and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
 
-### Tiling WM shortcuts (Sway / Hyprland)
+### Tiling Window Managers
 
-```bash
-# Push clipboard to the first connected phone
-bindsym Super+c exec kcd clipboard
+kcd fits into WM setups without pulling in KDE Plasma — single binary,
+systemd user unit alongside your compositor. All `mpris` commands auto-
+discover your phone, no device ID needed.
 
-# Ring the phone
-bindsym Super+Shift+f exec kcd findmyphone
-
-# Control phone music playback
-bindsym Super+Shift+period exec kcd mpris next
-bindsym Super+Shift+comma exec kcd mpris previous
-bindsym Super+Shift+m exec kcd mpris toggle
+**Hyprland** (`~/.config/hypr/hyprland.conf`):
 ```
+bind = SUPER, F9,  exec, kcd mpris toggle
+bind = SUPER, F10, exec, kcd mpris previous
+bind = SUPER, F11, exec, kcd mpris next
+```
+
+**Sway / i3** (`~/.config/sway/config` or `~/.config/i3/config`):
+```
+bindsym $mod+F9  exec kcd mpris toggle
+bindsym $mod+F10 exec kcd mpris previous
+bindsym $mod+F11 exec kcd mpris next
+```
+
+You can also bind `kcd clipboard`, `kcd findmyphone`, or any other
+subcommand — pick keys that don't conflict with your existing layout.
 
 ### Custom event scripts
 
