@@ -23,38 +23,53 @@ TITLE=""
 ARTIST=""
 CONNECTED="false"
 
+# Nerd Font icons — $'...' is required so \u escapes are interpreted
+ICON_OFF=$'\uf114'
+ICON_CHARGING=$'\uf0e7'
+ICON_HIGH=$'\uf1b9'
+ICON_MID=$'\uf0ed'
+ICON_LOW=$'\uf0e9'
+ICON_CRIT=$'\uf071'
+ICON_PLAY=$'\u25b6'
+NL=$'\n'
+
 render() {
     if [ "$CONNECTED" != "true" ]; then
-        printf '{"text":"\uf114","tooltip":"Disconnected","class":"kcd-disconnected","percentage":0}\n'
+        jq -n -c -M \
+            --arg text "$ICON_OFF" \
+            --arg tooltip "Disconnected" \
+            --arg class "kcd-disconnected" \
+            --argjson percentage 0 \
+            '{text: $text, tooltip: $tooltip, class: $class, percentage: $percentage}'
         return
     fi
 
-    local icon="\uf1b9"
-    if [ "$CHARGING" = "true" ]; then
-        icon="\uf0e7"
-    elif [ "$CHARGE" -lt 20 ]; then
-        icon="\uf071"
-    elif [ "$CHARGE" -lt 40 ]; then
-        icon="\uf0e9"
-    elif [ "$CHARGE" -lt 60 ]; then
-        icon="\uf0ed"
-    fi
-
+    local icon="$ICON_HIGH"
     local css="kcd-connected"
+
     if [ "$CHARGING" = "true" ]; then
+        icon="$ICON_CHARGING"
         css="kcd-charging"
     elif [ "$CHARGE" -lt 20 ]; then
+        icon="$ICON_CRIT"
         css="kcd-low"
+    elif [ "$CHARGE" -lt 40 ]; then
+        icon="$ICON_LOW"
+    elif [ "$CHARGE" -lt 60 ]; then
+        icon="$ICON_MID"
     fi
 
     local tooltip="Battery: ${CHARGE}%"
     if [ -n "$TITLE" ]; then
-        tooltip="${tooltip}\n\u25b6 ${TITLE}"
-        [ -n "$ARTIST" ] && tooltip="${tooltip} - ${ARTIST}"
+        if [ -n "$ARTIST" ]; then
+            tooltip="${tooltip}${NL}${ICON_PLAY} ${TITLE} - ${ARTIST}"
+        else
+            tooltip="${tooltip}${NL}${ICON_PLAY} ${TITLE}"
+        fi
     fi
 
     jq -n -c -M \
-        --arg text "$icon $CHARGE%" \
+        --arg text "${icon} ${CHARGE}%" \
         --arg tooltip "$tooltip" \
         --arg css "$css" \
         --argjson percentage "$CHARGE" \
