@@ -245,7 +245,6 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			LoopStatus:     body.LoopStatus,
 		}
 		p.mu.Lock()
-		p.remoteStates[dev.ID()] = state
 		tracker, ok := p.positionTrackers[dev.ID()]
 		if !ok {
 			tracker = &remotePositionTracker{}
@@ -254,12 +253,29 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		tracker.lastPosition = body.Pos
 		tracker.lastPositionAt = time.Now()
 		tracker.playing = body.IsPlaying
+		shouldPublish := shouldPublishRemoteState(p.remoteStates[dev.ID()], state)
+		p.remoteStates[dev.ID()] = state
 		p.mu.Unlock()
-		p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+		if shouldPublish && p.bus != nil {
+			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+		}
 		return nil
 	}
 
 	return nil
+}
+
+func shouldPublishRemoteState(last, current *NowPlaying) bool {
+	if last == nil {
+		return true
+	}
+	return last.Player != current.Player ||
+		last.Title != current.Title ||
+		last.Artist != current.Artist ||
+		last.Album != current.Album ||
+		last.PlaybackStatus != current.PlaybackStatus ||
+		last.IsPlaying != current.IsPlaying ||
+		last.Volume != current.Volume
 }
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
