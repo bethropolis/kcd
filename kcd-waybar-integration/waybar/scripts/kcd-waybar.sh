@@ -1,9 +1,9 @@
 #!/bin/bash
 # kcd-waybar.sh — Lightweight Waybar custom module for the kcd daemon.
 #
-# Requires: jq, kcd CLI on PATH.
-# Connects to the daemon via `kcd watch --json` (the client handles
-# socket reconnection with exponential backoff).
+# Requires: jq, and one of: nc (preferred), socat, or kcd CLI on PATH.
+# Connects directly to the daemon Unix socket via the lightest tool
+# available, then feeds events into an in-process while-loop (no subshell).
 #
 # Install:
 #   mkdir -p ~/.config/waybar/scripts
@@ -17,7 +17,7 @@
 #       "restart-interval": 0
 #   }
 
-# Kill child processes (kcd watch) immediately when Waybar kills this script
+# Kill child processes immediately when Waybar kills this script
 trap "exit" INT TERM
 trap "kill 0" EXIT
 
@@ -83,14 +83,9 @@ render() {
         '{text: $text, tooltip: $tooltip, class: $css, percentage: $percentage}'
 }
 
-render
-
-kcd watch --json \
-    -e device.connected \
-    -e device.disconnected \
-    -e battery.update \
-    -e mpris.update | while read -r event; do
-
+handle_event() {
+    local event="$1"
+    local type
     type=$(echo "$event" | jq -r '.type')
 
     case "$type" in
@@ -112,4 +107,46 @@ kcd watch --json \
     esac
 
     render
-done
+}
+
+# ---- Initial render before any event ----
+render
+
+# ---- Event source ----
+# Prefer lightweight Unix socket tools (nc ~0.5 MB, socat ~1 MB)
+# over the Go CLI (kcd watch ~10 MB).
+
+SOCKET="${KCD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/kcd/kcd.sock}"
+PAYLOAD='{"cmd":"watch","payload":{"events":["device.connected","device.disconnected","battery.update","mpris.update"]}}'
+
+if command -v nc >/dev/null 2>&1; then
+    # OpenBSD netcat — ~0.5 MB, connects to Unix socket with -U.
+    # After the payload is sent, nc keeps reading from the socket.
+    # We read-and-discard the {"ok":true} ack, then stream events.
+    {
+        read -r _
+        while read -r event; do
+            handle_event "$event"
+        done
+    } < <(printf '%s\n' "$PAYLOAD" | nc -U "$SOCKET" 2>/dev/null)
+
+elif command -v socat >/dev/null 2>&1; then
+    # socat — ~1 MB, same strategy (half-closes write side after payload).
+    {
+        read -r _
+        while read -r event; do
+            handle_event "$event"
+        done
+    } < <(printf '%s\n' "$PAYLOAD" | socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null)
+
+else
+    # kcd watch — ~10 MB (Go runtime overhead), but always available.
+    # No ack line to skip (kcd watch --json outputs events directly).
+    while read -r event; do
+        handle_event "$event"
+    done < <(kcd watch --json \
+        -e device.connected \
+        -e device.disconnected \
+        -e battery.update \
+        -e mpris.update 2>/dev/null)
+fi
