@@ -128,7 +128,7 @@ if command -v nc >/dev/null 2>&1; then
         while read -r event; do
             handle_event "$event"
         done
-    } < <(printf '%s\n' "$PAYLOAD" | nc -U "$SOCKET" 2>/dev/null)
+    } < <(nc -U "$SOCKET" <<< "$PAYLOAD" 2>/dev/null)
 
 elif command -v socat >/dev/null 2>&1; then
     # socat — ~1 MB, same strategy (half-closes write side after payload).
@@ -137,7 +137,7 @@ elif command -v socat >/dev/null 2>&1; then
         while read -r event; do
             handle_event "$event"
         done
-    } < <(printf '%s\n' "$PAYLOAD" | socat - "UNIX-CONNECT:$SOCKET" 2>/dev/null)
+    } < <(socat -,ignoreeof "UNIX-CONNECT:$SOCKET" <<< "$PAYLOAD" 2>/dev/null)
 
 else
     # kcd watch — ~10 MB (Go runtime overhead), but always available.
