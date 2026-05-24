@@ -104,6 +104,33 @@ func TestBatteryPlugin_Handle_ThresholdFull_EmitsEvent(t *testing.T) {
 	}
 }
 
+func TestBatteryPlugin_Handle_RequestResponds(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	p, _ := newPlugin(t)
+	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
+
+	pkt, _ := protocol.NewPacket("kdeconnect.battery.request", map[string]bool{"request": true})
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	// No assertion on the response — it depends on whether this machine has
+	// a battery. The important thing is that Handle doesn't crash or return
+	// an error. The send is best-effort.
+}
+
+func TestLocalBatteryRead(t *testing.T) {
+	charge, charging, err := readLocalBattery()
+	if err != nil {
+		// Desktops often have no battery — this is non-fatal.
+		t.Logf("no local battery (expected on desktops): %v", err)
+		return
+	}
+	if charge < 0 || charge > 100 {
+		t.Errorf("battery charge out of range: %d", charge)
+	}
+	t.Logf("local battery: %d%% (charging=%v)", charge, charging)
+}
+
 func TestBatteryPlugin_Handle_NoThreshold_NoEvent(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	p, bus := newPlugin(t)
