@@ -273,6 +273,7 @@ func shouldPublishRemoteState(last, current *NowPlaying) bool {
 		last.Title != current.Title ||
 		last.Artist != current.Artist ||
 		last.Album != current.Album ||
+		last.AlbumArtUrl != current.AlbumArtUrl ||
 		last.PlaybackStatus != current.PlaybackStatus ||
 		last.IsPlaying != current.IsPlaying ||
 		last.Volume != current.Volume
