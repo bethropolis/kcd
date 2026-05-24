@@ -3,6 +3,8 @@ package runcommand
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +52,7 @@ func (p *RunCommandPlugin) IncomingTypes() []string {
 
 // OutgoingTypes returns the packet types this plugin may send.
 func (p *RunCommandPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.runcommand"}
+	return []string{"kdeconnect.runcommand", "kdeconnect.notification"}
 }
 
 // Handle processes incoming command requests.
@@ -105,8 +107,46 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		if !ok {
 			return nil
 		}
-		// Handlers must not block. Spawning goroutine.
-		plugin.RunCommandAsync(p.logger, "sh", "-c", cmdStr)
+
+		// Handlers must not block. Spawning goroutine to run the command
+		// and optionally send a notification with the output.
+		go func() {
+			execCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			out, err := plugin.RunCommandSync(execCtx, "sh", "-c", cmdStr)
+
+			text := strings.TrimSpace(string(out))
+			if len(text) == 0 {
+				if err != nil {
+					text = fmt.Sprintf("Error: %v", err)
+				} else {
+					// No output and no error — do not send a notification.
+					return
+				}
+			} else if err != nil {
+				text = fmt.Sprintf("Error: %v\n\n%s", err, text)
+			}
+
+			// Do not send notifications for massive outputs (e.g. log dumps)
+			if len(text) > 4096 {
+				p.logger.Warn("command output too large for notification, truncating", zap.Int("len", len(text)))
+				text = text[:4000] + "\n...[output truncated]"
+			}
+
+			// Send notification back to the phone
+			// The Android app uses 'appName' as the title and 'ticker' as the body.
+			// It ignores 'title' and 'text'.
+			notifBody := map[string]interface{}{
+				"id":      fmt.Sprintf("%d", time.Now().UnixNano()),
+				"appName": fmt.Sprintf("Run: %s", body.Key),
+				"ticker":  text,
+			}
+
+			if pkt, err := protocol.NewPacket("kdeconnect.notification", notifBody); err == nil {
+				_ = dev.Send(pkt)
+			}
+		}()
 	}
 
 	return nil
