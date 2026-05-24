@@ -23,14 +23,15 @@ TITLE=""
 ARTIST=""
 CONNECTED="false"
 
-# Nerd Font icons — $'...' is required so \u escapes are interpreted
-ICON_OFF=$'\uf114'
-ICON_CHARGING=$'\uf0e7'
-ICON_HIGH=$'\uf1b9'
-ICON_MID=$'\uf0ed'
-ICON_LOW=$'\uf0e9'
-ICON_CRIT=$'\uf071'
-ICON_PLAY=$'\u25b6'
+# Nerd Font icons (Font Awesome codepoints) — $'...' required for \u
+ICON_OFF=$'\uf127'          # unlink
+ICON_CHARGING=$'\uf0e7'     # bolt
+ICON_BAT100=$'\uf240'       # battery-full
+ICON_BAT75=$'\uf241'        # battery-three-quarters
+ICON_BAT50=$'\uf242'        # battery-half
+ICON_BAT25=$'\uf243'        # battery-quarter
+ICON_BAT0=$'\uf244'         # battery-empty
+ICON_PLAY=$'\uf04b'         # play
 NL=$'\n'
 
 render() {
@@ -44,19 +45,21 @@ render() {
         return
     fi
 
-    local icon="$ICON_HIGH"
+    local icon="$ICON_BAT100"
     local css="kcd-connected"
 
     if [ "$CHARGING" = "true" ]; then
         icon="$ICON_CHARGING"
         css="kcd-charging"
     elif [ "$CHARGE" -lt 20 ]; then
-        icon="$ICON_CRIT"
+        icon="$ICON_BAT0"
         css="kcd-low"
     elif [ "$CHARGE" -lt 40 ]; then
-        icon="$ICON_LOW"
+        icon="$ICON_BAT25"
     elif [ "$CHARGE" -lt 60 ]; then
-        icon="$ICON_MID"
+        icon="$ICON_BAT50"
+    elif [ "$CHARGE" -lt 80 ]; then
+        icon="$ICON_BAT75"
     fi
 
     local tooltip="Battery: ${CHARGE}%"
