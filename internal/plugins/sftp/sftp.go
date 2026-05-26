@@ -49,10 +49,10 @@ type SftpBody struct {
 	User string      `json:"user"`
 	// Password is intentionally not logged.
 	Password string `json:"password"`
-	// Path is the directory on the Android device the user should be taken to.
-	// It is NOT the remote SFTP path — the Android SFTP server is typically
-	// chrooted to its storage root, so this path is used as a navigation target
-	// WITHIN the mounted filesystem, not as the sshfs remote path.
+	// Path is the primary storage root path from the Android device.
+	// When exactly one volume exists this is the volume path (e.g. /storage/emulated/0);
+	// when multiple volumes exist this falls back to "/" (legacy compat).
+	// Prefer MultiPaths for the authoritative list of browsable roots.
 	Path string `json:"path"`
 	// MultiPaths lists all available storage root paths on the device
 	// (e.g. internal storage, SD card). Populated by Android API 30+.
@@ -221,19 +221,18 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		return "", fmt.Errorf("create mount point %s: %w", mountPoint, err)
 	}
 
-	// Mount the SFTP server ROOT — empty path after ':'.
-	//
-	// Why not use body.Path as the remote path?
-	// The KDE Connect Android app chroots its built-in SFTP server to the
-	// device's storage root (e.g. /storage/emulated/0).  Passing body.Path
-	// (e.g. "/storage/emulated/0") as the remote sshfs path would navigate to
-	// that path INSIDE the chroot — effectively /storage/emulated/0/storage/…
-	// — which doesn't exist, producing the "you do not have permission to
-	// view /" error in GNOME Files / Nautilus.
-	//
-	// Mounting at root gives us the chroot's top level.  We then navigate the
-	// user to body.Path within the local mount.
-	remoteRoot := fmt.Sprintf("%s@%s:", body.User, body.IP)
+	// Determine the remote path on the Android device.
+	// The Android SFTP server exposes the real filesystem at "/".
+	// Listing "/" via sshfs fails because it contains permission-denied
+	// entries (/proc, /sys). Instead, mount directly to the first storage
+	// volume (e.g. /storage/emulated/0) which is guaranteed browsable.
+	remotePath := ""
+	if len(body.MultiPaths) > 0 {
+		remotePath = body.MultiPaths[0]
+	} else if body.Path != "" && body.Path != "/" {
+		remotePath = body.Path
+	}
+	remoteRoot := fmt.Sprintf("%s@%s:%s", body.User, body.IP, remotePath)
 
 	args := []string{
 		remoteRoot,
@@ -274,15 +273,9 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		return "", fmt.Errorf("%s", errMsg)
 	}
 
-	// Navigate the user to the first storage volume within the mount.
-	// The phone's SFTP server denies OPENDIR on the root path (/), so we
-	// must navigate into a real volume (e.g. /storage/emulated/0).
+	// The mount point now IS the storage volume root, so the user browses
+	// directly to the mount point — no extra navigation needed.
 	browsePath := mountPoint
-	if len(body.MultiPaths) > 0 {
-		browsePath = filepath.Join(mountPoint, body.MultiPaths[0])
-	} else if body.Path != "" && body.Path != "/" {
-		browsePath = filepath.Join(mountPoint, body.Path)
-	}
 
 	// Track the mount point so Unmount() can call fusermount.
 	p.mu.Lock()
