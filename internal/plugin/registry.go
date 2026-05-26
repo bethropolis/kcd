@@ -51,7 +51,11 @@ func (r *Registry) Register(p Plugin) {
 }
 
 // Dispatch routes an incoming packet to the appropriate plugin.
-func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protocol.Packet) {
+// Returns true if the packet was processed within the timeout and may be safely
+// returned to the packet pool. Returns false if the plugin timed out — the
+// caller must NOT recycle the packet because the background goroutine may still
+// hold a reference to it.
+func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protocol.Packet) bool {
 	r.mu.RLock()
 	p, ok := r.plugins[pkt.Type]
 	r.mu.RUnlock()
@@ -59,7 +63,7 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 	if !ok {
 		// No plugin registered for this type — safely ignore
 		r.logger.Debug("unhandled packet type", zap.String("type", pkt.Type))
-		return
+		return true
 	}
 
 	timeout := p.Timeout()
@@ -99,12 +103,14 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 				zap.Error(err),
 			)
 		}
+		return true // Completed in time; safe to recycle
 	case <-ctx.Done():
 		r.logger.Warn("plugin handle timeout",
 			zap.String("plugin", p.Name()),
 			zap.String("packet_type", pkt.Type),
 			zap.Duration("timeout", timeout),
 		)
+		return false // Timed out; DO NOT recycle — goroutine still holds packet
 	}
 }
 

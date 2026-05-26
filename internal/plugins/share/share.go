@@ -184,6 +184,13 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				})
 			}
 		} else {
+			if body.LastModified > 0 {
+				modTime := time.UnixMilli(body.LastModified)
+				if err := os.Chtimes(destPath, modTime, modTime); err != nil {
+					p.Logger.Debug("share: failed to restore file timestamps", zap.Error(err))
+				}
+			}
+
 			if p.bus != nil {
 				p.bus.Publish(events.TypeShareComplete, dev.ID(), map[string]interface{}{
 					"file":    body.Filename,
@@ -195,7 +202,11 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				if cmd == "" {
 					cmd = "xdg-open"
 				}
-				plugin.RunCommandAsync(p.Logger, cmd, destPath)
+				absPath, err := filepath.Abs(destPath)
+				if err != nil {
+					absPath = destPath
+				}
+				plugin.RunCommandAsync(p.Logger, cmd, absPath)
 			}
 		}
 	}()

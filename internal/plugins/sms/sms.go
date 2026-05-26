@@ -27,6 +27,8 @@ const (
 	PacketTypeSMSRequestConv    = "kdeconnect.sms.request_conversation"
 	PacketTypeSMSRequestAtt     = "kdeconnect.sms.request_attachment"
 	PacketTypeSMSAttachmentFile = "kdeconnect.sms.attachment_file"
+
+	maxSMSMessages = 1000 // safety limit to prevent OOM from malicious payload
 )
 
 // SMSPlugin implements SMS sending, receiving, conversation browsing, and MMS
@@ -126,6 +128,10 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	var batch SMSMessagesPacket
 	if err := json.Unmarshal(pkt.Body, &batch); err != nil {
 		return fmt.Errorf("sms: unmarshal messages batch: %w", err)
+	}
+
+	if len(batch.Messages) > maxSMSMessages {
+		return fmt.Errorf("sms: messages batch too large: %d (max %d)", len(batch.Messages), maxSMSMessages)
 	}
 
 	for _, msg := range batch.Messages {

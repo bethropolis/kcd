@@ -58,14 +58,19 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 		if dispatch != nil {
 			if d.State() != StatePaired && pkt.Type != protocol.TypeIdentity && pkt.Type != protocol.TypePair {
 				d.logger.Debug("dropping packet from unpaired device", zap.String("type", pkt.Type))
-			} else {
-				dispatch(ctx, d, pkt)
+				protocol.ReleasePacket(pkt)
+			} else if dispatch(ctx, d, pkt) {
+				// Plugin completed within timeout — safe to recycle.
+				protocol.ReleasePacket(pkt)
 			}
+			// If dispatch returned false (timeout), the background goroutine
+			// still holds a reference to the packet. Skip ReleasePacket to
+			// prevent a data race — the packet will be GC'd.
+		} else {
+			// Don't leak memory; return the packet to pool after dispatch returns.
+			// Handlers shouldn't keep references to the original packet struct.
+			protocol.ReleasePacket(pkt)
 		}
-
-		// Don't leak memory; return the packet to pool after dispatch returns.
-		// Handlers shouldn't keep references to the original packet struct.
-		protocol.ReleasePacket(pkt)
 	}
 }
 

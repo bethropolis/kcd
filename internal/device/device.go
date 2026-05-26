@@ -39,7 +39,7 @@ type Device struct {
 	mu sync.RWMutex
 
 	// pluginDispatch routes incoming packets to registered plugins
-	pluginDispatch func(ctx context.Context, dev *Device, pkt *protocol.Packet)
+	pluginDispatch func(ctx context.Context, dev *Device, pkt *protocol.Packet) bool
 	onConnect      func(dev *Device)
 	onDisconnect   func(dev *Device)
 
@@ -67,7 +67,7 @@ func (d *Device) SetBus(bus *events.Bus) {
 }
 
 // Connect establishes a connection for the device and starts the reader and writer loops.
-func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet), onConnect func(*Device), onDisconnect func(*Device)) {
+func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet) bool, onConnect func(*Device), onDisconnect func(*Device)) {
 	d.mu.Lock()
 	if d.conn != nil {
 		_ = d.conn.Close()

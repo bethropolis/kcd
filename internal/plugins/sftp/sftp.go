@@ -359,8 +359,31 @@ func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
 	return volumes
 }
 
-func (p *SftpPlugin) OnConnect(_ device.Sender)    {}
-func (p *SftpPlugin) OnDisconnect(_ device.Sender) {}
+func (p *SftpPlugin) OnConnect(_ device.Sender) {}
+
+func (p *SftpPlugin) OnDisconnect(dev device.Sender) {
+	p.mu.Lock()
+	deviceID := dev.ID()
+	_, mounted := p.mountPoints[deviceID]
+	p.mu.Unlock()
+
+	if mounted {
+		p.logger.Info("device disconnected, cleaning up SFTP mount",
+			zap.String("device_id", deviceID),
+		)
+		if err := p.Unmount(deviceID); err != nil {
+			p.logger.Warn("failed to unmount on disconnect",
+				zap.String("device_id", deviceID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Evict cached credentials to prevent slow memory leak.
+	p.mu.Lock()
+	delete(p.lastBody, deviceID)
+	p.mu.Unlock()
+}
 
 // Unmount cleanly unmounts a previously mounted SFTP filesystem.
 // It first attempts a graceful shutdown of the sshfs process (SIGTERM → wait → SIGKILL),

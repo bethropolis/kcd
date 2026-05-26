@@ -207,8 +207,8 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		zap.String("device_name", safeDeviceName),
 		zap.Int("protocol_version", peerBody.ProtocolVersion))
 
-	dispatch := func(ctx context.Context, sender *device.Device, pkt *protocol.Packet) {
-		plugins.Dispatch(ctx, sender, pkt)
+	dispatch := func(ctx context.Context, sender *device.Device, pkt *protocol.Packet) bool {
+		return plugins.Dispatch(ctx, sender, pkt)
 	}
 
 	onConnect := func(sender *device.Device) {

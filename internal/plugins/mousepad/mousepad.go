@@ -29,9 +29,13 @@ type MousepadPlugin struct {
 
 	moveCh  chan MousepadBody // capacity 1, older frames dropped
 	eventCh chan MousepadBody // capacity 64, clicks + keys
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin {
+	ctx, cancel := context.WithCancel(context.Background())
 	isWayland := os.Getenv("WAYLAND_DISPLAY") != ""
 	p := &MousepadPlugin{
 		logger:    logger.With(zap.String("plugin", "mousepad")),
@@ -39,6 +43,8 @@ func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadP
 		isWayland: isWayland,
 		moveCh:    make(chan MousepadBody, 1),
 		eventCh:   make(chan MousepadBody, 64),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	// Try uinput first if auto or explicit
@@ -114,7 +120,7 @@ func (p *MousepadPlugin) OutgoingTypes() []string {
 func (p *MousepadPlugin) Handle(_ context.Context, _ device.Sender, pkt *protocol.Packet) error {
 	var body MousepadBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
-		return err
+		return fmt.Errorf("mousepad: decode body: %w", err)
 	}
 
 	isPointerMove := (body.Dx != 0 || body.Dy != 0) && !body.SingleClick && !body.DoubleClick &&
@@ -142,12 +148,26 @@ func (p *MousepadPlugin) Handle(_ context.Context, _ device.Sender, pkt *protoco
 func (p *MousepadPlugin) worker() {
 	for {
 		select {
-		case body := <-p.moveCh:
+		case <-p.ctx.Done():
+			return
+		case body, ok := <-p.moveCh:
+			if !ok {
+				return
+			}
 			p.handleMove(body)
-		case body := <-p.eventCh:
+		case body, ok := <-p.eventCh:
+			if !ok {
+				return
+			}
 			p.handleEvent(body)
 		}
 	}
+}
+
+// Close stops the background worker goroutine.
+func (p *MousepadPlugin) Close() error {
+	p.cancel()
+	return nil
 }
 
 func (p *MousepadPlugin) handleMove(body MousepadBody) {

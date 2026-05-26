@@ -174,6 +174,21 @@ type NowPlaying struct {
 	LoopStatus     string `json:"loopStatus,omitempty"`
 }
 
+// DeepCopy returns a fully independent copy of NowPlaying.
+// Pointer fields (Shuffle) are deep-copied to prevent shared-memory races
+// between the cached state and callers.
+func (p *NowPlaying) DeepCopy() *NowPlaying {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	if p.Shuffle != nil {
+		s := *p.Shuffle
+		cp.Shuffle = &s
+	}
+	return &cp
+}
+
 func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
@@ -641,12 +656,12 @@ func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 	if state == nil {
 		return nil
 	}
-	copy := *state
+	copy := state.DeepCopy()
 	if tracker, ok := p.positionTrackers[deviceID]; ok && tracker.playing {
 		elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 		copy.Pos = tracker.lastPosition + elapsed
 	}
-	return &copy
+	return copy
 }
 
 // RemoteStateAge returns the time since the last remote state update for a device.
@@ -671,12 +686,12 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 		if state == nil {
 			continue
 		}
-		copy := *state
+		copy := state.DeepCopy()
 		if tracker, ok := p.positionTrackers[id]; ok && tracker.playing {
 			elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 			copy.Pos = tracker.lastPosition + elapsed
 		}
-		result[id] = &copy
+		result[id] = copy
 	}
 	return result
 }

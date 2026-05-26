@@ -118,8 +118,18 @@ type ClipboardFileBody struct {
 	Filename string `json:"filename"`
 }
 
+const maxClipboardFileSize = 50 * 1024 * 1024 // 50 MB safety limit (matches KDE Connect C++)
+
 func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
+		return nil
+	}
+
+	if pkt.PayloadSize > maxClipboardFileSize {
+		p.logger.Warn("clipboard file: rejected payload exceeding size limit",
+			zap.Int64("size", pkt.PayloadSize),
+			zap.Int("limit_bytes", maxClipboardFileSize),
+		)
 		return nil
 	}
 	var body ClipboardFileBody
@@ -249,8 +259,32 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	return dev.Send(pkt)
 }
 
+func (p *ClipboardPlugin) readClipboard() string {
+	var cmd *exec.Cmd
+	if p.isWayland {
+		cmd = exec.CommandContext(context.Background(), "wl-paste", "-n")
+	} else {
+		cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-o")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
-	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", map[string]any{})
+	content := p.readClipboard()
+
+	p.mu.Lock()
+	p.lastPushedContent = content
+	p.mu.Unlock()
+
+	body := ClipboardBody{
+		Content:   content,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", body)
 	if err != nil {
 		p.logger.Debug("clipboard: OnConnect: failed to build packet", zap.Error(err))
 		return
