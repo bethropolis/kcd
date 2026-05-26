@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
@@ -27,6 +28,7 @@ type SftpPlugin struct {
 	mu          sync.RWMutex
 	lastBody    map[string]SftpBody
 	mountPoints map[string]string // deviceID -> local mountPoint path
+	mountPIDs   map[string]int    // deviceID -> sshfs PID for graceful shutdown
 }
 
 func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin {
@@ -36,6 +38,7 @@ func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *
 		logger:      logger.With(zap.String("plugin", "sftp")),
 		lastBody:    make(map[string]SftpBody),
 		mountPoints: make(map[string]string),
+		mountPIDs:   make(map[string]int),
 	}
 }
 
@@ -236,6 +239,8 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		remoteRoot,
 		mountPoint,
 		"-p", body.Port.String(),
+		"-s",
+		"-F", "/dev/null",
 		"-o", "password_stdin",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
@@ -244,6 +249,8 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		"-o", "ServerAliveCountMax=" + strconv.Itoa(p.cfg.KeepaliveCount),
 		"-o", "auto_cache",
 		"-o", "kernel_cache",
+		"-o", "uid=" + strconv.Itoa(os.Getuid()),
+		"-o", "gid=" + strconv.Itoa(os.Getgid()),
 	}
 
 	if len(p.cfg.ExtraSshfsOpts) > 0 {
@@ -257,12 +264,23 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(mountPoint)
-		return "", fmt.Errorf("sshfs failed: %w\n%s", err, strings.TrimSpace(string(out)))
+		msg := strings.TrimSpace(string(out))
+		errMsg := fmt.Sprintf("sshfs failed: %v\n%s", err, msg)
+		if strings.Contains(msg, "Operation not permitted") || strings.Contains(msg, "fusermount") {
+			errMsg += "\n\nHint: FUSE requires user_allow_other in /etc/fuse.conf.\nRun: sudo sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf"
+		} else if strings.Contains(msg, "sshfs: not found") || strings.Contains(msg, "executable file not found") {
+			errMsg += "\n\nHint: sshfs is not installed.\nInstall: sudo apt install sshfs  (or the equivalent for your distro)"
+		}
+		return "", fmt.Errorf("%s", errMsg)
 	}
 
-	// Navigate the user to body.Path within the mount.
+	// Navigate the user to the first storage volume within the mount.
+	// The phone's SFTP server denies OPENDIR on the root path (/), so we
+	// must navigate into a real volume (e.g. /storage/emulated/0).
 	browsePath := mountPoint
-	if body.Path != "" && body.Path != "/" {
+	if len(body.MultiPaths) > 0 {
+		browsePath = filepath.Join(mountPoint, body.MultiPaths[0])
+	} else if body.Path != "" && body.Path != "/" {
 		browsePath = filepath.Join(mountPoint, body.Path)
 	}
 
@@ -270,6 +288,16 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 	p.mu.Lock()
 	p.mountPoints[deviceID] = mountPoint
 	p.mu.Unlock()
+
+	// Find and track the sshfs daemon PID for graceful shutdown.
+	if pid, err := findSSHFSPID(mountPoint); err == nil {
+		p.mu.Lock()
+		p.mountPIDs[deviceID] = pid
+		p.mu.Unlock()
+		p.logger.Debug("tracking sshfs PID", zap.Int("pid", pid))
+	} else {
+		p.logger.Debug("could not find sshfs PID", zap.Error(err))
+	}
 
 	p.logger.Info("SFTP mounted",
 		zap.String("mount_point", mountPoint),
@@ -341,14 +369,19 @@ func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
 func (p *SftpPlugin) OnConnect(_ device.Sender)    {}
 func (p *SftpPlugin) OnDisconnect(_ device.Sender) {}
 
-// Unmount cleanly unmounts a previously mounted SFTP filesystem using fusermount.
-// It removes the mount point directory after a successful unmount.
-// Returns an error if the device was never mounted or if fusermount fails.
+// Unmount cleanly unmounts a previously mounted SFTP filesystem.
+// It first attempts a graceful shutdown of the sshfs process (SIGTERM → wait → SIGKILL),
+// then uses fusermount to ensure the mount point is released.
+// Returns an error if the device was never mounted.
 func (p *SftpPlugin) Unmount(deviceID string) error {
 	p.mu.Lock()
 	mountPoint, ok := p.mountPoints[deviceID]
 	if ok {
 		delete(p.mountPoints, deviceID)
+	}
+	pid, hasPID := p.mountPIDs[deviceID]
+	if hasPID {
+		delete(p.mountPIDs, deviceID)
 	}
 	p.mu.Unlock()
 
@@ -358,18 +391,40 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 
 	p.logger.Info("unmounting SFTP share", zap.String("mount_point", mountPoint))
 
-	// fusermount3 is the modern variant (Debian/Ubuntu); fall back to fusermount.
+	// Graceful shutdown: SIGTERM → wait → SIGKILL.
+	if hasPID {
+		p.logger.Debug("sending SIGTERM to sshfs", zap.Int("pid", pid))
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			if err := proc.Signal(syscall.SIGTERM); err == nil {
+				done := make(chan struct{})
+				go func() {
+					proc.Wait()
+					close(done)
+				}()
+				select {
+				case <-done:
+					p.logger.Debug("sshfs exited cleanly after SIGTERM")
+				case <-time.After(3 * time.Second):
+					p.logger.Debug("sshfs did not exit after SIGTERM, sending SIGKILL")
+					proc.Kill()
+				}
+			}
+		}
+	}
+
+	// Ensure the mount point is released.
 	tool := "fusermount3"
 	if _, err := exec.LookPath(tool); err != nil {
 		tool = "fusermount"
 	}
 
 	if out, err := exec.CommandContext(context.Background(), tool, "-u", mountPoint).CombinedOutput(); err != nil {
-		// Put the mount point back so the caller can retry.
-		p.mu.Lock()
-		p.mountPoints[deviceID] = mountPoint
-		p.mu.Unlock()
-		return fmt.Errorf("fusermount: %w\n%s", err, strings.TrimSpace(string(out)))
+		p.logger.Warn("fusermount cleanup failed",
+			zap.String("mount_point", mountPoint),
+			zap.Error(err),
+			zap.String("output", strings.TrimSpace(string(out))),
+		)
 	}
 
 	_ = os.Remove(mountPoint)
@@ -382,4 +437,31 @@ func (p *SftpPlugin) MountedPath(deviceID string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.mountPoints[deviceID]
+}
+
+// findSSHFSPID scans /proc to find the sshfs daemon PID for a given mount point.
+// Uses /proc directly to avoid external dependencies (pgrep, etc.).
+func findSSHFSPID(mountPoint string) (int, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0, fmt.Errorf("read /proc: %w", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		// cmdline uses null bytes as separators; convert to string for matching.
+		if strings.Contains(string(cmdline), mountPoint) && strings.Contains(string(cmdline), "sshfs") {
+			return pid, nil
+		}
+	}
+	return 0, fmt.Errorf("no sshfs process found for mount point %s", mountPoint)
 }

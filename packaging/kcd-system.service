@@ -42,7 +42,10 @@ RuntimeDirectory=kcd
 RuntimeDirectoryMode=0700
 
 # ── Process hardening ─────────────────────────────────────────────────────────
-NoNewPrivileges=true
+#
+# NOTE: NoNewPrivileges is intentionally omitted because fusermount3 (setuid
+# root) is required for sshfs FUSE mounts. Enabling it would block SFTP
+# mounting with "fusermount3: mount failed: Operation not permitted".
 MemoryMax=128M
 TasksMax=64
 PrivateNetwork=false

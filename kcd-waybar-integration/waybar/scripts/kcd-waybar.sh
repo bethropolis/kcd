@@ -101,8 +101,14 @@ handle_event() {
             CONNECTED="true"
             ;;
         "mpris.update")
-            TITLE=$(echo "$event" | jq -r '.payload.title // empty')
-            ARTIST=$(echo "$event" | jq -r '.payload.artist // empty')
+            PLAYING=$(echo "$event" | jq -r '.payload.isPlaying // false')
+            if [ "$PLAYING" = "true" ]; then
+                TITLE=$(echo "$event" | jq -r '.payload.title // empty')
+                ARTIST=$(echo "$event" | jq -r '.payload.artist // empty')
+            else
+                TITLE=""
+                ARTIST=""
+            fi
             ;;
     esac
 
