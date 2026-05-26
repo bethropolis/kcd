@@ -43,6 +43,7 @@ type MPRISPlugin struct {
 	lastStates       map[string]*NowPlaying
 	artRequests      map[string]time.Time
 	remoteStates     map[string]*NowPlaying            // deviceID → last known state
+	remoteStateTimes map[string]time.Time              // deviceID → when state was last updated
 	positionTrackers map[string]*remotePositionTracker // deviceID → position extrapolation
 
 	pauseMusic        bool
@@ -79,6 +80,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		lastStates:        make(map[string]*NowPlaying),
 		artRequests:       make(map[string]time.Time),
 		remoteStates:      make(map[string]*NowPlaying),
+		remoteStateTimes:  make(map[string]time.Time),
 		positionTrackers:  make(map[string]*remotePositionTracker),
 		callPausedPlayers: make([]string, 0),
 	}
@@ -255,6 +257,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		tracker.playing = body.IsPlaying
 		shouldPublish := shouldPublishRemoteState(p.remoteStates[dev.ID()], state)
 		p.remoteStates[dev.ID()] = state
+		p.remoteStateTimes[dev.ID()] = time.Now()
 		p.mu.Unlock()
 		if shouldPublish && p.bus != nil {
 			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
@@ -485,6 +488,7 @@ func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
 	defer p.mu.Unlock()
 	delete(p.devices, dev.ID())
 	delete(p.remoteStates, dev.ID())
+	delete(p.remoteStateTimes, dev.ID())
 	delete(p.positionTrackers, dev.ID())
 }
 
@@ -643,6 +647,18 @@ func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 		copy.Pos = tracker.lastPosition + elapsed
 	}
 	return &copy
+}
+
+// RemoteStateAge returns the time since the last remote state update for a device.
+// Returns a large duration if no state has been received yet.
+func (p *MPRISPlugin) RemoteStateAge(deviceID string) time.Duration {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	t, ok := p.remoteStateTimes[deviceID]
+	if !ok {
+		return 365 * 24 * time.Hour // effectively "forever ago"
+	}
+	return time.Since(t)
 }
 
 // RemoteStates returns all known remote device player states,

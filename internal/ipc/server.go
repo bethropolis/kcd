@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"go.uber.org/zap"
 )
 
@@ -163,6 +164,29 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 		data = append(data, '\n')
 		if _, err := conn.Write(data); err != nil {
 			return
+		}
+
+		// Send initial mpris state if recently updated.
+		// If the last update was more than 10 seconds ago the state is
+		// likely stale — the phone probably stopped playing — so we skip it
+		// to avoid showing a ghost "now playing" in Waybar/CLI after reconnect.
+		if pl, ok := s.handler.plugins.GetByName("MPRIS"); ok {
+			mp := pl.(*mpris.MPRISPlugin)
+			if mp.RemoteStateAge(dev.ID()) < 10*time.Second {
+				if state := mp.RemoteState(dev.ID()); state != nil {
+					mprisEv := map[string]interface{}{
+						"type":      "mpris.update",
+						"deviceId":  dev.ID(),
+						"timestamp": time.Now().UTC(),
+						"payload":   state,
+					}
+					data, _ = json.Marshal(mprisEv)
+					data = append(data, '\n')
+					if _, err := conn.Write(data); err != nil {
+						return
+					}
+				}
+			}
 		}
 	}
 
