@@ -134,17 +134,28 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 				text = text[:4000] + "\n...[output truncated]"
 			}
 
-			// Send notification back to the phone
+			// Send notification back to the phone.
 			// The Android app uses 'appName' as the title and 'ticker' as the body.
 			// It ignores 'title' and 'text'.
+			// Note: the Android ReceiveNotificationsPlugin is disabled by default.
+			// Users must enable "Receive notifications" in the device's plugin settings.
 			notifBody := map[string]interface{}{
 				"id":      fmt.Sprintf("%d", time.Now().UnixNano()),
 				"appName": fmt.Sprintf("Run: %s", body.Key),
 				"ticker":  text,
 			}
 
+			p.logger.Debug("sending command output notification",
+				zap.String("key", body.Key),
+				zap.Int("output_len", len(text)),
+			)
 			if pkt, err := protocol.NewPacket("kdeconnect.notification", notifBody); err == nil {
-				_ = dev.Send(pkt)
+				if err := dev.Send(pkt); err != nil {
+					p.logger.Warn("failed to send command output notification",
+						zap.String("key", body.Key),
+						zap.Error(err),
+					)
+				}
 			}
 		}()
 	}
