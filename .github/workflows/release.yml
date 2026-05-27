@@ -50,6 +50,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install Nix
+        if: hashFiles('flake.nix') != ''
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Flake schema check
+        if: hashFiles('flake.nix') != ''
+        run: nix flake check --no-build
+
+      - name: Nix build package
+        if: hashFiles('flake.nix') != ''
+        run: nix build
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
