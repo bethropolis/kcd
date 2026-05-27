@@ -19,4 +19,4 @@ mousepad = false
 EOF
 fi
 
-exec "$@"
+exec /usr/bin/kcd "$@"
