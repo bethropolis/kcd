@@ -18,7 +18,8 @@
 
           src = ./.;
 
-          vendorHash = "";  # Go's go.sum handles integrity
+          # Update when go.sum changes: nix build 2>&1 | grep 'got:' | awk '{print $2}'
+          vendorHash = "sha256-rnI60JzB8vtFC4iIVoHGi9um7f0mV7jbIJTNVu8ytVY=";
 
           subPackages = [ "cmd/kcd" ];
 
