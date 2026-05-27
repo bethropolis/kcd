@@ -22,6 +22,7 @@ func TestRunCommandPlugin_Handle_GlobalCommand(t *testing.T) {
 	if err := p.Handle(context.Background(), dev, pkt); err != nil {
 		t.Fatalf("Handle failed: %v", err)
 	}
+	p.wg.Wait()
 }
 
 func TestRunCommandPlugin_Handle_PerDeviceOverrides(t *testing.T) {
@@ -41,6 +42,7 @@ func TestRunCommandPlugin_Handle_PerDeviceOverrides(t *testing.T) {
 	if err := p.Handle(context.Background(), dev1, pkt); err != nil {
 		t.Fatalf("Handle for dev1 failed: %v", err)
 	}
+	p.wg.Wait()
 
 	// Device dev2 should fall back to the global command.
 	dev2 := device.NewDevice("dev2", "Phone 2", "phone", logger)
@@ -48,6 +50,7 @@ func TestRunCommandPlugin_Handle_PerDeviceOverrides(t *testing.T) {
 	if err := p.Handle(context.Background(), dev2, pkt); err != nil {
 		t.Fatalf("Handle for dev2 failed: %v", err)
 	}
+	p.wg.Wait()
 }
 
 func TestRunCommandPlugin_Handle_RequestCommandList(t *testing.T) {
