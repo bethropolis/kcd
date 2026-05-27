@@ -137,5 +137,60 @@ Safe to call even if already unmounted (returns error in that case).`,
 				return nil
 			},
 		},
+		{
+			Name:      "browse",
+			Usage:     "Request fresh credentials and browse or mount a storage volume",
+			ArgsUsage: "<device-id> [volume-index|volume-name|volume-path]",
+			Description: `Request fresh SFTP credentials from the phone and either list
+available volumes or mount a specific one.
+
+Without a volume argument, lists available volumes with their index, name, and path.
+
+With a volume argument (index, name, or path), mounts that volume via sshfs and
+opens it in the default file manager.
+
+Examples:
+  kcd sftp browse myphone
+  kcd sftp browse myphone 0
+  kcd sftp browse myphone "SD card"
+  kcd sftp browse myphone /storage/ABCD-1234`,
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+
+				volume := ""
+				if c.NArg() > 1 {
+					volume = c.Args().Get(1)
+				}
+
+				fmt.Println("Requesting SFTP credentials from phone (waiting up to 20s)…")
+				path, volumes, err := cl.SftpBrowse(c.Args().First(), volume)
+				if err != nil {
+					return err
+				}
+
+				if path != "" {
+					fmt.Printf("Mounted at: %s\n", path)
+					return nil
+				}
+
+				if len(volumes) == 0 {
+					fmt.Println("No storage volumes reported by device.")
+					return nil
+				}
+
+				fmt.Println("Available volumes:")
+				for i, v := range volumes {
+					fmt.Printf("  %d. %-30s %s\n", i, v.Name, v.Path)
+				}
+				fmt.Println("\nMount a volume: kcd sftp browse <device-id> <index|name|path>")
+				return nil
+			},
+		},
 	},
 }

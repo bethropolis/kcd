@@ -38,6 +38,7 @@ const (
 	CmdMprisStatus          = "mpris_status"
 	CmdMprisAction          = "mpris_action"
 	CmdMprisRemote          = "mpris_remote"
+	CmdSftpBrowse           = "sftp_browse"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -137,6 +138,18 @@ type SftpInfoResponse struct {
 type StorageVolumeResponse struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
+}
+
+// SftpBrowsePayload is used for CmdSftpBrowse.
+type SftpBrowsePayload struct {
+	DeviceID string `json:"deviceId"`
+	Volume   string `json:"volume,omitempty"`
+}
+
+// SftpBrowseResponse is returned by CmdSftpBrowse.
+type SftpBrowseResponse struct {
+	Path    string                  `json:"path,omitempty"`
+	Volumes []StorageVolumeResponse `json:"volumes,omitempty"`
 }
 
 type MprisPlayerInfo struct {
