@@ -115,6 +115,8 @@ dockers_v2:
       - "v{{ .Version }}"
       - latest
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - entrypoint.sh
     ids:
       - kcd
     labels:

@@ -53,9 +53,9 @@ docker compose run --rm kcd-cli devices
 | `/data` | Received files | Optional |
 | `/run` | IPC Unix socket | Yes (tmpfs recommended) |
 
-The container runs as UID 65534 (nobody). All volume directories are pre-created
-in the image with correct ownership, so bind mounts must grant write access to
-UID 65534.
+The entrypoint auto-fixes ownership on all volumes at startup (remaps host-root
+owned paths to UID 65534). A default `kcd.toml` is created at `/config/kcd/` if
+none exists.
 
 ## Building Locally
 
