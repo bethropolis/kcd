@@ -190,10 +190,69 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender) (st
 			if !exists {
 				return "", fmt.Errorf("credentials missing after event (internal error)")
 			}
-			return p.mountWithBody(ctx, dev.ID(), body)
+			return p.mountWithBody(ctx, dev.ID(), body, "")
 
 		case <-deadline.Done():
 			return "", fmt.Errorf("timed out after %s waiting for SFTP response — is the KDE Connect app open on the phone?", timeout)
+		}
+	}
+}
+
+// RequestAndMountVolume sends the SFTP request, waits for credentials, then
+// mounts the specified volume. If volumePath is empty, the available volumes
+// are returned without mounting (list mode). The caller is responsible for
+// closing the returned closer when done with the mounted path.
+func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Sender, volumePath string) (mountPath string, volumes []StorageVolume, err error) {
+	if p.bus == nil {
+		return "", nil, fmt.Errorf("event bus not available")
+	}
+
+	sub := p.bus.Subscribe(0, events.TypeSftpMount)
+	defer sub.Close()
+
+	if err := p.RequestMount(dev); err != nil {
+		return "", nil, fmt.Errorf("send SFTP request: %w", err)
+	}
+
+	p.logger.Info("SFTP request sent, waiting for phone response", zap.String("device", dev.ID()))
+
+	timeout := time.Duration(p.cfg.CredentialsTimeoutSecs) * time.Second
+	if timeout == 0 {
+		timeout = 20 * time.Second
+	}
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		select {
+		case evt, ok := <-sub.C:
+			if !ok {
+				return "", nil, fmt.Errorf("event bus closed")
+			}
+			if evt.DeviceID != dev.ID() {
+				continue
+			}
+			p.mu.RLock()
+			body, exists := p.lastBody[dev.ID()]
+			p.mu.RUnlock()
+			if !exists {
+				return "", nil, fmt.Errorf("credentials missing after event (internal error)")
+			}
+
+			vols := p.buildVolumes(body)
+
+			if volumePath == "" {
+				return "", vols, nil
+			}
+
+			path, err := p.mountWithBody(ctx, dev.ID(), body, volumePath)
+			if err != nil {
+				return "", nil, err
+			}
+			return path, vols, nil
+
+		case <-deadline.Done():
+			return "", nil, fmt.Errorf("timed out after %s waiting for SFTP response — is the KDE Connect app open on the phone?", timeout)
 		}
 	}
 }
@@ -207,11 +266,13 @@ func (p *SftpPlugin) MountLocally(ctx context.Context, deviceID string) (string,
 	if !ok {
 		return "", fmt.Errorf("no SFTP credentials cached for device %s — use 'kcd sftp mount' which requests them automatically", deviceID)
 	}
-	return p.mountWithBody(ctx, deviceID, body)
+	return p.mountWithBody(ctx, deviceID, body, "")
 }
 
 // mountWithBody performs the sshfs mount and returns the local browse path.
-func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body SftpBody) (string, error) {
+// volumePath specifies which storage volume to mount. If empty, the first
+// available volume is selected automatically.
+func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body SftpBody, volumePath string) (string, error) {
 	baseDir := p.cfg.MountDir
 	if baseDir == "" {
 		baseDir = os.TempDir()
@@ -224,13 +285,17 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 	// Determine the remote path on the Android device.
 	// The Android SFTP server exposes the real filesystem at "/".
 	// Listing "/" via sshfs fails because it contains permission-denied
-	// entries (/proc, /sys). Instead, mount directly to the first storage
+	// entries (/proc, /sys). Instead, mount directly to a storage
 	// volume (e.g. /storage/emulated/0) which is guaranteed browsable.
-	remotePath := ""
-	if len(body.MultiPaths) > 0 {
-		remotePath = body.MultiPaths[0]
-	} else if body.Path != "" && body.Path != "/" {
-		remotePath = body.Path
+	// If a specific volumePath is provided, use it; otherwise auto-select
+	// the first available volume.
+	remotePath := volumePath
+	if remotePath == "" {
+		if len(body.MultiPaths) > 0 {
+			remotePath = body.MultiPaths[0]
+		} else if body.Path != "" && body.Path != "/" {
+			remotePath = body.Path
+		}
 	}
 	remoteRoot := fmt.Sprintf("%s@%s:%s", body.User, body.IP, remotePath)
 
@@ -339,13 +404,10 @@ func (p *SftpPlugin) Info(deviceID string) *SftpInfo {
 	return info
 }
 
-// Volumes returns the list of available storage volumes from cached credentials.
-// Returns nil if no credentials or no multiPaths data.
-func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	body, ok := p.lastBody[deviceID]
-	if !ok || len(body.MultiPaths) == 0 {
+// buildVolumes constructs a StorageVolume slice from a SftpBody.
+// Caller must hold at least a read lock on p.mu if body comes from p.lastBody.
+func (p *SftpPlugin) buildVolumes(body SftpBody) []StorageVolume {
+	if len(body.MultiPaths) == 0 {
 		return nil
 	}
 	volumes := make([]StorageVolume, 0, len(body.MultiPaths))
@@ -357,6 +419,18 @@ func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
 		volumes = append(volumes, StorageVolume{Name: name, Path: mp})
 	}
 	return volumes
+}
+
+// Volumes returns the list of available storage volumes from cached credentials.
+// Returns nil if no credentials or no multiPaths data.
+func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	body, ok := p.lastBody[deviceID]
+	if !ok {
+		return nil
+	}
+	return p.buildVolumes(body)
 }
 
 func (p *SftpPlugin) OnConnect(_ device.Sender) {}
