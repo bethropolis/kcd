@@ -157,11 +157,16 @@ share.text\t'Text shared from phone'
 share.url\t'URL shared from phone'
 ping.received\t'Ping received'
 telephony.ringing\t'Incoming call'
+telephony.talking\t'Call in progress'
 telephony.missed\t'Missed call'
 telephony.canceled\t'Call ended'
 connectivity.update\t'Cell signal changed'
+volume.update\t'System volume changed'
 sftp.mount\t'SFTP filesystem mounted'
-volume.update\t'System volume changed'"
+mpris.update\t'Now playing changed'
+sms.incoming\t'SMS/MMS received'
+sms.attachment\t'MMS attachment downloaded'
+ring.received\t'Phone wants PC to ring'"
 
 # ---------------------------------------------------------------------------
 # sftp  request|info|volumes|mount|unmount  <device-id>

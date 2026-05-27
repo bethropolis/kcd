@@ -185,6 +185,18 @@ const CmdMyAction = "my_action"
 
 **7. Add config field to `packaging/kcd.example.toml`**
 
+**8. Document in `docs/IPC_PROTOCOL.md` and `docs/CLIENT_GUIDE.md`**
+
+- Add the new IPC command to the command reference table (section 3) with
+  request/response payload schemas.
+- If the plugin introduces new event types, add them to the event types
+  section (section 5) with full JSON payload examples.
+- If the plugin sends or receives new KDE Connect packet types, add entries
+  to the outbound (section 6) or inbound (section 7) packet reference tables.
+- Add the new CLI command to the command reference in `docs/CLI.md`.
+- Cover error cases in the walkthrough—what happens when the device is
+  disconnected, the plugin is disabled, or the payload is malformed.
+
 ### Plugin lookup
 
 To get a plugin and type-assert to its concrete type from an IPC handler:
