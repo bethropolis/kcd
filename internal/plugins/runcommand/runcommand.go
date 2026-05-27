@@ -20,6 +20,7 @@ type RunCommandPlugin struct {
 	Commands          map[string]string
 	CommandsPerDevice map[string]map[string]string // keyed by device ID
 	logger            *zap.Logger
+	wg                sync.WaitGroup // exported for tests to synchronize with background goroutines
 }
 
 func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, logger *zap.Logger) *RunCommandPlugin {
@@ -110,7 +111,9 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 
 		// Handlers must not block. Spawning goroutine to run the command
 		// and optionally send a notification with the output.
+		p.wg.Add(1)
 		go func() {
+			defer p.wg.Done()
 			execCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
