@@ -118,41 +118,60 @@ handle_event() {
 # ---- Initial render before any event ----
 render
 
-# ---- Event source ----
-# Prefer lightweight Unix socket tools (nc ~0.5 MB, socat ~1 MB)
-# over the Go CLI (kcd watch ~10 MB).
+# ---- Event source with auto-reconnect ----
+# Each connection delivers an ack line followed by newline-delimited JSON events.
+# When the connection drops (daemon restart, network blip), we reconnect after
+# a short delay and clear stale state.
 
 SOCKET="${KCD_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/kcd/kcd.sock}"
 PAYLOAD='{"cmd":"watch","payload":{"events":["device.connected","device.disconnected","battery.update","mpris.update"]}}'
 
-if command -v nc >/dev/null 2>&1; then
-    # OpenBSD netcat — ~0.5 MB, connects to Unix socket with -U.
-    # After the payload is sent, nc keeps reading from the socket.
-    # We read-and-discard the {"ok":true} ack, then stream events.
+reconnect_delay() {
+    sleep 1
+}
+
+connect_and_stream() {
+    [[ -S "$SOCKET" ]] || return 1
+
+    if command -v nc >/dev/null 2>&1; then
+        # OpenBSD netcat — ~0.5 MB
+        nc -U "$SOCKET" <<< "$PAYLOAD" 2>/dev/null
+        return $?
+    elif command -v socat >/dev/null 2>&1; then
+        # socat — ~1 MB
+        socat -,ignoreeof "UNIX-CONNECT:$SOCKET" <<< "$PAYLOAD" 2>/dev/null
+        return $?
+    elif command -v kcd >/dev/null 2>&1; then
+        # kcd watch — ~10 MB fallback
+        kcd watch --json \
+            -e device.connected \
+            -e device.disconnected \
+            -e battery.update \
+            -e mpris.update 2>/dev/null
+        return $?
+    fi
+    return 1
+}
+
+while true; do
+    # Clear stale state before each connect attempt
+    TITLE=""
+    ARTIST=""
+    CONNECTED="false"
+    render
+
     {
         read -r _
         while read -r event; do
             handle_event "$event"
         done
-    } < <(nc -U "$SOCKET" <<< "$PAYLOAD" 2>/dev/null)
+    } < <(connect_and_stream) || true
 
-elif command -v socat >/dev/null 2>&1; then
-    # socat — ~1 MB, same strategy (half-closes write side after payload).
-    {
-        read -r _
-        while read -r event; do
-            handle_event "$event"
-        done
-    } < <(socat -,ignoreeof "UNIX-CONNECT:$SOCKET" <<< "$PAYLOAD" 2>/dev/null)
+    # Connection dropped — clear stale state immediately
+    TITLE=""
+    ARTIST=""
+    CONNECTED="false"
+    render
 
-else
-    # kcd watch — ~10 MB (Go runtime overhead), but always available.
-    # No ack line to skip (kcd watch --json outputs events directly).
-    while read -r event; do
-        handle_event "$event"
-    done < <(kcd watch --json \
-        -e device.connected \
-        -e device.disconnected \
-        -e battery.update \
-        -e mpris.update 2>/dev/null)
-fi
+    reconnect_delay
+done

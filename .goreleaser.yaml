@@ -125,6 +125,24 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
 
+homebrew_casks:
+  - name: kcd
+    description: "Lightweight, headless implementation of the KDE Connect protocol (v8) written in Go"
+    homepage: "https://github.com/bethropolis/kcd"
+    license: "MIT"
+    repository:
+      owner: bethropolis
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    url:
+      verified: github.com/bethropolis/kcd
+    binaries:
+      - kcd
+    completions:
+      bash: packaging/kcd.bash-completion
+      zsh: packaging/kcd.zsh-completion
+      fish: packaging/kcd.fish-completion
+
 nfpms:
   - id: packages
     package_name: kcd
@@ -233,20 +251,9 @@ release:
 
     ### Installation
 
-    **Docker:**
-    ```bash
-    docker pull ghcr.io/bethropolis/kcd:latest
-    ```
-
     **Arch Linux:**
     ```bash
     yay -S kcd-bin
-    ```
-
-    **Quick install (Linux amd64):**
-    ```bash
-    curl -sSL https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.tar.gz | tar -xz
-    sudo mv kcd /usr/local/bin/
     ```
 
     **Debian / Ubuntu:**
@@ -259,6 +266,22 @@ release:
     ```bash
     curl -LO https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.rpm
     sudo rpm -i kcd_{{ .Version }}_x86_64.rpm
+    ```
+
+    **Docker:**
+    ```bash
+    docker pull ghcr.io/bethropolis/kcd:latest
+    ```
+
+    **Homebrew:**
+    ```bash
+    brew install bethropolis/tap/kcd
+    ```
+
+    **Quick install (Linux amd64):**
+    ```bash
+    curl -sSL https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.tar.gz | tar -xz
+    sudo mv kcd /usr/local/bin/
     ```
   footer: |
     **Full Changelog:** https://github.com/bethropolis/kcd/compare/{{ .PreviousTag }}...v{{ .Version }}

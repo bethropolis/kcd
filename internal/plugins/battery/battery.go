@@ -3,6 +3,7 @@ package battery
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,7 +63,7 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 	case "kdeconnect.battery":
 		var body BatteryBody
 		if err := json.Unmarshal(pkt.Body, &body); err != nil {
-			return err
+			return fmt.Errorf("battery: decode body: %w", err)
 		}
 
 		dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
@@ -83,7 +84,7 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 			IsCharging:    charging,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("battery: create response packet: %w", err)
 		}
 		return dev.Send(pkt)
 	}
