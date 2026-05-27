@@ -268,7 +268,7 @@ Add to `~/.config/waybar/config`:
 }
 ```
 
-A ready-made config snippet, bash script and stylesheet are in [`kcd-waybar-integration/`](kcd-waybar-integration/).
+A ready-made config snippet, bash script and stylesheet are in [`desktop-integration/waybar/`](desktop-integration/waybar/). See [`desktop-integration/`](desktop-integration/) for the event stream reference and integration guides.
 
 
 ### Tiling Window Managers
