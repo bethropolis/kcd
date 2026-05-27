@@ -1,0 +1,29 @@
+name: Nix Flake Verify
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+
+jobs:
+  nix-verify:
+    name: Build & Check Flake
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Flake schema check
+        run: nix flake check --no-build
+
+      - name: Build package
+        run: nix build
