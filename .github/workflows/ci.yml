@@ -7,14 +7,14 @@ on:
       - "**.md"
       - ".goreleaser.yaml"
       - "packaging/**"
-      - "kcd-waybar-integration/**"
+      - "desktop-integration/**"
   pull_request:
     branches: [main, master]
     paths-ignore:
       - "**.md"
       - ".goreleaser.yaml"
       - "packaging/**"
-      - "kcd-waybar-integration/**"
+      - "desktop-integration/**"
 
 permissions:
   contents: read

@@ -41,7 +41,7 @@ release-dry-run:
 # Install the Waybar integration script
 @waybar:
     mkdir -p ~/.config/waybar/scripts
-    cp kcd-waybar-integration/waybar/scripts/kcd-waybar.sh ~/.config/waybar/scripts/kcd-waybar.sh
+    cp desktop-integration/waybar/scripts/kcd-waybar.sh ~/.config/waybar/scripts/kcd-waybar.sh
     chmod +x ~/.config/waybar/scripts/kcd-waybar.sh
     echo "Installed kcd-waybar.sh to ~/.config/waybar/scripts/kcd-waybar.sh"
     echo "Add to Waybar config (config.jsonc):"

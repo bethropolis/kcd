@@ -360,7 +360,7 @@ kcd/
 │   ├── protocol/                 — Packet pool, identity, pair packet helpers
 │   └── transport/                — TLS conn wrapper, TCP listener, plaintext bootstrap
 ├── packaging/                    — systemd units, firewall rules, example config
-├── kcd-waybar-integration/       — Ready-made Waybar config and stylesheet
+├── desktop-integration/          — Waybar script, config, stylesheet + integration guide
 ├── scripts/                      — install / uninstall / post-install hooks
 └── Dockerfile
 ```
