@@ -27,19 +27,19 @@ type Config struct {
 	LogLevel string `toml:"log_level"` // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
 	// Old config values are silently ignored by the TOML parser.
-	Plugins           PluginConfig                 `toml:"plugins"`
-	Commands          map[string]string            `toml:"commands"`
-	CommandsPerDevice map[string]map[string]string `toml:"commands_per_device"`
-	Notifications     NotificationConfig           `toml:"notifications"`
-	Battery           BatteryConfig                `toml:"battery"`
-	Notification      NotificationPluginConfig     `toml:"notification_plugin"`
-	Share             ShareConfig                  `toml:"share"`
-	SFTP              SFTPConfig                   `toml:"sftp"`
-	Ping              PingConfig                   `toml:"ping"`
-	Pairing           PairingConfig                `toml:"pairing"`
-	Mousepad          MousepadConfig               `toml:"mousepad"`
-	SMS               SMSConfig                    `toml:"sms"`
-	PruneStaleThreshold string `toml:"prune_stale_threshold"` // auto-remove stale unpaired devices; Go duration, "0" = disable
+	Plugins             PluginConfig                 `toml:"plugins"`
+	Commands            map[string]string            `toml:"commands"`
+	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
+	Notifications       NotificationConfig           `toml:"notifications"`
+	Battery             BatteryConfig                `toml:"battery"`
+	Notification        NotificationPluginConfig     `toml:"notification_plugin"`
+	Share               ShareConfig                  `toml:"share"`
+	SFTP                SFTPConfig                   `toml:"sftp"`
+	Ping                PingConfig                   `toml:"ping"`
+	Pairing             PairingConfig                `toml:"pairing"`
+	Mousepad            MousepadConfig               `toml:"mousepad"`
+	SMS                 SMSConfig                    `toml:"sms"`
+	PruneStaleThreshold string                       `toml:"prune_stale_threshold"` // auto-remove stale unpaired devices; Go duration, "0" = disable
 
 	ConfigPath string `toml:"-"` // populated at load time, never written to disk
 }
