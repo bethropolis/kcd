@@ -5,7 +5,7 @@ RUN apk add --no-cache ca-certificates && \
     chown -R 65534:65534 /out/config /out/state /out/data /out/run
 
 # ─── Runtime ───────────────────────────────────────────────────────────────────
-FROM scratch
+FROM alpine:3.20
 
 LABEL org.opencontainers.image.title="kcd" \
       org.opencontainers.image.description="Headless KDE Connect daemon" \
@@ -19,12 +19,12 @@ COPY --from=base --chown=65534:65534 /out/state /state
 COPY --from=base --chown=65534:65534 /out/data /data
 COPY --from=base --chown=65534:65534 /out/run /run
 
+COPY entrypoint.sh /entrypoint.sh
+
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/kcd /usr/bin/kcd
 
 VOLUME ["/config", "/state", "/data"]
-
-USER 65534:65534
 
 ENV XDG_CONFIG_HOME=/config \
     XDG_STATE_HOME=/state \
@@ -36,5 +36,5 @@ EXPOSE 1716/tcp 1716/udp 1739-1764/tcp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/bin/kcd", "devices"]
 
-ENTRYPOINT ["/usr/bin/kcd"]
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["daemon"]

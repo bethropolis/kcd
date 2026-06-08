@@ -228,6 +228,25 @@ func (c *Client) SftpUnmount(deviceID string) error {
 	return err
 }
 
+// SftpBrowse requests fresh SFTP credentials from the phone and either lists
+// available volumes (volume arg empty) or mounts the specified volume.
+// volume can be an index (0-based), volume name, or path.
+// Returns the mount path (empty if listing) and available volumes.
+func (c *Client) SftpBrowse(deviceID string, volume string) (string, []ipc.StorageVolumeResponse, error) {
+	resp, err := c.Call(ipc.CmdSftpBrowse, ipc.SftpBrowsePayload{
+		DeviceID: deviceID,
+		Volume:   volume,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	var result ipc.SftpBrowseResponse
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &result)
+	}
+	return result.Path, result.Volumes, nil
+}
+
 // BroadcastStart asks the daemon to begin UDP/mDNS broadcasting.
 func (c *Client) BroadcastStart() error {
 	_, err := c.Call(ipc.CmdBroadcastStart, nil)

@@ -381,6 +381,29 @@ kcd mpris seek -10s
 kcd mpris seek 1m30s
 ```
 
+### mpris raw
+
+Dump raw MPRIS debug state for all local media players as JSON. Shows player
+names, their running status, and device-to-player mappings. Useful for
+diagnosing "no player found" issues.
+
+```
+kcd mpris raw
+```
+
+Returns the same data as the `mpris_status` IPC command.
+
+```json
+{
+  "watcherRunning": true,
+  "deviceCount": 2,
+  "players": ["spotify", "firefox"],
+  "playerMappings": {
+    "a1b2c3d4e5f6_...": "spotify"
+  }
+}
+```
+
 ### Scripting examples
 
 ```bash
@@ -570,6 +593,46 @@ Calls `fusermount3` (or `fusermount` on older systems) and removes the
 temporary mount point directory. Returns an error if the device was never
 mounted in this daemon session.
 
+### sftp browse
+
+Request fresh SFTP credentials and list available storage volumes or mount
+a specific one immediately.
+
+```
+kcd sftp browse <device-id> [volume-index|volume-name|volume-path]
+```
+
+**Without a volume argument** — requests fresh credentials and lists volumes:
+
+```
+$ kcd sftp browse a1b2c3d4
+Requesting SFTP credentials from phone (waiting up to 20s)…
+Available volumes:
+  0. Internal shared storage         /storage/emulated/0
+  1. SD card                         /storage/ABCD-1234
+
+Mount a volume: kcd sftp browse <device-id> <index|name|path>
+```
+
+**With a volume argument** — requests fresh credentials and mounts the
+specified volume via sshfs, opening it in the default file manager:
+
+```
+$ kcd sftp browse a1b2c3d4 "SD card"
+Requesting SFTP credentials from phone (waiting up to 20s)…
+Mounted at: /home/user/Downloads/kcd/mnt/kcd-sftp-a1b2c3d4
+```
+
+The volume argument is resolved in this order:
+
+1. **Index** (0-based) — `0`, `1`, etc.
+2. **Name** (case-insensitive) — `"SD card"`, `"internal shared storage"`
+3. **Path** (exact then case-insensitive) — `/storage/ABCD-1234`
+
+This is the recommended way to mount a specific phone volume without having
+to `request` + `mount` separately. It always fetches fresh credentials,
+so the credentials are guaranteed valid.
+
 ---
 
 ## run
@@ -615,19 +678,46 @@ kcd run exec a1b2... uptime
 
 ## sms
 
-Send an SMS via a connected phone.
+Send and receive SMS via a connected phone.
+
+### sms send
+
+Send an SMS message.
 
 ```
-kcd sms <device-id> <phone-number> <message>
+kcd sms send <device-id> <phone-number> <message>
 ```
 
 **Example**
 
 ```bash
-kcd sms a1b2... +1555000111 "Heading home in 10"
+kcd sms send a1b2... +1555000111 "Heading home in 10"
 ```
 
-> Incoming SMS threads are not yet supported. Only sending is implemented.
+### sms conversations
+
+Request a list of SMS conversation threads. Results arrive as `sms.incoming` events.
+
+```
+kcd sms conversations <device-id>
+```
+
+### sms conversation
+
+Request messages from a specific conversation thread.
+
+```
+kcd sms conversation <device-id> <thread-id>
+```
+
+### sms attachment
+
+Request an MMS attachment file from a device. The file is saved locally and an
+`sms.attachment` event is emitted with the path.
+
+```
+kcd sms attachment <device-id> <part-id> <unique-identifier>
+```
 
 ---
 
@@ -666,7 +756,7 @@ kcd watch [--events <type,...>] [--json]
 | `notification` | Notification from the phone: `{appName, title, text, id, ...}` |
 | `notification.canceled` | The phone dismissed a notification: `{id}` |
 | `share.progress` | File transfer progress: `{file, current, total}` |
-| `share.complete` | File transfer finished: `{file, path}` |
+| `share.complete` | File transfer finished: `{file, success, error?}` |
 | `share.text` | Plain text received: `{text}` |
 | `share.url` | URL received: `{url}` |
 | `ping.received` | A ping arrived |
@@ -674,8 +764,14 @@ kcd watch [--events <type,...>] [--json]
 | `telephony.missed` | Missed call: `{contactName, phoneNumber}` |
 | `telephony.canceled` | Call ended |
 | `connectivity.update` | Signal strength: `{signal, networkType}` |
+| `volume.update` | Device volume changed: `{name, volume, muted}` |
 | `mpris.update` | Now playing: `{player, title, artist, album, isPlaying, pos, length, volume}` |
 | `sftp.mount` | SFTP credentials: `{uri, ip, port, user, password, path, multiPaths, pathNames, errorMessage}` |
+| `battery.threshold` | Battery low/full alert: `{charge, charging, event}` |
+| `telephony.talking` | Call in progress: `{contactName, phoneNumber}` |
+| `sms.incoming` | SMS/MMS received: `{body, sender, date, thread_id, read}` |
+| `sms.attachment` | MMS attachment downloaded: `{filename, path, thread_id}` |
+| `ring.received` | Phone wants this PC to ring |
 
 ### Examples
 
