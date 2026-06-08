@@ -13,6 +13,9 @@
 __pycache__/
 
 
+# Nix build outputs
+result*
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*

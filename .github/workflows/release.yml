@@ -64,6 +64,12 @@ jobs:
         if: hashFiles('flake.nix') != ''
         run: nix build
 
+      - name: Clean up Nix artifacts before release
+        if: hashFiles('flake.nix') != ''
+        run: |
+          rm -rf result*
+          git checkout flake.lock
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
