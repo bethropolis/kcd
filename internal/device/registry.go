@@ -90,6 +90,29 @@ func (r *Registry) AllPairedDevicesConnected() bool {
 	return hasPaired && allConnected
 }
 
+// Prune removes devices that are stale (unpaired, disconnected, past threshold).
+// It skips Paired and Connected devices. Returns the number of removed devices.
+// Silent — no events are published.
+func (r *Registry) Prune(threshold time.Duration) int {
+	if threshold <= 0 {
+		return 0
+	}
+	var pruned int
+	r.devices.Range(func(key, value any) bool {
+		dev := value.(*Device)
+		if dev.State() == StatePaired || dev.IsConnected() {
+			return true
+		}
+		lastSeen := dev.LastSeen()
+		if lastSeen.IsZero() || time.Since(lastSeen) > threshold {
+			r.devices.Delete(key)
+			pruned++
+		}
+		return true
+	})
+	return pruned
+}
+
 // ReconnectBackoff calculates exponential backoff duration based on attempts.
 // Caps out at maxDuration.
 func ReconnectBackoff(attempt int, maxDuration time.Duration) time.Duration {

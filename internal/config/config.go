@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -38,7 +39,9 @@ type Config struct {
 	Pairing           PairingConfig                `toml:"pairing"`
 	Mousepad          MousepadConfig               `toml:"mousepad"`
 	SMS               SMSConfig                    `toml:"sms"`
-	ConfigPath        string                       `toml:"-"` // populated at load time, never written to disk
+	PruneStaleThreshold string `toml:"prune_stale_threshold"` // auto-remove stale unpaired devices; Go duration, "0" = disable
+
+	ConfigPath string `toml:"-"` // populated at load time, never written to disk
 }
 
 // PluginConfig toggles individual plugins on or off.
@@ -72,6 +75,7 @@ func Defaults() *Config {
 	c.Pairing.Defaults()
 	c.Mousepad.Defaults()
 	c.SMS.Defaults()
+	c.PruneStaleThreshold = "15m"
 
 	return c
 }
@@ -129,6 +133,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Share.PortMin > c.Share.PortMax {
 		return fmt.Errorf("config: share port_min (%d) cannot be greater than port_max (%d)", c.Share.PortMin, c.Share.PortMax)
+	}
+
+	// Prune threshold validation
+	if c.PruneStaleThreshold != "" {
+		if _, err := time.ParseDuration(c.PruneStaleThreshold); err != nil {
+			return fmt.Errorf("config: invalid prune_stale_threshold %q: %w", c.PruneStaleThreshold, err)
+		}
 	}
 
 	// Mousepad backend validation

@@ -32,6 +32,13 @@
 #
 # To initiate pairing to a specific device, run `kcd pair <device-id>`.
 
+# ─── Device Management ─────────────────────────────────────────────────────────
+# Automatically remove stale (unpaired, disconnected) devices from the registry.
+# This prevents old discovery entries from accumulating in `kcd devices`.
+# Set to "0" to disable auto-pruning entirely.
+# Default: "15m"
+# prune_stale_threshold = "15m"
+
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
 # Directory where files received from paired devices are saved.

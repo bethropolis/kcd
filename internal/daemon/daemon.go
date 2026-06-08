@@ -87,8 +87,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		logger.Warn("failed to load devices", zap.Error(err))
 	}
 
+	pruneThreshold, _ := time.ParseDuration(cfg.PruneStaleThreshold)
+	if pruned := devices.Prune(pruneThreshold); pruned > 0 {
+		logger.Info("pruned stale devices on startup", zap.Int("count", pruned))
+	}
+
 	// Helper to save device state
 	saveDevices := func() {
+		devices.Prune(pruneThreshold)
 		devs := devices.List()
 		infos := make([]device.DeviceInfo, 0, len(devs))
 		for _, dev := range devs {
@@ -125,7 +131,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bc := discovery.NewBroadcasterController(identity, 30*time.Second, logger, devices.AllPairedDevicesConnected)
 
 	// 5. IPC Server
-	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus)
+	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
 
 	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
 

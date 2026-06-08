@@ -189,6 +189,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	} else {
 		dev.SetName(safeDeviceName)
 	}
+	dev.SetLastSeen(time.Now())
 
 	certFP := cert.Fingerprint(peerCert)
 	if dev.State() == device.StatePaired && dev.CertFP != "" {
