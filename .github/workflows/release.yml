@@ -68,7 +68,7 @@ jobs:
         if: hashFiles('flake.nix') != ''
         run: |
           rm -rf result*
-          git checkout flake.lock
+          git checkout HEAD -- flake.lock
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
