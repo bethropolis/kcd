@@ -13,23 +13,25 @@ import (
 
 // Handler handles incoming IPC requests.
 type Handler struct {
-	devices    *device.Registry
-	plugins    *plugin.Registry
-	pairPlugin *pair.PairPlugin
-	statePath  string
-	bus        *events.Bus
-	routes     map[string]func(Request) Response
+	devices        *device.Registry
+	plugins        *plugin.Registry
+	pairPlugin     *pair.PairPlugin
+	statePath      string
+	bus            *events.Bus
+	routes         map[string]func(Request) Response
+	pruneThreshold time.Duration
 }
 
 // NewHandler creates a new IPC command handler.
-func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *pair.PairPlugin, statePath string, bus *events.Bus) *Handler {
+func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *pair.PairPlugin, statePath string, bus *events.Bus, pruneThreshold time.Duration) *Handler {
 	return &Handler{
-		devices:    devices,
-		plugins:    plugins,
-		pairPlugin: pairPlugin,
-		statePath:  statePath,
-		bus:        bus,
-		routes:     make(map[string]func(Request) Response),
+		devices:        devices,
+		plugins:        plugins,
+		pairPlugin:     pairPlugin,
+		statePath:      statePath,
+		bus:            bus,
+		routes:         make(map[string]func(Request) Response),
+		pruneThreshold: pruneThreshold,
 	}
 }
 
@@ -85,6 +87,7 @@ func (h *Handler) saveDevices() {
 	if h.statePath == "" {
 		return
 	}
+	h.devices.Prune(h.pruneThreshold)
 	devs := h.devices.List()
 	infos := make([]device.DeviceInfo, 0, len(devs))
 	for _, dev := range devs {
