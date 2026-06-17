@@ -397,7 +397,36 @@ func (c *Client) MprisRemote() (*ipc.MprisRemoteResponse, error) {
 	return &resp, nil
 }
 
-// WatchFile subscribes to daemon events and streams them to the given channel.
+// RemoteVolumeList returns the last known sink list for a device.
+func (c *Client) RemoteVolumeList(deviceID string) ([]byte, error) {
+	resp, err := c.Call(ipc.CmdRemoteVolumeList, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
+// RemoteVolumeSet sets the volume for a specific sink on a remote device.
+func (c *Client) RemoteVolumeSet(deviceID, sinkName string, volume int) error {
+	_, err := c.Call(ipc.CmdRemoteVolumeSet, struct {
+		DeviceID string `json:"deviceId"`
+		Name     string `json:"name"`
+		Volume   int    `json:"volume"`
+	}{DeviceID: deviceID, Name: sinkName, Volume: volume})
+	return err
+}
+
+// RemoteVolumeMute sets the mute state for a specific sink on a remote device.
+func (c *Client) RemoteVolumeMute(deviceID, sinkName string, muted bool) error {
+	_, err := c.Call(ipc.CmdRemoteVolumeMute, struct {
+		DeviceID string `json:"deviceId"`
+		Name     string `json:"name"`
+		Muted    bool   `json:"muted"`
+	}{DeviceID: deviceID, Name: sinkName, Muted: muted})
+	return err
+}
+
+// Watch subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
 	dialer := net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)

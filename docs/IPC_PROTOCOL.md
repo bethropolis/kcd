@@ -555,6 +555,57 @@ an integer value field). Seek with `"seek"` (int64, offset in ms) or
 
 **Response data:** none
 
+#### `remote_volume_list`
+
+List the last known audio sinks for a device.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** `[]SinkInfo`
+
+```json
+{
+  "ok": true,
+  "data": [
+    {"name": "media", "description": "Media", "volume": 75, "muted": false, "maxVolume": 100}
+  ]
+}
+```
+
+Returns an empty array if the plugin has not yet received a sink list from the device (connect to the device first).
+
+**Error cases:**
+- `"device not found"` — the device ID is unknown or was removed
+- `"remotesystemvolume plugin not enabled"` — plugin disabled in config
+
+#### `remote_volume_set`
+
+Set the volume of a specific audio sink on a remote device (0–100).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_...", "name": "media", "volume": 50}
+```
+
+**Response data:** none
+
+#### `remote_volume_mute`
+
+Mute or unmute a specific audio sink on a remote device.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_...", "name": "media", "muted": true}
+```
+
+**Response data:** none
+
 #### `mpris_remote`
 
 List remote MPRIS players (players on paired devices).
@@ -933,9 +984,9 @@ SFTP credentials received (success) or error.
 
 #### `volume.update`
 
-Device volume level changed.
+Device volume level changed (sent in two shapes).
 
-**Payload:**
+**Payload (per-sink update):**
 
 ```json
 {"name": "media", "volume": 70, "muted": false}
@@ -946,6 +997,16 @@ Device volume level changed.
 | `name` | string | Audio stream name |
 | `volume` | number | Volume level (0–100) |
 | `muted` | bool | Whether the stream is muted |
+
+**Payload (full sink list):**
+
+```json
+{
+  "sinks": [
+    {"name": "media", "description": "Media", "volume": 75, "muted": false, "maxVolume": 100}
+  ]
+}
+```
 
 ### 5.11 SMS Events
 
@@ -1054,6 +1115,7 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.sms.request_attachment` | SMS | Request an MMS attachment file |
 | `kdeconnect.telephony.request_mute` | Telephony | Mute incoming call ringer |
 | `kdeconnect.systemvolume` | SystemVolume | Push local sink list to phone |
+| `kdeconnect.systemvolume.request` | RemoteSystemVolume | Set phone volume/mute or request sink list |
 | `kdeconnect.findmyphone.request` | FindMyPhone | Trigger phone ringer |
 | `kdeconnect.connectivity_report.request` | Connectivity | Request signal strength report |
 | `kdeconnect.ping` | Ping | Send a ping |
@@ -1090,6 +1152,7 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) |
 | `kdeconnect.runcommand.request` | RunCommand | `RequestBody{RequestCommandList bool, Key string}` |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
+| `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |
 
 ---
 

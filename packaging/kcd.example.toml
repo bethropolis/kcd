@@ -145,6 +145,13 @@ sms = true
 # Screen size detection: requires xdpyinfo (X11) or wlr-randr (Wayland).
 presenter = true
 
+# Control the remote device's audio volume from this machine.
+# Commands:
+#   kcd volume list <id>                    — List audio sinks on the phone
+#   kcd volume set <id> <sink> <0-100>      — Set volume for a sink
+#   kcd volume mute <id> <sink> <true|false> — Mute/unmute a sink
+remotesystemvolume = true
+
 # ─── RunCommand: exposed commands ─────────────────────────────────────────────
 # Shell commands that the RunCommand plugin makes available to your phone.
 # Trigger them from the KDE Connect Android app → your device → Run command.

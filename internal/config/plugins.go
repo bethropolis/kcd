@@ -6,24 +6,25 @@ import (
 )
 
 type PluginConfig struct {
-	Battery        bool `toml:"battery"`
-	Clipboard      bool `toml:"clipboard"`
-	Notification   bool `toml:"notification"`
-	Share          bool `toml:"share"`
-	RunCommand     bool `toml:"runcommand"`
-	MPRIS          bool `toml:"mpris"`
-	Ping           bool `toml:"ping"`
-	Telephony      bool `toml:"telephony"`
-	Connectivity   bool `toml:"connectivity"`
-	Mousepad       bool `toml:"mousepad"`
-	SFTP           bool `toml:"sftp"`
-	FindMyPhone    bool `toml:"findmyphone"`
-	LockDevice     bool `toml:"lockdevice"`
-	SystemVolume   bool `toml:"systemvolume"`
-	PauseMusic     bool `toml:"pausemusic"`
-	SMS            bool `toml:"sms"`
-	Presenter      bool `toml:"presenter"`
-	FindThisDevice bool `toml:"findthisdevice"`
+	Battery            bool `toml:"battery"`
+	Clipboard          bool `toml:"clipboard"`
+	Notification       bool `toml:"notification"`
+	Share              bool `toml:"share"`
+	RunCommand         bool `toml:"runcommand"`
+	MPRIS              bool `toml:"mpris"`
+	Ping               bool `toml:"ping"`
+	Telephony          bool `toml:"telephony"`
+	Connectivity       bool `toml:"connectivity"`
+	Mousepad           bool `toml:"mousepad"`
+	SFTP               bool `toml:"sftp"`
+	FindMyPhone        bool `toml:"findmyphone"`
+	LockDevice         bool `toml:"lockdevice"`
+	SystemVolume       bool `toml:"systemvolume"`
+	PauseMusic         bool `toml:"pausemusic"`
+	SMS                bool `toml:"sms"`
+	Presenter          bool `toml:"presenter"`
+	FindThisDevice     bool `toml:"findthisdevice"`
+	RemoteSystemVolume bool `toml:"remotesystemvolume"`
 }
 
 type BatteryConfig struct {
@@ -101,6 +102,7 @@ func (p *PluginConfig) Defaults() {
 	p.SMS = true
 	p.Presenter = true
 	p.FindThisDevice = true
+	p.RemoteSystemVolume = true
 }
 
 func (c *BatteryConfig) Defaults() {
