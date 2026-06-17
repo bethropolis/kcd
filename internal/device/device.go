@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
@@ -37,6 +38,10 @@ type Device struct {
 	IsCharging    bool
 
 	mu sync.RWMutex
+
+	// reconnecting is an atomic flag preventing multiple concurrent
+	// auto-reconnect goroutines for this device.
+	reconnecting atomic.Bool
 
 	// pluginDispatch routes incoming packets to registered plugins
 	pluginDispatch func(ctx context.Context, dev *Device, pkt *protocol.Packet) bool
@@ -295,4 +300,17 @@ func (d *Device) SetLastSeen(t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastSeen = t
+}
+
+// TryReconnect attempts to mark the device as reconnecting.
+// Returns true if this goroutine should proceed; false if another
+// reconnect goroutine is already running.
+func (d *Device) TryReconnect() bool {
+	return d.reconnecting.CompareAndSwap(false, true)
+}
+
+// ReconnectDone marks the device as no longer reconnecting.
+// Must be called (typically via defer) after a reconnect goroutine exits.
+func (d *Device) ReconnectDone() {
+	d.reconnecting.Store(false)
 }

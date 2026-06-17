@@ -227,6 +227,12 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		if lastIP == nil {
 			return
 		}
+		// Prevent multiple concurrent reconnect goroutines for the same device.
+		if !sender.TryReconnect() {
+			logger.Debug("auto-reconnect: already reconnecting, skipping",
+				zap.String("device_id", sender.ID()))
+			return
+		}
 		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger)
 	}
 
@@ -255,6 +261,8 @@ func reconnectWithBackoff(
 ) {
 	const maxBackoff = 5 * time.Minute
 	attempt := 0
+
+	defer dev.ReconnectDone()
 
 	logger.Info("starting auto-reconnect",
 		zap.String("device_id", dev.ID()),
