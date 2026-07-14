@@ -125,6 +125,7 @@ func main() {
 			runCmd,
 			smsCmd,
 			mprisCmd,
+			volumeCmd,
 			{
 
 				Name:  "doctor",

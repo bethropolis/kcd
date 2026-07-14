@@ -39,6 +39,9 @@ const (
 	CmdMprisAction          = "mpris_action"
 	CmdMprisRemote          = "mpris_remote"
 	CmdSftpBrowse           = "sftp_browse"
+	CmdRemoteVolumeList     = "remote_volume_list"
+	CmdRemoteVolumeSet      = "remote_volume_set"
+	CmdRemoteVolumeMute     = "remote_volume_mute"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.

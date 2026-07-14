@@ -20,6 +20,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/pair"
 	"github.com/bethropolis/kcd/internal/plugins/ping"
 	"github.com/bethropolis/kcd/internal/plugins/presenter"
+	"github.com/bethropolis/kcd/internal/plugins/remotesystemvolume"
 	"github.com/bethropolis/kcd/internal/plugins/runcommand"
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 	"github.com/bethropolis/kcd/internal/plugins/share"
@@ -39,7 +40,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger))
 	}
 	if cfg.Plugins.Clipboard {
-		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger))
+		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect))
 	}
 	if cfg.Plugins.Share {
 		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger))
@@ -82,6 +83,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	}
 	if cfg.Plugins.SMS {
 		plugins.Register(sms.NewSMSPlugin(cfg.SMS, bus, tlsCfg, logger))
+	}
+	if cfg.Plugins.RemoteSystemVolume {
+		plugins.Register(remotesystemvolume.NewRemoteSystemVolumePlugin(bus, logger))
 	}
 
 	return pairPlugin

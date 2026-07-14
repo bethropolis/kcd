@@ -346,7 +346,31 @@ ipc_request(sock, "clipboard_push", {"deviceId": dev_id})
 
 The daemon reads the local clipboard (`wl-paste`/`xclip`) and sends it.
 
-### 5.9 Get SFTP Connection Info
+### 5.9 Remote Volume Control
+
+```python
+# List audio sinks
+resp = ipc_request(sock, "remote_volume_list", {"deviceId": dev_id})
+if resp["ok"]:
+    for sink in resp["data"]:
+        print(f'{sink["name"]}: {sink["volume"]}% (muted: {sink["muted"]})')
+
+# Set volume
+ipc_request(sock, "remote_volume_set", {
+    "deviceId": dev_id, "name": "media", "volume": 50
+})
+
+# Mute/unmute
+ipc_request(sock, "remote_volume_mute", {
+    "deviceId": dev_id, "name": "media", "muted": True
+})
+```
+
+Volume changes from the phone arrive as `volume.update` events. The event payload
+is either `{"name", "volume", "muted"}` for a single sink change or `{"sinks": [...]}`
+for the full sink list.
+
+### 5.10 Get SFTP Connection Info
 
 ```python
 resp = ipc_request(sock, "sftp_info", {"deviceId": dev_id})

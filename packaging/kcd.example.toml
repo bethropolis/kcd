@@ -76,6 +76,12 @@ battery = true
 # X11:     requires xclip.
 clipboard = true
 
+[clipboard]
+# Push the local clipboard to a device every time it connects
+# or reconnects. Off by default to avoid spurious pushes on
+# daemon restart or phone reconnection.
+# push_on_connect = false
+
 # Forward phone notifications to the desktop via notify-send.
 # Requires libnotify / a running notification daemon.
 notification = true
@@ -144,6 +150,13 @@ sms = true
 # Gyroscope-based pointer: requires xdotool (X11) or ydotool (Wayland).
 # Screen size detection: requires xdpyinfo (X11) or wlr-randr (Wayland).
 presenter = true
+
+# Control the remote device's audio volume from this machine.
+# Commands:
+#   kcd volume list <id>                    — List audio sinks on the phone
+#   kcd volume set <id> <sink> <0-100>      — Set volume for a sink
+#   kcd volume mute <id> <sink> <true|false> — Mute/unmute a sink
+remotesystemvolume = true
 
 # ─── RunCommand: exposed commands ─────────────────────────────────────────────
 # Shell commands that the RunCommand plugin makes available to your phone.

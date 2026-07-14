@@ -20,24 +20,92 @@ import (
 	"go.uber.org/zap"
 )
 
+type clipboardBackend int
+
+const (
+	backendUnknown clipboardBackend = iota
+	backendWayland
+	backendX11
+)
+
 // ClipboardPlugin handles clipboard sync both directions.
 type ClipboardPlugin struct {
+	pushOnConnect     bool
 	lastTimestamp     int64
 	tlsConfig         *tls.Config
 	logger            *zap.Logger
-	isWayland         bool
+	backend           clipboardBackend
+	backendOnce       sync.Once
 	mu                sync.Mutex
 	lastContent       string // last content received from phone (inbound)
 	lastPushedContent string // last content sent to phone (outbound)
 }
 
 // NewClipboardPlugin creates a clipboard plugin.
-func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger) *ClipboardPlugin {
+func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool) *ClipboardPlugin {
 	return &ClipboardPlugin{
-		tlsConfig: tlsConfig,
-		logger:    logger.With(zap.String("plugin", "clipboard")),
-		isWayland: os.Getenv("WAYLAND_DISPLAY") != "",
+		tlsConfig:     tlsConfig,
+		pushOnConnect: pushOnConnect,
+		logger:        logger.With(zap.String("plugin", "clipboard")),
 	}
+}
+
+// detectBackend probes for a working clipboard tool (wl-paste → xclip)
+// and caches the result so the probe runs at most once.
+//
+// Under systemd user services neither WAYLAND_DISPLAY nor DISPLAY
+// is typically set.  We probe by checking the display variable first,
+// then falling back to scanning $XDG_RUNTIME_DIR for a Wayland socket.
+func (p *ClipboardPlugin) detectBackend() clipboardBackend {
+	p.backendOnce.Do(func() {
+		wlDisplay := os.Getenv("WAYLAND_DISPLAY")
+		xDisplay := os.Getenv("DISPLAY")
+
+		switch {
+		case wlDisplay != "":
+			if _, err := exec.LookPath("wl-paste"); err == nil {
+				p.backend = backendWayland
+				p.logger.Debug("clipboard: backend=wayland (WAYLAND_DISPLAY set)")
+			}
+		case xDisplay != "":
+			if _, err := exec.LookPath("xclip"); err == nil {
+				p.backend = backendX11
+				p.logger.Debug("clipboard: backend=x11 (DISPLAY set)")
+			}
+		default:
+			// Systemd user service — neither variable is set.
+			// Probe $XDG_RUNTIME_DIR for any Wayland socket.
+			rtDir := os.Getenv("XDG_RUNTIME_DIR")
+			hasWaylandSock := false
+			if rtDir != "" {
+				if entries, err := os.ReadDir(rtDir); err == nil {
+					for _, e := range entries {
+						if strings.HasPrefix(e.Name(), "wayland-") && !e.IsDir() {
+							hasWaylandSock = true
+							break
+						}
+					}
+				}
+			}
+			if hasWaylandSock {
+				if _, err := exec.LookPath("wl-paste"); err == nil {
+					p.backend = backendWayland
+					p.logger.Debug("clipboard: backend=wayland (socket probe)")
+				}
+			}
+			if p.backend == backendUnknown {
+				if _, err := exec.LookPath("xclip"); err == nil {
+					p.backend = backendX11
+					p.logger.Debug("clipboard: backend=x11 (fallback)")
+				}
+			}
+		}
+
+		if p.backend == backendUnknown {
+			p.logger.Warn("clipboard: no clipboard tool found (install wl-clipboard or xclip)")
+		}
+	})
+	return p.backend
 }
 
 // ClipboardBody represents the content of a clipboard packet.
@@ -100,14 +168,19 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	// Spawning goroutine as Handlers must not block.
 	go func() {
 		var cmd *exec.Cmd
-		if p.isWayland {
+		switch p.detectBackend() {
+		case backendWayland:
 			cmd = exec.CommandContext(context.Background(), "wl-copy")
-		} else {
+		case backendX11:
 			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
+		default:
+			return
 		}
 
 		cmd.Stdin = strings.NewReader(body.Content)
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
+		}
 	}()
 
 	return nil
@@ -175,10 +248,13 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		defer t.Close()
 
 		var cmd *exec.Cmd
-		if p.isWayland {
+		switch p.detectBackend() {
+		case backendWayland:
 			cmd = exec.CommandContext(context.Background(), "wl-copy", "--type", mimeType)
-		} else {
+		case backendX11:
 			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-t", mimeType, "-i")
+		default:
+			return
 		}
 		cmd.Stdin = t
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -221,10 +297,13 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
 func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	var cmd *exec.Cmd
-	if p.isWayland {
+	switch p.detectBackend() {
+	case backendWayland:
 		cmd = exec.CommandContext(ctx, "wl-paste", "-n")
-	} else {
+	case backendX11:
 		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
+	default:
+		return fmt.Errorf("clipboard: no clipboard tool available")
 	}
 
 	out, err := cmd.Output()
@@ -261,19 +340,26 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 
 func (p *ClipboardPlugin) readClipboard() string {
 	var cmd *exec.Cmd
-	if p.isWayland {
+	switch p.detectBackend() {
+	case backendWayland:
 		cmd = exec.CommandContext(context.Background(), "wl-paste", "-n")
-	} else {
+	case backendX11:
 		cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-o")
+	default:
+		return ""
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		p.logger.Debug("clipboard: read failed", zap.Error(err))
 		return ""
 	}
 	return string(out)
 }
 
 func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
+	if !p.pushOnConnect {
+		return
+	}
 	content := p.readClipboard()
 
 	p.mu.Lock()

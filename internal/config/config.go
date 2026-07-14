@@ -36,6 +36,7 @@ type Config struct {
 	Share               ShareConfig                  `toml:"share"`
 	SFTP                SFTPConfig                   `toml:"sftp"`
 	Ping                PingConfig                   `toml:"ping"`
+	Clipboard           ClipboardConfig              `toml:"clipboard"`
 	Pairing             PairingConfig                `toml:"pairing"`
 	Mousepad            MousepadConfig               `toml:"mousepad"`
 	SMS                 SMSConfig                    `toml:"sms"`
@@ -74,6 +75,7 @@ func Defaults() *Config {
 	c.Ping.Defaults()
 	c.Pairing.Defaults()
 	c.Mousepad.Defaults()
+	c.Clipboard.Defaults()
 	c.SMS.Defaults()
 	c.PruneStaleThreshold = "15m"
 

@@ -721,6 +721,60 @@ kcd sms attachment <device-id> <part-id> <unique-identifier>
 
 ---
 
+## volume
+
+Control the remote device's audio volume (requires `remotesystemvolume` plugin).
+
+### volume list
+
+List audio sinks on a remote device and their current volume/mute state.
+
+```
+kcd volume list <device-id>
+```
+
+**Example output**
+
+```
+media  75%
+alarm  100%
+```
+
+### volume set
+
+Set a sink's volume (0–100) on a remote device.
+
+```
+kcd volume set <device-id> <sink-name> <0-100>
+```
+
+**Examples**
+
+```bash
+kcd volume set a1b2... media 50
+kcd volume set a1b2... alarm 80
+```
+
+### volume mute
+
+Mute or unmute a sink on a remote device.
+
+```
+kcd volume mute <device-id> <sink-name> <true|false>
+```
+
+**Examples**
+
+```bash
+kcd volume mute a1b2... media true    # Mute
+kcd volume mute a1b2... media false   # Unmute
+```
+
+> Sink names and current volume can be discovered with `kcd volume list`.
+> Volume changes made on the phone are also published as `volume.update` events.
+
+---
+
 ## watch
 
 Monitor real-time events from the daemon as an NDJSON stream. This is the primary way to observe what is happening across all devices.

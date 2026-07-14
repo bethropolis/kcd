@@ -46,6 +46,9 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	if cfg.Plugins.MPRIS {
 		registerMprisRoutes(handler, devices, plugins)
 	}
+	if cfg.Plugins.RemoteSystemVolume {
+		registerRemoteVolumeRoutes(handler, devices, plugins)
+	}
 
 	handler.Register(ipc.CmdConnect, func(req ipc.Request) ipc.Response {
 		var p ipc.ConnectPayload
