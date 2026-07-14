@@ -40,7 +40,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger))
 	}
 	if cfg.Plugins.Clipboard {
-		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger))
+		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect))
 	}
 	if cfg.Plugins.Share {
 		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger))

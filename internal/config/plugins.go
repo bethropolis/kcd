@@ -120,6 +120,16 @@ func (c *NotificationPluginConfig) Defaults() {
 	c.ExpireMS = -1
 }
 
+type ClipboardConfig struct {
+	// PushOnConnect sends the local clipboard to a device when it
+	// connects/reconnects. Off by default to avoid spurious pushes.
+	PushOnConnect bool `toml:"push_on_connect"`
+}
+
+func (c *ClipboardConfig) Defaults() {
+	c.PushOnConnect = false
+}
+
 func (c *ShareConfig) Defaults() {
 	c.PortMin = 1739
 	c.PortMax = 1764

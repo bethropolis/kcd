@@ -76,6 +76,12 @@ battery = true
 # X11:     requires xclip.
 clipboard = true
 
+[clipboard]
+# Push the local clipboard to a device every time it connects
+# or reconnects. Off by default to avoid spurious pushes on
+# daemon restart or phone reconnection.
+# push_on_connect = false
+
 # Forward phone notifications to the desktop via notify-send.
 # Requires libnotify / a running notification daemon.
 notification = true

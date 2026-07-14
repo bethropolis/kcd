@@ -30,6 +30,7 @@ const (
 
 // ClipboardPlugin handles clipboard sync both directions.
 type ClipboardPlugin struct {
+	pushOnConnect     bool
 	lastTimestamp     int64
 	tlsConfig         *tls.Config
 	logger            *zap.Logger
@@ -41,10 +42,11 @@ type ClipboardPlugin struct {
 }
 
 // NewClipboardPlugin creates a clipboard plugin.
-func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger) *ClipboardPlugin {
+func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool) *ClipboardPlugin {
 	return &ClipboardPlugin{
-		tlsConfig: tlsConfig,
-		logger:    logger.With(zap.String("plugin", "clipboard")),
+		tlsConfig:     tlsConfig,
+		pushOnConnect: pushOnConnect,
+		logger:        logger.With(zap.String("plugin", "clipboard")),
 	}
 }
 
@@ -355,6 +357,9 @@ func (p *ClipboardPlugin) readClipboard() string {
 }
 
 func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
+	if !p.pushOnConnect {
+		return
+	}
 	content := p.readClipboard()
 
 	p.mu.Lock()
