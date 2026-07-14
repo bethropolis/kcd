@@ -49,16 +49,57 @@ func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger) *ClipboardPlu
 }
 
 // detectBackend probes for a working clipboard tool (wl-paste → xclip)
-// and caches the result so LookPath is called at most once.
+// and caches the result so the probe runs at most once.
+//
+// Under systemd user services neither WAYLAND_DISPLAY nor DISPLAY
+// is typically set.  We probe by checking the display variable first,
+// then falling back to scanning $XDG_RUNTIME_DIR for a Wayland socket.
 func (p *ClipboardPlugin) detectBackend() clipboardBackend {
 	p.backendOnce.Do(func() {
-		if _, err := exec.LookPath("wl-paste"); err == nil {
-			p.backend = backendWayland
-			p.logger.Debug("clipboard: using Wayland backend (wl-paste/wl-copy)")
-		} else if _, err := exec.LookPath("xclip"); err == nil {
-			p.backend = backendX11
-			p.logger.Debug("clipboard: using X11 backend (xclip)")
-		} else {
+		wlDisplay := os.Getenv("WAYLAND_DISPLAY")
+		xDisplay := os.Getenv("DISPLAY")
+
+		switch {
+		case wlDisplay != "":
+			if _, err := exec.LookPath("wl-paste"); err == nil {
+				p.backend = backendWayland
+				p.logger.Debug("clipboard: backend=wayland (WAYLAND_DISPLAY set)")
+			}
+		case xDisplay != "":
+			if _, err := exec.LookPath("xclip"); err == nil {
+				p.backend = backendX11
+				p.logger.Debug("clipboard: backend=x11 (DISPLAY set)")
+			}
+		default:
+			// Systemd user service — neither variable is set.
+			// Probe $XDG_RUNTIME_DIR for any Wayland socket.
+			rtDir := os.Getenv("XDG_RUNTIME_DIR")
+			hasWaylandSock := false
+			if rtDir != "" {
+				if entries, err := os.ReadDir(rtDir); err == nil {
+					for _, e := range entries {
+						if strings.HasPrefix(e.Name(), "wayland-") && !e.IsDir() {
+							hasWaylandSock = true
+							break
+						}
+					}
+				}
+			}
+			if hasWaylandSock {
+				if _, err := exec.LookPath("wl-paste"); err == nil {
+					p.backend = backendWayland
+					p.logger.Debug("clipboard: backend=wayland (socket probe)")
+				}
+			}
+			if p.backend == backendUnknown {
+				if _, err := exec.LookPath("xclip"); err == nil {
+					p.backend = backendX11
+					p.logger.Debug("clipboard: backend=x11 (fallback)")
+				}
+			}
+		}
+
+		if p.backend == backendUnknown {
 			p.logger.Warn("clipboard: no clipboard tool found (install wl-clipboard or xclip)")
 		}
 	})
