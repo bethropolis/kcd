@@ -830,6 +830,16 @@ A notification was received from a device.
 | `requestReplyId` | string | Present if the notification supports inline replies |
 | `id` | string | Notification identifier |
 
+> **Desktop popups:** the daemon shows each phone notification via `notify-send`.
+> Popups render **without an icon by default** (`show_icons = false`); set
+> `show_icons = true` to display the phone's app icon (downloaded via
+> `fetch_icons` and reused across re-posts). Because Android re-posts a
+> notification on every update with a stable `id` (e.g. a scrobbler's
+> now-playing notification), the daemon replaces the existing desktop popup
+> in place (`--replace-id`) so repeated updates collapse to one popup instead
+> of flooding the screen — mirroring the reference desktop's
+> `Notification::update()`. Disable with `replace_notifications = false`.
+
 #### `notification.canceled`
 
 A notification was dismissed by the device.

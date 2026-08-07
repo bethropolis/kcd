@@ -43,6 +43,14 @@ type NotificationPluginConfig struct {
 	MaxBodyLength    int    `toml:"max_body_length"`
 	ExpireMS         int    `toml:"expire_ms"`
 	SkipNonClearable bool   `toml:"skip_non_clearable"`
+	// ReplaceNotifications replaces the previous desktop popup when the phone
+	// re-posts a notification with the same id (e.g. media/scrobble updates),
+	// instead of creating a new popup each time. On by default.
+	ReplaceNotifications bool `toml:"replace_notifications"`
+	// ShowIcons shows the app icon on desktop popups. Off by default —
+	// kcd notifications render without an icon. When enabled, the phone's
+	// icon is downloaded (subject to FetchIcons) and reused across re-posts.
+	ShowIcons bool `toml:"show_icons"`
 }
 
 type ShareConfig struct {
@@ -118,6 +126,7 @@ func (c *NotificationPluginConfig) Defaults() {
 	c.FetchIcons = true
 	c.MaxBodyLength = 0
 	c.ExpireMS = -1
+	c.ReplaceNotifications = true
 }
 
 type ClipboardConfig struct {
