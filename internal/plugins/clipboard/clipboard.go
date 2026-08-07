@@ -43,6 +43,9 @@ type ClipboardPlugin struct {
 
 // NewClipboardPlugin creates a clipboard plugin.
 func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool) *ClipboardPlugin {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &ClipboardPlugin{
 		tlsConfig:     tlsConfig,
 		pushOnConnect: pushOnConnect,

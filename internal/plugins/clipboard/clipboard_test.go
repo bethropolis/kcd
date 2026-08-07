@@ -6,13 +6,13 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 )
 
 func TestClipboardPlugin_Handle(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
-	p := &ClipboardPlugin{}
+	p := NewClipboardPlugin(nil, logger, false)
 
 	body := ClipboardBody{
 		Content: "Hello world!",
