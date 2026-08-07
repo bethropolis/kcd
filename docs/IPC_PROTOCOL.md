@@ -666,6 +666,14 @@ are delivered.
    {"type":"mpris.update","deviceId":"...","timestamp":"...","payload":{...NowPlaying...}}
    ```
 
+   The daemon keeps now-playing state fresh by re-requesting it every 5
+   seconds from devices with an **actively-playing** player (see the
+   `mpris.update` section below), so this initial dump fires reliably for
+   mid-track state — a pure-push client can mount and see the current track
+   without polling. Stopped/paused players are deliberately not polled, so
+   they age past the 10-second gate and no ghost track is shown after a
+   reconnect.
+
 3. **Live stream:** All matching events are streamed as they occur, one per
    line, until the client disconnects or the daemon shuts down.
 
@@ -1057,6 +1065,32 @@ this daemon to ring).
 
 Now-playing state from a device's media player.
 
+> **Album art:** when the phone advertises a `kdeconnect:/artUri?...` URI,
+> the daemon requests the art bytes over a side channel and caches them to
+> `$XDG_CACHE_HOME/kcd/art/<kdeArtHash>.<ext>`. Once fetched, `albumArtUrl`
+> is emitted as a loadable `file://` path. A second `mpris.update` event is
+> published when the art arrives. If the fetch is still in flight or fails,
+> the original URI is left untouched — clients should fall back to a
+> placeholder.
+
+> **Freshness:** the daemon re-requests now-playing from every connected
+> device with an **actively-playing** player every 5 seconds
+> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). Responses are
+> deduplicated — an event is only emitted when the state actually changes.
+> This keeps `pos`/state current for pure-push clients (widgets, Waybar)
+> that never poll the CLI. Devices that haven't reported a player yet, or
+> whose player is stopped/paused, are not polled — a stopped-but-alive
+> player keeps its last pushed track (so it can be resumed), but stops being
+> refreshed and ages out of the 10-second initial-dump gate.
+
+> **Session teardown:** when the phone reports a `playerList` that no longer
+> contains the device's currently-tracked player (the media session was
+> destroyed, e.g. the app was swiped away), the daemon drops the cached
+> state and publishes an empty `mpris.update` (`{...NowPlaying...}` with no
+> title) so watchers fall back to "no media playing". An empty `playerList`
+> (all sessions destroyed) has the same effect. A stopped-but-alive session
+> is **not** cleared — only sessions removed from `playerList` are.
+
 **Payload:**
 
 ```json
@@ -1065,7 +1099,7 @@ Now-playing state from a device's media player.
   "title": "Song Title",
   "artist": "Artist Name",
   "album": "Album Name",
-  "albumArtUrl": "https://i.scdn.co/image/...",
+  "albumArtUrl": "file:///home/user/.cache/kcd/art/1141556203.jpg",
   "url": "spotify:track:...",
   "length": 240000,
   "pos": 45000,
@@ -1082,6 +1116,10 @@ Now-playing state from a device's media player.
   "loopStatus": "None"
 }
 ```
+
+The extension is sniffed from the received bytes (JPEG/PNG/GIF/WebP),
+defaulting to `.jpg`. The cache directory holds at most 500 files and is
+cleared when it overflows.
 
 ---
 
@@ -1102,7 +1140,7 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.clipboard.connect` | Clipboard | Push clipboard with timestamp on connect |
 | `kdeconnect.mousepad.keyboardstate` | Mousepad | Advertise keyboard capability on connect |
 | `kdeconnect.mpris` | MPRIS | Player list, NowPlaying state, seek positions, album art (broadcast + request-reply) |
-| `kdeconnect.mpris.request` | MPRIS | Request player list, now-playing, volume; send control actions |
+| `kdeconnect.mpris.request` | MPRIS | Request player list, now-playing, volume, album art; send control actions |
 | `kdeconnect.notification.reply` | Notification | Reply to a notification with inline reply support |
 | `kdeconnect.notification` | RunCommand | Command output notification pushed to phone |
 | `kdeconnect.runcommand` | RunCommand | Send command list to phone |
@@ -1148,8 +1186,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.clipboard.file` | Clipboard | `ClipboardFileBody{Filename string}` |
 | `kdeconnect.lock` | LockDevice | `LockBody{RequestLocked, SetLocked, IsLocked}` |
 | `kdeconnect.lock.request` | LockDevice | `LockBody{}` (triggers lock/unlock) |
-| `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, ...}` |
-| `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) |
+| `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, AlbumArtUrl, TransferringAlbumArt, ...}` — inbound packets with `transferringAlbumArt: true` + `payloadTransferInfo` carry album art bytes (side channel) that the daemon caches to `$XDG_CACHE_HOME/kcd/art/` |
+| `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) — an outbound `kdeconnect.mpris.request` with `player` + `albumArtUrl` asks the phone to stream art back |
 | `kdeconnect.runcommand.request` | RunCommand | `RequestBody{RequestCommandList bool, Key string}` |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
 | `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |

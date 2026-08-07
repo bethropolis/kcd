@@ -424,7 +424,14 @@ kcd watch --events=mpris.update
 # bindsym XF86AudioNext exec kcd mpris next
 ```
 
-> **Note:** The `mpris.update` event fires whenever the phone sends a now-playing state change (track change, play/pause toggle). Subscribe with `kcd watch --events=mpris.update`.
+> **Note:** The `mpris.update` event fires whenever the phone sends a now-playing state change (track change, play/pause toggle). Subscribe with `kcd watch --events=mpris.update`. The daemon also re-requests now-playing every 5 seconds from devices with an **actively-playing** player, so state stays fresh for pure-push clients without polling — but events are deduplicated, so `mpris.update` only fires on real changes. Stopped/paused players are not polled (a stopped-but-alive track stays listed so it can be resumed), and when the phone removes a player from its `playerList` (session destroyed) the cached state is dropped and an empty `mpris.update` is emitted so the widget falls back to "no media playing".
+>
+> **Note:** Phone album art URIs (`kdeconnect:/artUri?...`) are resolved by the
+> daemon: it fetches the art bytes from the phone, caches them to
+> `$XDG_CACHE_HOME/kcd/art/<kdeArtHash>.<ext>`, and emits a loadable
+> `file://` URL in `albumArtUrl` (both in `kcd mpris status --json` and in
+> `mpris.update` events). A second `mpris.update` is published when the art
+> arrives.
 
 ---
 
