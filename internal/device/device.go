@@ -43,6 +43,17 @@ type Device struct {
 	// auto-reconnect goroutines for this device.
 	reconnecting atomic.Bool
 
+	// reconnectAttempt persists the auto-reconnect backoff counter across
+	// disconnect cycles. A connection that flaps (drops shortly after a
+	// successful dial) keeps the counter so the backoff escalates instead of
+	// resetting to the 2s floor; a stable connection resets it on drop.
+	reconnectAttempt int
+
+	// connectStarted is when the most recent connection was established,
+	// used to detect flaps (connections that die too quickly to count as
+	// genuinely stable).
+	connectStarted time.Time
+
 	// pluginDispatch routes incoming packets to registered plugins
 	pluginDispatch func(ctx context.Context, dev *Device, pkt *protocol.Packet) bool
 	onConnect      func(dev *Device)
@@ -108,6 +119,12 @@ func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch fun
 		d.lastIP = tcpAddr.IP
 		d.mu.Unlock()
 	}
+
+	// Record when the connection was established so a quick drop can be
+	// distinguished from a genuinely stable connection.
+	d.mu.Lock()
+	d.connectStarted = time.Now()
+	d.mu.Unlock()
 
 	go d.readLoop(ctx, conn)
 	go d.writerLoop(ctx, conn)
@@ -313,4 +330,39 @@ func (d *Device) TryReconnect() bool {
 // Must be called (typically via defer) after a reconnect goroutine exits.
 func (d *Device) ReconnectDone() {
 	d.reconnecting.Store(false)
+}
+
+// ReconnectAttempt returns the persisted auto-reconnect backoff counter.
+func (d *Device) ReconnectAttempt() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.reconnectAttempt
+}
+
+// SetReconnectAttempt stores the auto-reconnect backoff counter so the next
+// reconnect cycle (spawned when this connection drops) continues backing off
+// instead of resetting to the initial floor.
+func (d *Device) SetReconnectAttempt(n int) {
+	d.mu.Lock()
+	d.reconnectAttempt = n
+	d.mu.Unlock()
+}
+
+// ResetReconnectAttempt clears the backoff counter after a stable connection
+// (one that stayed up long enough to count as genuinely healthy) drops.
+func (d *Device) ResetReconnectAttempt() {
+	d.mu.Lock()
+	d.reconnectAttempt = 0
+	d.mu.Unlock()
+}
+
+// ConnectionAge returns how long the current connection has been established,
+// or 0 if the device has never connected in this process.
+func (d *Device) ConnectionAge() time.Duration {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.connectStarted.IsZero() {
+		return 0
+	}
+	return time.Since(d.connectStarted)
 }
