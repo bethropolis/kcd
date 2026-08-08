@@ -29,6 +29,7 @@ type NotificationPlugin struct {
 	tlsConfig      *tls.Config
 	logger         *zap.Logger
 	notifIDs       sync.Map // maps deviceID|body.ID -> desktop notify-send ID (string)
+	pendingCloses  sync.Map // maps deviceID|body.ID -> *time.Timer (deferred close for cancel-grace)
 	iconDir        string   // temp dir for cached notification icons
 	cfg            config.NotificationPluginConfig
 	canCloseNotifs bool // whether notify-send supports --print-id
@@ -70,6 +71,12 @@ func (p *NotificationPlugin) Close() {
 	if p.iconDir != "" {
 		_ = os.RemoveAll(p.iconDir)
 	}
+	p.pendingCloses.Range(func(k, v any) bool {
+		if t, ok := v.(*time.Timer); ok {
+			t.Stop()
+		}
+		return true
+	})
 }
 
 // SetFilters atomically replaces the per-app notification filter map.
@@ -130,15 +137,34 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	// Handle cancellation — close the corresponding desktop notification.
 	if body.IsCancel {
 		if body.ID != "" {
-			if desktopID, ok := p.notifIDs.LoadAndDelete(p.notifKey(dev.ID(), body.ID)); ok {
-				go func() {
-					_ = p.newExec(context.Background(), "gdbus", "call", "--session",
-						"--dest", "org.freedesktop.Notifications",
-						"--object-path", "/org/freedesktop/Notifications",
-						"--method", "org.freedesktop.Notifications.CloseNotification",
-						desktopID.(string),
-					).Run()
-				}()
+			key := p.notifKey(dev.ID(), body.ID)
+			if desktopID, ok := p.notifIDs.Load(key); ok {
+				if p.cfg.CancelGraceMS > 0 {
+					// Cancel-grace: hold the popup open so a same-id re-post
+					// (media now-playing toggling play/pause) updates it in
+					// place instead of closing and re-opening. If no re-post
+					// arrives, close after the grace window.
+					if t, ok := p.pendingCloses.Load(key); ok {
+						t.(*time.Timer).Stop()
+					}
+					want := desktopID.(string)
+					p.pendingCloses.Store(key, time.AfterFunc(
+						time.Duration(p.cfg.CancelGraceMS)*time.Millisecond,
+						func() {
+							if cur, ok := p.notifIDs.LoadAndDelete(key); ok {
+								// Only close the popup we scheduled — if a
+								// re-post replaced it, leave the new one.
+								if cur.(string) == want {
+									p.closeNotification(want)
+								}
+							}
+							p.pendingCloses.Delete(key)
+						},
+					))
+				} else {
+					p.notifIDs.Delete(key)
+					p.closeNotification(desktopID.(string))
+				}
 			}
 		}
 		if p.bus != nil {
@@ -289,6 +315,18 @@ func (p *NotificationPlugin) fetchIcon(
 	return iconPath
 }
 
+// closeNotification closes a previously-shown desktop popup by id.
+func (p *NotificationPlugin) closeNotification(desktopID string) {
+	go func() {
+		_ = p.newExec(context.Background(), "gdbus", "call", "--session",
+			"--dest", "org.freedesktop.Notifications",
+			"--object-path", "/org/freedesktop/Notifications",
+			"--method", "org.freedesktop.Notifications.CloseNotification",
+			desktopID,
+		).Run()
+	}()
+}
+
 // sendDesktopNotification calls notify-send with the collected parameters.
 func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, text, iconPath string) {
 	// Dunst / mako / swaync: stack notifications from the same app so they
@@ -327,7 +365,13 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 		// mirroring the reference desktop's Notification::update(). Disable
 		// via `replace_notifications = false`.
 		if p.cfg.ReplaceNotifications {
-			if prevID, ok := p.notifIDs.Load(p.notifKey(devID, id)); ok {
+			key := p.notifKey(devID, id)
+			// Cancel-grace: if a cancel was deferred for this key, drop it so
+			// the popup is updated in place rather than closed and re-opened.
+			if t, ok := p.pendingCloses.LoadAndDelete(key); ok {
+				t.(*time.Timer).Stop()
+			}
+			if prevID, ok := p.notifIDs.Load(key); ok {
 				if s, ok := prevID.(string); ok && s != "" {
 					args = append(args, "-r", s)
 				}

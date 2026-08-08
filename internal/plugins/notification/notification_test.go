@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
@@ -52,6 +53,8 @@ func TestNotificationPlugin_Handle_Normal(t *testing.T) {
 
 func TestNotificationPlugin_Handle_Cancel(t *testing.T) {
 	p := newPlugin(t)
+	// Immediate close — no grace debounce for this test.
+	p.cfg.CancelGraceMS = 0
 	logger := zaptest.NewLogger(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 
@@ -240,5 +243,116 @@ func TestNotificationPlugin_ShowIconsGating(t *testing.T) {
 	p2.sendDesktopNotification(dev.ID(), "Pano Scrobbler", "id-2", "Song", "Artist", "/tmp/icon.png")
 	if got := f2.argFor(0, "-i"); got != "/tmp/icon.png" {
 		t.Fatalf("expected -i /tmp/icon.png with icons enabled, got %q", got)
+	}
+}
+
+// gdbusCalls returns the recorded CloseNotification invocations.
+func (f *fakeNotifier) gdbusCalls() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]string
+	for _, c := range f.calls {
+		if len(c) > 0 && c[0] == "gdbus" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func postAndCancel(t *testing.T, p *NotificationPlugin, dev device.Sender, id string) {
+	t.Helper()
+	p.sendDesktopNotification(dev.ID(), "Pano Scrobbler", id, "Song", "Artist", "")
+	body := NotificationBody{ID: id, IsCancel: true}
+	pkt, _ := protocol.NewPacket("kdeconnect.notification", body)
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle(cancel) returned error: %v", err)
+	}
+}
+
+func TestNotificationPlugin_CancelGrace_RePostWithinWindow(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	p.cfg.CancelGraceMS = 200
+	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
+	key := p.notifKey(dev.ID(), id)
+
+	// Post then cancel — the close is deferred, the popup stays open.
+	postAndCancel(t, p, dev, id)
+	if len(f.gdbusCalls()) != 0 {
+		t.Fatalf("expected no immediate close under cancel-grace, got %d gdbus calls", len(f.gdbusCalls()))
+	}
+	if v, ok := p.notifIDs.Load(key); !ok || v != "1" {
+		t.Fatalf("expected desktop id 1 retained during grace, got %v/%v", ok, v)
+	}
+
+	// Re-post within the window — must update in place, not close+reopen.
+	p.sendDesktopNotification(dev.ID(), "Pano Scrobbler", id, "Song", "Artist", "")
+	if r := f.argFor(1, "-r"); r != "1" {
+		t.Fatalf("expected -r 1 on re-post during grace, got %q", r)
+	}
+
+	// Wait past the grace window: the deferred close must have been cancelled.
+	time.Sleep(250 * time.Millisecond)
+	if len(f.gdbusCalls()) != 0 {
+		t.Fatalf("expected deferred close cancelled on re-post, got %d gdbus calls", len(f.gdbusCalls()))
+	}
+	if v, ok := p.notifIDs.Load(key); !ok || v != "2" {
+		t.Fatalf("expected desktop id 2 after in-place update, got %v/%v", ok, v)
+	}
+}
+
+func TestNotificationPlugin_CancelGrace_NoRePost(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	p.cfg.CancelGraceMS = 50
+	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
+	key := p.notifKey(dev.ID(), id)
+
+	postAndCancel(t, p, dev, id)
+	if len(f.gdbusCalls()) != 0 {
+		t.Fatalf("expected no immediate close under cancel-grace, got %d gdbus calls", len(f.gdbusCalls()))
+	}
+
+	// No re-post: after the grace window the popup is closed and the entry dropped.
+	waitFor(t, "deferred close", func() bool {
+		if len(f.gdbusCalls()) != 1 {
+			return false
+		}
+		_, ok := p.notifIDs.Load(key)
+		return !ok
+	})
+	if got := f.gdbusCalls()[0][len(f.gdbusCalls()[0])-1]; got != "1" {
+		t.Fatalf("expected gdbus close of desktop id 1, got %q", got)
+	}
+}
+
+func TestNotificationPlugin_CancelGraceDisabled(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	p.cfg.CancelGraceMS = 0
+	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
+	key := p.notifKey(dev.ID(), id)
+
+	postAndCancel(t, p, dev, id)
+	waitFor(t, "immediate gdbus close", func() bool {
+		if _, ok := p.notifIDs.Load(key); ok {
+			return false
+		}
+		return len(f.gdbusCalls()) == 1
+	})
+	if got := f.gdbusCalls()[0][len(f.gdbusCalls()[0])-1]; got != "1" {
+		t.Fatalf("expected gdbus close of desktop id 1, got %q", got)
 	}
 }

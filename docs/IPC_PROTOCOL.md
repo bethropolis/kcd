@@ -839,6 +839,15 @@ A notification was received from a device.
 > in place (`--replace-id`) so repeated updates collapse to one popup instead
 > of flooding the screen — mirroring the reference desktop's
 > `Notification::update()`. Disable with `replace_notifications = false`.
+>
+> When the phone **cancels** a notification (e.g. a scrobbler's now-playing
+> popup torn down on pause), the daemon defers closing the desktop popup by
+> `cancel_grace_ms` (default `1500`). If the same notification id is re-posted
+> within that window (rapid play/pause toggling), the popup is updated in
+> place instead of flickering closed and open. A real dismissal — no re-post —
+> closes the popup after the grace window. Set `cancel_grace_ms = 0` to close
+> immediately on cancel. The `notification.canceled` event is always emitted
+> immediately on the cancel packet, regardless of the grace window.
 
 #### `notification.canceled`
 

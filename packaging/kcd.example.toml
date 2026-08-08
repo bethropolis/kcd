@@ -211,6 +211,7 @@ suspend = "systemctl suspend"
 # skip_non_clearable = false    # skip non-dismissible notifications (media playback, etc.)
 # replace_notifications = true  # replace the same notification in place on re-posts (e.g. scrobble now-playing) instead of flooding new popups
 # show_icons = false            # show app icons on desktop popups (downloaded from the phone); off by default
+# cancel_grace_ms = 1500        # delay closing a popup after a phone cancel; a same-id re-post within this window updates in place instead of flickering (0 = close immediately)
 
 # ─── Share: file transfer settings ────────────────────────────────────────────
 

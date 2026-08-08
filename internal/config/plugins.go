@@ -51,6 +51,11 @@ type NotificationPluginConfig struct {
 	// kcd notifications render without an icon. When enabled, the phone's
 	// icon is downloaded (subject to FetchIcons) and reused across re-posts.
 	ShowIcons bool `toml:"show_icons"`
+	// CancelGraceMS defers closing the desktop popup after the phone cancels
+	// a notification. If the same notification is re-posted within the window
+	// (e.g. media now-playing toggling play/pause), the popup is updated in
+	// place instead of closing and re-opening. 0 closes immediately.
+	CancelGraceMS int `toml:"cancel_grace_ms"`
 }
 
 type ShareConfig struct {
@@ -127,6 +132,7 @@ func (c *NotificationPluginConfig) Defaults() {
 	c.MaxBodyLength = 0
 	c.ExpireMS = -1
 	c.ReplaceNotifications = true
+	c.CancelGraceMS = 1500
 }
 
 type ClipboardConfig struct {
