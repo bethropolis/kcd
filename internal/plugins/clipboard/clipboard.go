@@ -1,6 +1,7 @@
 package clipboard
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -117,19 +118,58 @@ func (p *ClipboardPlugin) getBackend() (clipboardBackend, string) {
 	return backend, disp
 }
 
-// clipboardCmd builds an exec.Cmd for a clipboard tool with a strict timeout
-// (a hung wl-paste must not stall the daemon) and with WAYLAND_DISPLAY injected
-// into the subprocess environment from the probed socket, so the tool works
-// even when the daemon's own environment lacks the variable.
-func (p *ClipboardPlugin) clipboardCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
-	ctx, cancel := context.WithTimeout(ctx, clipboardTimeout)
-	cmd := exec.CommandContext(ctx, name, args...)
+// clipboardCmd builds an exec.Cmd for a clipboard tool with WAYLAND_DISPLAY
+// injected into the subprocess environment from the probed socket, so the
+// tool works even when the daemon's own environment lacks the variable.
+// The command itself carries no deadline; runClipboard applies the timeout
+// around execution so a hung wl-paste can never stall the daemon.
+func (p *ClipboardPlugin) clipboardCmd(name string, args ...string) *exec.Cmd {
+	// A background context: the deadline lives in runClipboard, which binds
+	// a bounded context around execution so a hung tool is killed there.
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.WaitDelay = time.Second
 	if _, disp := p.getBackend(); disp != "" {
 		cmd.Env = append(os.Environ(), "WAYLAND_DISPLAY="+disp)
 	}
-	_ = cancel // the context's timer owns the deadline; cancel fires on its own
 	return cmd
+}
+
+// runClipboard runs a clipboard subprocess bounded by the clipboard timeout
+// and captures any stderr the tool prints. On failure the stderr is wrapped
+// into the returned error so the real reason (e.g. "No selection", a compositor
+// error) is visible instead of a bare "exit status N".
+func (p *ClipboardPlugin) runClipboard(ctx context.Context, cmd *exec.Cmd, stdin io.Reader) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, clipboardTimeout)
+	defer cancel()
+
+	timed := exec.CommandContext(tctx, cmd.Path, cmd.Args[1:]...)
+	timed.Env = cmd.Env
+	timed.WaitDelay = cmd.WaitDelay
+	timed.Stdin = stdin
+
+	var stderr bytes.Buffer
+	timed.Stderr = &stderr
+
+	out, err := timed.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return out, err
+}
+
+// isNoSelection reports whether a clipboard tool failure actually means the
+// clipboard is empty (nothing to push) rather than a real problem with the
+// tool or compositor. Matches wl-paste's and xclip's "nothing here" messages.
+func isNoSelection(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "no selection") ||
+		strings.Contains(s, "nothing is copied") ||
+		strings.Contains(s, "no data")
 }
 
 // clipboardTimeout bounds every wl-copy/wl-paste/xclip subprocess so a hung
@@ -195,20 +235,17 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 
 	// Spawning goroutine as Handlers must not block.
 	go func() {
-		var cmd *exec.Cmd
 		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			cmd = p.clipboardCmd(context.Background(), "wl-copy")
+			if _, err := p.runClipboard(context.Background(), p.clipboardCmd("wl-copy"), strings.NewReader(body.Content)); err != nil {
+				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
+			}
 		case backendX11:
-			cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard")
+			if _, err := p.runClipboard(context.Background(), p.clipboardCmd("xclip", "-selection", "clipboard"), strings.NewReader(body.Content)); err != nil {
+				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
+			}
 		default:
 			p.logger.Debug("clipboard: no backend available, dropping inbound copy")
-			return
-		}
-
-		cmd.Stdin = strings.NewReader(body.Content)
-		if err := cmd.Run(); err != nil {
-			p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
 		}
 	}()
 
@@ -279,15 +316,14 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		var cmd *exec.Cmd
 		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			cmd = p.clipboardCmd(context.Background(), "wl-copy", "--type", mimeType)
+			cmd = p.clipboardCmd("wl-copy", "--type", mimeType)
 		case backendX11:
-			cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard", "-t", mimeType, "-i")
+			cmd = p.clipboardCmd("xclip", "-selection", "clipboard", "-t", mimeType, "-i")
 		default:
 			return
 		}
-		cmd.Stdin = t
-		if out, err := cmd.CombinedOutput(); err != nil {
-			p.logger.Warn("clipboard file: failed to set clipboard", zap.Error(err), zap.String("output", string(out)))
+		if _, err := p.runClipboard(context.Background(), cmd, t); err != nil {
+			p.logger.Warn("clipboard file: failed to set clipboard", zap.Error(err))
 		}
 	}()
 
@@ -328,19 +364,29 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	var cmd *exec.Cmd
 	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
-		cmd = p.clipboardCmd(ctx, "wl-paste", "-n")
+		cmd = p.clipboardCmd("wl-paste", "-n")
 	case backendX11:
-		cmd = p.clipboardCmd(ctx, "xclip", "-selection", "clipboard", "-o")
+		cmd = p.clipboardCmd("xclip", "-selection", "clipboard", "-o")
 	default:
 		return fmt.Errorf("clipboard: no clipboard tool available")
 	}
 
-	out, err := cmd.Output()
+	out, err := p.runClipboard(ctx, cmd, nil)
 	if err != nil {
+		// An empty clipboard (fresh session, nothing copied yet) is not an
+		// error worth failing a push for — the tool exits non-zero with a
+		// "no selection"-style message. Treat it as nothing to push so the
+		// CLI and --watch don't spam errors until something is copied.
+		if isNoSelection(err) {
+			return nil
+		}
 		return err
 	}
 
 	content := string(out)
+	if content == "" {
+		return nil
+	}
 
 	p.mu.Lock()
 	// Skip if content matches what we last received from the phone (lastContent)
@@ -371,13 +417,13 @@ func (p *ClipboardPlugin) readClipboard() string {
 	var cmd *exec.Cmd
 	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
-		cmd = p.clipboardCmd(context.Background(), "wl-paste", "-n")
+		cmd = p.clipboardCmd("wl-paste", "-n")
 	case backendX11:
-		cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard", "-o")
+		cmd = p.clipboardCmd("xclip", "-selection", "clipboard", "-o")
 	default:
 		return ""
 	}
-	out, err := cmd.Output()
+	out, err := p.runClipboard(context.Background(), cmd, nil)
 	if err != nil {
 		p.logger.Debug("clipboard: read failed", zap.Error(err))
 		return ""

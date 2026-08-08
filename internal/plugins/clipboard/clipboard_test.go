@@ -2,8 +2,14 @@ package clipboard
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,7 +146,7 @@ func TestClipboardPlugin_CmdInjectsWaylandEnv(t *testing.T) {
 	p := NewClipboardPlugin(nil, zap.NewNop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-9" })
 
-	cmd := p.clipboardCmd(context.Background(), "wl-copy")
+	cmd := p.clipboardCmd("wl-copy")
 	found := false
 	for _, kv := range cmd.Env {
 		if kv == "WAYLAND_DISPLAY=wayland-9" {
@@ -153,18 +159,149 @@ func TestClipboardPlugin_CmdInjectsWaylandEnv(t *testing.T) {
 	}
 }
 
-func TestClipboardPlugin_CmdHasTimeout(t *testing.T) {
+func TestRunClipboard_Success(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+
+	out, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "printf hello"), nil)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if string(out) != "hello" {
+		t.Fatalf("expected 'hello', got %q", out)
+	}
+}
+
+func TestRunClipboard_WrapsStderr(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+
+	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "echo boom >&2; exit 2"), nil)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	// The real stderr reason must surface instead of a bare "exit status 2".
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected stderr in error, got %v", err)
+	}
+}
+
+func TestRunClipboard_TimesOutHungSubprocess(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+
+	// A hung subprocess must be killed by the 2s timeout — and not instantly
+	// (that would regress to the old premature-cancel bug).
+	start := time.Now()
+	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30"), nil)
+	if err == nil {
+		t.Fatal("expected a timeout error from a hung clipboard subprocess")
+	}
+	if elapsed := time.Since(start); elapsed < time.Second {
+		t.Fatalf("subprocess killed too early (instant cancel regression?), elapsed=%v", elapsed)
+	} else if elapsed > 3*clipboardTimeout {
+		t.Fatalf("expected subprocess killed within ~2s, took %v", elapsed)
+	}
+}
+
+func TestIsNoSelection(t *testing.T) {
+	for _, msg := range []string{
+		"exit status 1: wl-paste: No selection",
+		"exit status 1: Nothing is copied",
+		"exit status 1: Error: There is no data to be read",
+	} {
+		if !isNoSelection(fmt.Errorf("%s", msg)) {
+			t.Errorf("expected %q to be treated as no-selection", msg)
+		}
+	}
+	if isNoSelection(fmt.Errorf("exit status 1: failed to connect to compositor")) {
+		t.Error("compositor errors must remain hard failures")
+	}
+}
+
+// fakeSender records packets like a device without touching the network.
+type fakeSender struct {
+	sent []*protocol.Packet
+}
+
+func (f *fakeSender) ID() string                 { return "fake" }
+func (f *fakeSender) Name() string               { return "fake" }
+func (f *fakeSender) SetName(string)             {}
+func (f *fakeSender) State() device.PairingState { return device.StatePaired }
+func (f *fakeSender) SetState(device.PairingState) {
+}
+
+func (f *fakeSender) Send(p *protocol.Packet) error {
+	f.sent = append(f.sent, p)
+	return nil
+}
+func (f *fakeSender) IsConnected() bool           { return true }
+func (f *fakeSender) RemoteIP() net.IP            { return net.ParseIP("127.0.0.1") }
+func (f *fakeSender) PeerCert() *x509.Certificate { return nil }
+func (f *fakeSender) HasCapability(string) bool   { return false }
+func (f *fakeSender) UpdateBattery(int, bool)     {}
+func (f *fakeSender) GetBattery() (int, bool)     { return 0, false }
+
+// shimWith replaces PATH with a single scripted binary so Push exercises the
+// real command execution without depending on the host's clipboard tools.
+func shimWith(t *testing.T, name, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestPush_EmptyClipboardIsSoftFail(t *testing.T) {
 	p := NewClipboardPlugin(nil, zap.NewNop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
-	// A hung subprocess (sleep 30) must be killed by the 2s context timeout.
-	start := time.Now()
-	cmd := p.clipboardCmd(context.Background(), "sleep", "30")
-	if err := cmd.Run(); err == nil {
-		t.Fatal("expected a timeout error from a hung clipboard subprocess")
+	// Empty clipboard with nothing copied: wl-paste exits non-zero with a
+	// "no selection" diagnostic — push must not fail the CLI for this.
+	shimWith(t, "wl-paste", "#!/bin/sh\necho 'No selection' >&2\nexit 1\n")
+	dev := &fakeSender{}
+
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected soft pass on empty clipboard, got %v", err)
 	}
-	if wait := time.Since(start); wait > 3*clipboardTimeout {
-		t.Fatalf("expected subprocess killed within ~2s, took %v", wait)
+	if len(dev.sent) != 0 {
+		t.Fatalf("expected no packet for empty clipboard, got %d", len(dev.sent))
+	}
+}
+
+func TestPush_EmptyOutputSendsNothing(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
+
+	// Tool reports success but no content — still nothing to push.
+	shimWith(t, "wl-paste", "#!/bin/sh\nexit 0\n")
+	dev := &fakeSender{}
+
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(dev.sent) != 0 {
+		t.Fatalf("expected no packet for empty output, got %d", len(dev.sent))
+	}
+}
+
+func TestPush_SendsContent(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
+
+	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'hello world'\n")
+	dev := &fakeSender{}
+
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(dev.sent) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(dev.sent))
+	}
+	var body ClipboardBody
+	if err := json.Unmarshal(dev.sent[0].Body, &body); err != nil {
+		t.Fatalf("bad body: %v", err)
+	}
+	if body.Content != "hello world" {
+		t.Fatalf("expected 'hello world', got %q", body.Content)
 	}
 }
 
