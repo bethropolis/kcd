@@ -35,7 +35,8 @@ type ClipboardPlugin struct {
 	tlsConfig         *tls.Config
 	logger            *zap.Logger
 	backend           clipboardBackend
-	backendOnce       sync.Once
+	wlDisplay         string // WAYLAND_DISPLAY value for spawned subprocesses
+	probe             func() (clipboardBackend, string)
 	mu                sync.Mutex
 	lastContent       string // last content received from phone (inbound)
 	lastPushedContent string // last content sent to phone (outbound)
@@ -50,66 +51,90 @@ func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect
 		tlsConfig:     tlsConfig,
 		pushOnConnect: pushOnConnect,
 		logger:        logger.With(zap.String("plugin", "clipboard")),
+		probe:         probeBackend,
 	}
 }
 
-// detectBackend probes for a working clipboard tool (wl-paste → xclip)
-// and caches the result so the probe runs at most once.
+// probeBackend determines the usable clipboard backend (wl-paste/xclip) by
+// inspecting the environment and $XDG_RUNTIME_DIR. It is side-effect free and
+// unit-testable. The returned string is the WAYLAND_DISPLAY value to inject
+// into spawned subprocesses (empty for X11/unknown).
 //
-// Under systemd user services neither WAYLAND_DISPLAY nor DISPLAY
-// is typically set.  We probe by checking the display variable first,
-// then falling back to scanning $XDG_RUNTIME_DIR for a Wayland socket.
-func (p *ClipboardPlugin) detectBackend() clipboardBackend {
-	p.backendOnce.Do(func() {
-		wlDisplay := os.Getenv("WAYLAND_DISPLAY")
-		xDisplay := os.Getenv("DISPLAY")
+// A Wayland socket is preferred over DISPLAY: under a systemd user service
+// WAYLAND_DISPLAY is often unset at startup, and treating DISPLAY as the
+// backend on a Wayland session silently copies to the X clipboard where
+// Wayland-native apps never see it.
+func probeBackend() (clipboardBackend, string) {
+	rtDir := os.Getenv("XDG_RUNTIME_DIR")
 
-		switch {
-		case wlDisplay != "":
+	// Wayland: trust WAYLAND_DISPLAY only if its socket actually exists,
+	// otherwise scan the runtime dir for any live wayland-* socket.
+	if disp := os.Getenv("WAYLAND_DISPLAY"); disp != "" && rtDir != "" {
+		if _, err := os.Stat(filepath.Join(rtDir, disp)); err == nil {
 			if _, err := exec.LookPath("wl-paste"); err == nil {
-				p.backend = backendWayland
-				p.logger.Debug("clipboard: backend=wayland (WAYLAND_DISPLAY set)")
+				return backendWayland, disp
 			}
-		case xDisplay != "":
-			if _, err := exec.LookPath("xclip"); err == nil {
-				p.backend = backendX11
-				p.logger.Debug("clipboard: backend=x11 (DISPLAY set)")
-			}
-		default:
-			// Systemd user service — neither variable is set.
-			// Probe $XDG_RUNTIME_DIR for any Wayland socket.
-			rtDir := os.Getenv("XDG_RUNTIME_DIR")
-			hasWaylandSock := false
-			if rtDir != "" {
-				if entries, err := os.ReadDir(rtDir); err == nil {
-					for _, e := range entries {
-						if strings.HasPrefix(e.Name(), "wayland-") && !e.IsDir() {
-							hasWaylandSock = true
-							break
-						}
+		}
+	}
+	if rtDir != "" {
+		if entries, err := os.ReadDir(rtDir); err == nil {
+			for _, e := range entries {
+				name := e.Name()
+				if !e.IsDir() && strings.HasPrefix(name, "wayland-") {
+					if _, err := exec.LookPath("wl-paste"); err == nil {
+						return backendWayland, name
 					}
 				}
 			}
-			if hasWaylandSock {
-				if _, err := exec.LookPath("wl-paste"); err == nil {
-					p.backend = backendWayland
-					p.logger.Debug("clipboard: backend=wayland (socket probe)")
-				}
-			}
-			if p.backend == backendUnknown {
-				if _, err := exec.LookPath("xclip"); err == nil {
-					p.backend = backendX11
-					p.logger.Debug("clipboard: backend=x11 (fallback)")
-				}
-			}
 		}
+	}
 
-		if p.backend == backendUnknown {
-			p.logger.Warn("clipboard: no clipboard tool found (install wl-clipboard or xclip)")
+	// X11 fallback.
+	if os.Getenv("DISPLAY") != "" {
+		if _, err := exec.LookPath("xclip"); err == nil {
+			return backendX11, ""
 		}
-	})
-	return p.backend
+	}
+	return backendUnknown, ""
 }
+
+// getBackend returns the cached backend, re-probing while it is unknown so an
+// early failed probe (compositor not up yet, env not imported) does not stick
+// for the lifetime of the process. Only non-unknown results are cached.
+func (p *ClipboardPlugin) getBackend() (clipboardBackend, string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.backend != backendUnknown {
+		return p.backend, p.wlDisplay
+	}
+	backend, disp := p.probe()
+	if backend != backendUnknown {
+		p.backend = backend
+		p.wlDisplay = disp
+		p.logger.Debug("clipboard: backend detected",
+			zap.Int("backend", int(backend)), zap.String("wl_display", disp))
+	}
+	return backend, disp
+}
+
+// clipboardCmd builds an exec.Cmd for a clipboard tool with a strict timeout
+// (a hung wl-paste must not stall the daemon) and with WAYLAND_DISPLAY injected
+// into the subprocess environment from the probed socket, so the tool works
+// even when the daemon's own environment lacks the variable.
+func (p *ClipboardPlugin) clipboardCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
+	ctx, cancel := context.WithTimeout(ctx, clipboardTimeout)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = time.Second
+	if _, disp := p.getBackend(); disp != "" {
+		cmd.Env = append(os.Environ(), "WAYLAND_DISPLAY="+disp)
+	}
+	_ = cancel // the context's timer owns the deadline; cancel fires on its own
+	return cmd
+}
+
+// clipboardTimeout bounds every wl-copy/wl-paste/xclip subprocess so a hung
+// clipboard tool cannot block clipboard sync indefinitely.
+const clipboardTimeout = 2 * time.Second
 
 // ClipboardBody represents the content of a clipboard packet.
 type ClipboardBody struct {
@@ -171,12 +196,13 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	// Spawning goroutine as Handlers must not block.
 	go func() {
 		var cmd *exec.Cmd
-		switch p.detectBackend() {
+		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			cmd = exec.CommandContext(context.Background(), "wl-copy")
+			cmd = p.clipboardCmd(context.Background(), "wl-copy")
 		case backendX11:
-			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
+			cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard")
 		default:
+			p.logger.Debug("clipboard: no backend available, dropping inbound copy")
 			return
 		}
 
@@ -251,11 +277,11 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		defer t.Close()
 
 		var cmd *exec.Cmd
-		switch p.detectBackend() {
+		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			cmd = exec.CommandContext(context.Background(), "wl-copy", "--type", mimeType)
+			cmd = p.clipboardCmd(context.Background(), "wl-copy", "--type", mimeType)
 		case backendX11:
-			cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-t", mimeType, "-i")
+			cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard", "-t", mimeType, "-i")
 		default:
 			return
 		}
@@ -300,11 +326,11 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
 func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	var cmd *exec.Cmd
-	switch p.detectBackend() {
+	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
-		cmd = exec.CommandContext(ctx, "wl-paste", "-n")
+		cmd = p.clipboardCmd(ctx, "wl-paste", "-n")
 	case backendX11:
-		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
+		cmd = p.clipboardCmd(ctx, "xclip", "-selection", "clipboard", "-o")
 	default:
 		return fmt.Errorf("clipboard: no clipboard tool available")
 	}
@@ -343,11 +369,11 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 
 func (p *ClipboardPlugin) readClipboard() string {
 	var cmd *exec.Cmd
-	switch p.detectBackend() {
+	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
-		cmd = exec.CommandContext(context.Background(), "wl-paste", "-n")
+		cmd = p.clipboardCmd(context.Background(), "wl-paste", "-n")
 	case backendX11:
-		cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard", "-o")
+		cmd = p.clipboardCmd(context.Background(), "xclip", "-selection", "clipboard", "-o")
 	default:
 		return ""
 	}
