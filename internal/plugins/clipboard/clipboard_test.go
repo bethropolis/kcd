@@ -162,7 +162,7 @@ func TestClipboardPlugin_CmdInjectsWaylandEnv(t *testing.T) {
 func TestRunClipboard_Success(t *testing.T) {
 	p := NewClipboardPlugin(nil, zap.NewNop(), false)
 
-	out, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "printf hello"), nil)
+	out, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "printf hello"))
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -174,7 +174,7 @@ func TestRunClipboard_Success(t *testing.T) {
 func TestRunClipboard_WrapsStderr(t *testing.T) {
 	p := NewClipboardPlugin(nil, zap.NewNop(), false)
 
-	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "echo boom >&2; exit 2"), nil)
+	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "echo boom >&2; exit 2"))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -190,7 +190,7 @@ func TestRunClipboard_TimesOutHungSubprocess(t *testing.T) {
 	// A hung subprocess must be killed by the 2s timeout — and not instantly
 	// (that would regress to the old premature-cancel bug).
 	start := time.Now()
-	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30"), nil)
+	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30"))
 	if err == nil {
 		t.Fatal("expected a timeout error from a hung clipboard subprocess")
 	}
@@ -302,6 +302,53 @@ func TestPush_SendsContent(t *testing.T) {
 	}
 	if body.Content != "hello world" {
 		t.Fatalf("expected 'hello world', got %q", body.Content)
+	}
+}
+
+// TestPush_DoesNotEchoReceivedClipboard guards the echo bug: after the phone
+// pushes content, the local clipboard holds it (possibly with a trailing
+// newline appended by wl-copy). A --watch-triggered Push must NOT send that
+// same content straight back to the phone.
+func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
+	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
+
+	// Phone sent "hello"; wl-copy stored "hello\n" (no -n); wl-paste reads it
+	// back with the trailing newline still attached.
+	p.mu.Lock()
+	p.lastContent = "hello"
+	p.mu.Unlock()
+	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'hello\\n'\n")
+	dev := &fakeSender{}
+
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(dev.sent) != 0 {
+		t.Fatalf("expected no echo packet, got %d", len(dev.sent))
+	}
+
+	// Exact round-trip (what wl-copy -n produces) must also be suppressed.
+	p.mu.Lock()
+	p.lastContent = "new clip"
+	p.mu.Unlock()
+	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'new clip'\n")
+	dev = &fakeSender{}
+
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(dev.sent) != 0 {
+		t.Fatalf("expected no echo packet, got %d", len(dev.sent))
+	}
+
+	// Genuinely different content must still be pushed.
+	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'something else'\n")
+	if err := Push(context.Background(), dev, p); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(dev.sent) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(dev.sent))
 	}
 }
 

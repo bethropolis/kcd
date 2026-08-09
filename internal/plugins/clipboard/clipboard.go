@@ -138,14 +138,14 @@ func (p *ClipboardPlugin) clipboardCmd(name string, args ...string) *exec.Cmd {
 // and captures any stderr the tool prints. On failure the stderr is wrapped
 // into the returned error so the real reason (e.g. "No selection", a compositor
 // error) is visible instead of a bare "exit status N".
-func (p *ClipboardPlugin) runClipboard(ctx context.Context, cmd *exec.Cmd, stdin io.Reader) ([]byte, error) {
+func (p *ClipboardPlugin) runClipboard(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 	tctx, cancel := context.WithTimeout(ctx, clipboardTimeout)
 	defer cancel()
 
 	timed := exec.CommandContext(tctx, cmd.Path, cmd.Args[1:]...)
 	timed.Env = cmd.Env
 	timed.WaitDelay = cmd.WaitDelay
-	timed.Stdin = stdin
+	timed.Stdin = nil
 
 	var stderr bytes.Buffer
 	timed.Stderr = &stderr
@@ -157,6 +157,26 @@ func (p *ClipboardPlugin) runClipboard(ctx context.Context, cmd *exec.Cmd, stdin
 		}
 	}
 	return out, err
+}
+
+// runCopy writes clipboard data via wl-copy/xclip -i. Unlike runClipboard it
+// must NOT capture stdout/stderr through os.Pipe: wl-copy forks a persistent
+// background manager that inherits the pipe fds, so the pipe never EOFs and
+// cmd.Output()/cmd.Wait() would block until the manager dies. Pointing the
+// child's fds at the null device instead makes Run() return as soon as the
+// forking wl-copy process exits. wl-paste never forks, which is why the read
+// path above can still use pipes.
+func (p *ClipboardPlugin) runCopy(ctx context.Context, cmd *exec.Cmd, stdin io.Reader) error {
+	tctx, cancel := context.WithTimeout(ctx, clipboardTimeout)
+	defer cancel()
+
+	timed := exec.CommandContext(tctx, cmd.Path, cmd.Args[1:]...)
+	timed.Env = cmd.Env
+	timed.WaitDelay = cmd.WaitDelay
+	timed.Stdin = stdin
+	timed.Stdout = nil
+	timed.Stderr = nil
+	return timed.Run()
 }
 
 // isNoSelection reports whether a clipboard tool failure actually means the
@@ -237,11 +257,15 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	go func() {
 		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			if _, err := p.runClipboard(context.Background(), p.clipboardCmd("wl-copy"), strings.NewReader(body.Content)); err != nil {
+			// -n: wl-copy appends a trailing newline by default. Without it the
+			// local selection becomes content+"\n", which differs from the
+			// inbound lastContent guard and makes --watch echo the phone's own
+			// clipboard straight back to it.
+			if err := p.runCopy(context.Background(), p.clipboardCmd("wl-copy", "-n"), strings.NewReader(body.Content)); err != nil {
 				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
 			}
 		case backendX11:
-			if _, err := p.runClipboard(context.Background(), p.clipboardCmd("xclip", "-selection", "clipboard"), strings.NewReader(body.Content)); err != nil {
+			if err := p.runCopy(context.Background(), p.clipboardCmd("xclip", "-selection", "clipboard"), strings.NewReader(body.Content)); err != nil {
 				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
 			}
 		default:
@@ -316,13 +340,13 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		var cmd *exec.Cmd
 		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			cmd = p.clipboardCmd("wl-copy", "--type", mimeType)
+			cmd = p.clipboardCmd("wl-copy", "-n", "--type", mimeType)
 		case backendX11:
 			cmd = p.clipboardCmd("xclip", "-selection", "clipboard", "-t", mimeType, "-i")
 		default:
 			return
 		}
-		if _, err := p.runClipboard(context.Background(), cmd, t); err != nil {
+		if err := p.runCopy(context.Background(), cmd, t); err != nil {
 			p.logger.Warn("clipboard file: failed to set clipboard", zap.Error(err))
 		}
 	}()
@@ -371,7 +395,7 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 		return fmt.Errorf("clipboard: no clipboard tool available")
 	}
 
-	out, err := p.runClipboard(ctx, cmd, nil)
+	out, err := p.runClipboard(ctx, cmd)
 	if err != nil {
 		// An empty clipboard (fresh session, nothing copied yet) is not an
 		// error worth failing a push for — the tool exits non-zero with a
@@ -395,7 +419,11 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	// lastContent guard: prevents sending the phone's own content back.
 	// lastPushedContent guard: prevents duplicate pushes when the local
 	// clipboard hasn't changed between two Push calls.
-	if content == p.lastContent || content == p.lastPushedContent {
+	//
+	// Comparisons are normalized of trailing newlines so a stray \n appended
+	// by some clipboard tooling cannot silently disable the guard and cause
+	// an echo of the phone's own content back to it.
+	if normClip(content) == normClip(p.lastContent) || normClip(content) == normClip(p.lastPushedContent) {
 		p.mu.Unlock()
 		return nil
 	}
@@ -413,6 +441,13 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	return dev.Send(pkt)
 }
 
+// normClip strips trailing newlines so content read back from wl-copy/xclip
+// compares equal to the raw content we stored, regardless of which tool
+// appended (or not) a trailing newline.
+func normClip(s string) string {
+	return strings.TrimRight(s, "\n")
+}
+
 func (p *ClipboardPlugin) readClipboard() string {
 	var cmd *exec.Cmd
 	switch backend, _ := p.getBackend(); backend {
@@ -423,7 +458,7 @@ func (p *ClipboardPlugin) readClipboard() string {
 	default:
 		return ""
 	}
-	out, err := p.runClipboard(context.Background(), cmd, nil)
+	out, err := p.runClipboard(context.Background(), cmd)
 	if err != nil {
 		p.logger.Debug("clipboard: read failed", zap.Error(err))
 		return ""
