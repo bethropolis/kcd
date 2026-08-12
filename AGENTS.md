@@ -55,6 +55,7 @@ These structural constraints must hold at all times:
 | Device state (persisted pairs) | `~/.local/state/kcd/devices.json` (`$XDG_STATE_HOME/kcd/devices.json`) |
 | TLS cert / key | `~/.config/kcd/cert.pem`, `~/.config/kcd/key.pem` |
 | IPC Unix socket | `/run/user/<uid>/kcd/kcd.sock` (`$XDG_RUNTIME_DIR/kcd/kcd.sock`) |
+| Album art cache | `~/.cache/kcd/art/` (`$XDG_CACHE_HOME/kcd/art`) — resolved `kdeconnect://` art URIs, keyed by `kdeArtHash` |
 | Downloaded files | `~/Downloads/kcd/` (overridable via `download_dir` in config) |
 | systemd user unit | `~/.config/systemd/user/kcd.service` |
 

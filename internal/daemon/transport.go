@@ -17,6 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// reconnectFlapThreshold is the minimum connection lifetime for it to count
+// as genuinely stable. A connection that drops sooner is treated as a flap
+// (e.g. a peer that keeps dying), so the auto-reconnect backoff continues
+// escalating instead of resetting to the 2s floor on every drop.
+const reconnectFlapThreshold = 15 * time.Second
+
 // DialDevice manually connects to a device at the given IP and port.
 func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
@@ -227,6 +233,14 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		if lastIP == nil {
 			return
 		}
+		// A connection that lasted long enough was genuinely stable, so the
+		// next drop should start the backoff over. A flap (connection dies
+		// shortly after a successful dial, e.g. a dying peer) keeps the
+		// counter so the backoff keeps escalating instead of hammering at the
+		// 2s floor forever.
+		if sender.ConnectionAge() >= reconnectFlapThreshold {
+			sender.ResetReconnectAttempt()
+		}
 		// Prevent multiple concurrent reconnect goroutines for the same device.
 		if !sender.TryReconnect() {
 			logger.Debug("auto-reconnect: already reconnecting, skipping",
@@ -260,7 +274,7 @@ func reconnectWithBackoff(
 	logger *zap.Logger,
 ) {
 	const maxBackoff = 5 * time.Minute
-	attempt := 0
+	attempt := dev.ReconnectAttempt()
 
 	defer dev.ReconnectDone()
 
@@ -321,6 +335,11 @@ func reconnectWithBackoff(
 				zap.String("device_id", dev.ID()),
 				zap.Int("attempts", attempt+1),
 			)
+			// Persist the counter before returning: if this connection flaps,
+			// the next reconnect cycle continues backing off rather than
+			// resetting to the 2s floor. onDisconnect resets it if the
+			// connection proved stable.
+			dev.SetReconnectAttempt(attempt + 1)
 			return
 		}
 

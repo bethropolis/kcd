@@ -128,7 +128,7 @@ var watchCmd = &cli.Command{
 			err := cl.Watch(ctx, c.StringSlice("events"), ch)
 
 			// If err != nil, the connection failed or disconnected
-			if !isJSON && err != nil {
+			if err != nil {
 				if err == context.Canceled {
 					return nil
 				}

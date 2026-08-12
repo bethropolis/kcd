@@ -245,7 +245,6 @@ def on_mpris(device_id, payload):
         print(f'Now playing: {payload["title"]} by {payload["artist"]}')
     else:
         print("Paused/stopped")
-
 w.start()
 
 # Keep main thread alive
@@ -267,10 +266,27 @@ except KeyboardInterrupt:
 | `notification` | Push notification from device |
 | `share.progress` | File transfer progress update |
 | `share.complete` | File transfer finished |
-| `mpris.update` | Now-playing state changed |
+| `mpris.update` | Now-playing state changed (deduplicated — only on real changes) |
 | `sms.incoming` | SMS/MMS received |
 | `pair.requested` | Remote device wants to pair |
 | `ping.received` | Ping from device |
+
+> **Freshness:** the daemon re-requests now-playing from devices with an
+> actively-playing player every 5 seconds, so a pure-push client (a widget watching the
+> event stream, with no polling) receives the current track within one poll
+> interval of subscribing — including mid-track mount, thanks to the initial
+> event dump. Events are deduplicated: `mpris.update` only fires when the
+> state actually changed, so the stream stays quiet between track changes.
+> Stopped/paused players are not polled, and when the phone removes a player
+> from its `playerList` (session destroyed) the cached state is dropped with
+> an empty `mpris.update` — showing "no media playing".
+
+> **Album art:** `mpris.update` payloads (and `kcd mpris status --json`)
+> expose `albumArtUrl` as a loadable `file://` path once the daemon has
+> fetched the art from the phone into `$XDG_CACHE_HOME/kcd/art/`. If the
+> art is still being fetched or fails, the raw `kdeconnect:/artUri?...`
+> URI is emitted instead — treat anything that isn't `http(s)://` or
+> `file://` as "no art available" and show a placeholder.
 
 See [`IPC_PROTOCOL.md §5`](IPC_PROTOCOL.md#5-event-types) for the full list.
 

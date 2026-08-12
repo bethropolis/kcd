@@ -48,6 +48,8 @@ type MPRISPlugin struct {
 
 	pauseMusic        bool
 	callPausedPlayers []string // names of local players paused during a call
+
+	artCache *ArtCache
 }
 
 type trackIdentity struct {
@@ -83,6 +85,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		remoteStateTimes:  make(map[string]time.Time),
 		positionTrackers:  make(map[string]*remotePositionTracker),
 		callPausedPlayers: make([]string, 0),
+		artCache:          NewArtCache(logger),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
@@ -91,6 +94,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 	p.watchCancel = cancel
 	p.watching = true
 	p.startWatcher(watchCtx)
+	p.startRemoteStatePoller(watchCtx)
 
 	// Subscribe to telephony events for pause-music-on-call.
 	if p.pauseMusic && p.dbus != nil {
@@ -128,6 +132,9 @@ type MPRISRequest struct {
 
 	// Album art
 	AlbumArtUrl string `json:"albumArtUrl,omitempty"`
+
+	// Set when this packet carries album art bytes over a side channel.
+	TransferringAlbumArt bool `json:"transferringAlbumArt,omitempty"`
 
 	// Player list from remote device
 	PlayerList []string `json:"playerList,omitempty"`
@@ -206,13 +213,48 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
+	// Inbound album art payload — the phone responds to requestAlbumArt
+	// with a side-channel transfer carrying the art bytes.
+	if body.TransferringAlbumArt && pkt.PayloadSize > 0 && pkt.PayloadTransferInfo != nil {
+		go p.receiveAlbumArt(ctx, dev, body.Player, body.AlbumArtUrl,
+			pkt.PayloadSize, pkt.PayloadTransferInfo.Port)
+		return nil
+	}
+
 	if body.RequestPlayerList {
 		return p.sendPlayerList(dev)
 	}
 
-	// Incoming playerList from remote device — request status for each player
-	if len(body.PlayerList) > 0 {
+	// Incoming playerList from remote device — prune players that no longer
+	// exist (their media session was destroyed) and request fresh status for
+	// the ones still around.
+	if body.PlayerList != nil {
 		p.logger.Debug("mpris: received player list from remote", zap.Strings("players", body.PlayerList))
+		pruned := false
+		p.mu.Lock()
+		if prev := p.remoteStates[dev.ID()]; prev != nil {
+			inList := false
+			for _, name := range body.PlayerList {
+				if name == prev.Player {
+					inList = true
+					break
+				}
+			}
+			if !inList {
+				delete(p.remoteStates, dev.ID())
+				delete(p.remoteStateTimes, dev.ID())
+				delete(p.positionTrackers, dev.ID())
+				pruned = true
+			}
+		}
+		p.mu.Unlock()
+
+		if pruned && p.bus != nil {
+			// The tracked player's session is gone — emit an empty update so
+			// watchers fall back to "no media playing" for this device.
+			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), &NowPlaying{})
+		}
+
 		for _, player := range body.PlayerList {
 			player := player
 			go p.requestPlayerStatus(dev, player)
@@ -274,8 +316,21 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		p.remoteStates[dev.ID()] = state
 		p.remoteStateTimes[dev.ID()] = time.Now()
 		p.mu.Unlock()
+
+		// Request art bytes from the phone when the advertsed album art is
+		// a kdeconnect:// URI we have not cached yet. Resolve any already
+		// cached art before publishing so watch clients get a loadable URL.
+		if p.artCache != nil && p.artCache.Resolve(state.AlbumArtUrl) == "" {
+			go p.requestAlbumArt(dev, state.Player, state.AlbumArtUrl)
+		}
 		if shouldPublish && p.bus != nil {
-			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+			pub := state.DeepCopy()
+			if p.artCache != nil {
+				if resolved := p.artCache.Resolve(pub.AlbumArtUrl); resolved != "" {
+					pub.AlbumArtUrl = resolved
+				}
+			}
+			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), pub)
 		}
 		return nil
 	}
@@ -474,6 +529,87 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 }
 
+// requestAlbumArt asks the remote device to stream the album art bytes
+// referenced by a kdeconnect:/artUri URI over a side channel.
+func (p *MPRISPlugin) requestAlbumArt(dev device.Sender, player, artUrl string) {
+	if player == "" || artUrl == "" {
+		return
+	}
+	p.mu.Lock()
+	reqKey := "req|" + dev.ID() + "|" + artUrl
+	if lastReq, exists := p.artRequests[reqKey]; exists && time.Since(lastReq) < 10*time.Second {
+		p.mu.Unlock()
+		return
+	}
+	p.artRequests[reqKey] = time.Now()
+	p.mu.Unlock()
+
+	body := MPRISRequest{
+		Player:      player,
+		AlbumArtUrl: artUrl,
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
+	if err != nil {
+		return
+	}
+	if err := dev.Send(pkt); err != nil {
+		p.logger.Debug("mpris: album art request failed", zap.Error(err))
+	}
+}
+
+// receiveAlbumArt streams an inbound album art payload into the cache
+// and re-publishes the device state with a resolved file:// URL so watch
+// clients and kcd mpris status surface the loadable location.
+func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, player, artUrl string, size int64, port int) {
+	remoteIP := dev.RemoteIP()
+	if remoteIP == nil {
+		return
+	}
+	if p.artCache == nil || size <= 0 || size > maxAlbumArtBytes {
+		return
+	}
+
+	p.logger.Debug("mpris: receiving album art from remote",
+		zap.String("player", player),
+		zap.String("device_id", dev.ID()),
+		zap.Int64("size", size))
+
+	tmp, err := os.CreateTemp(p.artCache.Dir(), ".art-*")
+	if err != nil {
+		p.logger.Warn("mpris: failed to create temp file for album art", zap.Error(err))
+		return
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	// The Handle ctx is canceled as soon as Handle returns; use an
+	// independent context so the side-channel dial isn't aborted.
+	dlCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, nil, p.logger); err != nil {
+		p.logger.Warn("mpris: album art transfer failed", zap.Error(err))
+		return
+	}
+
+	fileURL, err := p.artCache.Commit(artUrl, tmpPath)
+	if err != nil {
+		p.logger.Warn("mpris: failed to cache album art", zap.Error(err))
+		return
+	}
+
+	p.mu.Lock()
+	state := p.remoteStates[dev.ID()]
+	if state != nil {
+		state = state.DeepCopy()
+		state.AlbumArtUrl = fileURL
+	}
+	p.mu.Unlock()
+	if state != nil && p.bus != nil {
+		p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+	}
+}
+
 func (p *MPRISPlugin) OnConnect(dev device.Sender) {
 	p.logger.Info("mpris: device connected, requesting player list", zap.String("device_id", dev.ID()))
 	go p.requestPlayerListPeriodic(dev)
@@ -496,6 +632,64 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 		return
 	}
 	p.requestPlayerList(dev)
+}
+
+// remoteStatePollInterval is how often the daemon re-requests now-playing
+// from devices with an active remote player. Clients are then pure-push:
+// fresh state arrives within one interval of connect, and position stays
+// current without any client-side polling.
+const remoteStatePollInterval = 5 * time.Second
+
+// startRemoteStatePoller periodically re-requests now-playing from every
+// connected device that has a known active player. The responses flow back
+// through Handle, where shouldPublishRemoteState dedupes them, so an
+// mpris.update is only republished when the state actually changes — not
+// on every poll. This closes the "watch client misses mid-track state"
+// gap from the initial dump's 10s freshness gate.
+func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(remoteStatePollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				p.pollRemoteStates()
+			}
+		}
+	}()
+}
+
+// pollRemoteStates requests a now-playing refresh from devices that have a
+// cached, actively-playing player. Devices without a cached state (never
+// reported a player) or whose player is stopped/paused are skipped — stopped
+// players are intentionally left to go stale instead of keeping a ghost track
+// perpetually fresh.
+func (p *MPRISPlugin) pollRemoteStates() {
+	p.mu.RLock()
+	type target struct {
+		dev    device.Sender
+		player string
+	}
+	var targets []target
+	for id, dev := range p.devices {
+		if !dev.IsConnected() {
+			continue
+		}
+		state := p.remoteStates[id]
+		if state == nil || state.Player == "" || !state.IsPlaying {
+			continue
+		}
+		targets = append(targets, target{dev: dev, player: state.Player})
+	}
+	p.mu.RUnlock()
+
+	for _, t := range targets {
+		if err := p.requestPlayerStatus(t.dev, t.player); err != nil {
+			p.logger.Debug("mpris: state poll request failed", zap.Error(err))
+		}
+	}
 }
 
 func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
@@ -657,6 +851,7 @@ func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 		return nil
 	}
 	copy := state.DeepCopy()
+	copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
 	if tracker, ok := p.positionTrackers[deviceID]; ok && tracker.playing {
 		elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 		copy.Pos = tracker.lastPosition + elapsed
@@ -687,6 +882,7 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 			continue
 		}
 		copy := state.DeepCopy()
+		copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
 		if tracker, ok := p.positionTrackers[id]; ok && tracker.playing {
 			elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 			copy.Pos = tracker.lastPosition + elapsed
@@ -694,6 +890,18 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 		result[id] = copy
 	}
 	return result
+}
+
+// resolveArtURL maps a cached kdeconnect:// album art URI to a loadable
+// file:// URL. Non-kdeconnect URIs and not-yet-cached art pass through.
+func (p *MPRISPlugin) resolveArtURL(raw string) string {
+	if raw == "" || p.artCache == nil {
+		return raw
+	}
+	if resolved := p.artCache.Resolve(raw); resolved != "" {
+		return resolved
+	}
+	return raw
 }
 
 // watchTelephony subscribes to telephony events and pauses/resumes

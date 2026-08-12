@@ -1,9 +1,13 @@
 [Unit]
 Description=kcd — Headless KDE Connect Daemon
 Documentation=https://github.com/bethropolis/kcd
-# Wait for a network interface to be up before starting.
-After=network-online.target
+# Wait for the graphical session: the compositor exports WAYLAND_DISPLAY into
+# the systemd user manager at startup, and kcd's clipboard plugin probes the
+# Wayland socket to spawn wl-copy/wl-paste. Starting at default.target means
+# kcd boots before the compositor and misses the display environment.
+After=network-online.target graphical-session.target
 Wants=network-online.target
+PartOf=graphical-session.target
 
 [Service]
 # sd_notify: systemd waits for the daemon to send READY=1 before marking
@@ -43,4 +47,4 @@ TasksMax=64
 PrivateNetwork=false
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

@@ -28,12 +28,14 @@ type NotificationPlugin struct {
 	bus            *events.Bus
 	tlsConfig      *tls.Config
 	logger         *zap.Logger
-	notifIDs       sync.Map // maps body.ID (string) -> desktop notify-send ID (string)
+	notifIDs       sync.Map // maps deviceID|body.ID -> desktop notify-send ID (string)
+	pendingCloses  sync.Map // maps deviceID|body.ID -> *time.Timer (deferred close for cancel-grace)
 	iconDir        string   // temp dir for cached notification icons
 	cfg            config.NotificationPluginConfig
 	canCloseNotifs bool // whether notify-send supports --print-id
 	mu             sync.RWMutex
 	filters        config.NotificationConfig
+	newExec        func(ctx context.Context, name string, args ...string) *exec.Cmd
 }
 
 // NewNotificationPlugin creates a NotificationPlugin.
@@ -45,6 +47,7 @@ func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus,
 		bus:       bus,
 		tlsConfig: tlsConfig,
 		logger:    logger.With(zap.String("plugin", "notification")),
+		newExec:   exec.CommandContext,
 	}
 
 	// Probe --print-id support by checking --help output.
@@ -68,6 +71,12 @@ func (p *NotificationPlugin) Close() {
 	if p.iconDir != "" {
 		_ = os.RemoveAll(p.iconDir)
 	}
+	p.pendingCloses.Range(func(k, v any) bool {
+		if t, ok := v.(*time.Timer); ok {
+			t.Stop()
+		}
+		return true
+	})
 }
 
 // SetFilters atomically replaces the per-app notification filter map.
@@ -128,15 +137,34 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	// Handle cancellation — close the corresponding desktop notification.
 	if body.IsCancel {
 		if body.ID != "" {
-			if desktopID, ok := p.notifIDs.LoadAndDelete(body.ID); ok {
-				go func() {
-					_ = exec.CommandContext(context.Background(), "gdbus", "call", "--session",
-						"--dest", "org.freedesktop.Notifications",
-						"--object-path", "/org/freedesktop/Notifications",
-						"--method", "org.freedesktop.Notifications.CloseNotification",
-						desktopID.(string),
-					).Run()
-				}()
+			key := p.notifKey(dev.ID(), body.ID)
+			if desktopID, ok := p.notifIDs.Load(key); ok {
+				if p.cfg.CancelGraceMS > 0 {
+					// Cancel-grace: hold the popup open so a same-id re-post
+					// (media now-playing toggling play/pause) updates it in
+					// place instead of closing and re-opening. If no re-post
+					// arrives, close after the grace window.
+					if t, ok := p.pendingCloses.Load(key); ok {
+						t.(*time.Timer).Stop()
+					}
+					want := desktopID.(string)
+					p.pendingCloses.Store(key, time.AfterFunc(
+						time.Duration(p.cfg.CancelGraceMS)*time.Millisecond,
+						func() {
+							if cur, ok := p.notifIDs.LoadAndDelete(key); ok {
+								// Only close the popup we scheduled — if a
+								// re-post replaced it, leave the new one.
+								if cur.(string) == want {
+									p.closeNotification(want)
+								}
+							}
+							p.pendingCloses.Delete(key)
+						},
+					))
+				} else {
+					p.notifIDs.Delete(key)
+					p.closeNotification(desktopID.(string))
+				}
 			}
 		}
 		if p.bus != nil {
@@ -212,11 +240,20 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 
 	// Handlers must not block — all I/O in a goroutine.
 	go func() {
-		iconPath := p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon)
-		p.sendDesktopNotification(appName, body.ID, body.Title, text, iconPath)
+		var iconPath string
+		if p.cfg.ShowIcons {
+			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon)
+		}
+		p.sendDesktopNotification(dev.ID(), appName, body.ID, body.Title, text, iconPath)
 	}()
 
 	return nil
+}
+
+// notifKey scopes a notification id to its device so two paired phones with
+// colliding Android notification keys don't replace each other's popups.
+func (p *NotificationPlugin) notifKey(devID, id string) string {
+	return devID + "|" + id
 }
 
 // fetchIcon downloads the notification icon payload and returns the path to the
@@ -229,7 +266,7 @@ func (p *NotificationPlugin) fetchIcon(
 	size int64,
 	hasIcon bool,
 ) string {
-	if !hasIcon || !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
+	if !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
 		// Fall back to icon name derived from app name.
 		return ""
 	}
@@ -239,9 +276,16 @@ func (p *NotificationPlugin) fetchIcon(
 	safeName := nonAlphaNumeric.ReplaceAllString(appName, "_")
 	iconPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png", safeName, notifID))
 
-	// Already cached from a previous notification from this app.
+	// Reuse the cached icon even when the phone re-posts the notification
+	// without an icon payload (Android only sends the bytes when the icon
+	// hash changes). Without this, every re-post would fall back to a theme
+	// icon name that doesn't exist, showing a placeholder image.
 	if _, err := os.Stat(iconPath); err == nil {
 		return iconPath
+	}
+
+	if !hasIcon {
+		return ""
 	}
 
 	addr := fmt.Sprintf("%s:%d", remoteIP, port)
@@ -271,19 +315,23 @@ func (p *NotificationPlugin) fetchIcon(
 	return iconPath
 }
 
-// sendDesktopNotification calls notify-send with the collected parameters.
-func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, iconPath string) {
-	// Derive a fallback icon name from the app name when no payload icon is available.
-	iconArg := strings.ToLower(strings.ReplaceAll(appName, " ", "-"))
-	if iconPath != "" {
-		iconArg = iconPath
-	}
-	if iconArg == "" {
-		iconArg = "smartphone"
-	}
+// closeNotification closes a previously-shown desktop popup by id.
+func (p *NotificationPlugin) closeNotification(desktopID string) {
+	go func() {
+		_ = p.newExec(context.Background(), "gdbus", "call", "--session",
+			"--dest", "org.freedesktop.Notifications",
+			"--object-path", "/org/freedesktop/Notifications",
+			"--method", "org.freedesktop.Notifications.CloseNotification",
+			desktopID,
+		).Run()
+	}()
+}
 
+// sendDesktopNotification calls notify-send with the collected parameters.
+func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, text, iconPath string) {
 	// Dunst / mako / swaync: stack notifications from the same app so they
-	// replace each other instead of flooding the screen.
+	// replace each other instead of flooding the screen. Daemons that ignore
+	// this hint (e.g. Quickshell) are covered by --replace-id below.
 	groupHint := "string:x-dunst-stack-tag:kcd-" + appName
 
 	args := []string{"-a", appName}
@@ -293,18 +341,51 @@ func (p *NotificationPlugin) sendDesktopNotification(appName, id, title, text, i
 	if p.cfg.ExpireMS >= 0 {
 		args = append(args, "-t", strconv.Itoa(p.cfg.ExpireMS))
 	}
+
+	// No icon by default. Pass an explicit empty icon so daemons (e.g.
+	// Quickshell) don't fall back to deriving an icon name from the app name
+	// and render a placeholder. When show_icons is enabled, pass the phone's
+	// downloaded icon, falling back to a name derived from the app.
+	iconArg := ""
+	if p.cfg.ShowIcons {
+		iconArg = strings.ToLower(strings.ReplaceAll(appName, " ", "-"))
+		if iconPath != "" {
+			iconArg = iconPath
+		}
+		if iconArg == "" {
+			iconArg = "smartphone"
+		}
+	}
 	args = append(args, "-i", iconArg, "-h", groupHint)
 
 	if p.canCloseNotifs && id != "" {
+		// Android re-posts notifications on every update with a stable id
+		// (e.g. media/scrobble now-playing). Replace the existing desktop
+		// popup via D-Bus replaces_id so repeated updates collapse to one,
+		// mirroring the reference desktop's Notification::update(). Disable
+		// via `replace_notifications = false`.
+		if p.cfg.ReplaceNotifications {
+			key := p.notifKey(devID, id)
+			// Cancel-grace: if a cancel was deferred for this key, drop it so
+			// the popup is updated in place rather than closed and re-opened.
+			if t, ok := p.pendingCloses.LoadAndDelete(key); ok {
+				t.(*time.Timer).Stop()
+			}
+			if prevID, ok := p.notifIDs.Load(key); ok {
+				if s, ok := prevID.(string); ok && s != "" {
+					args = append(args, "-r", s)
+				}
+			}
+		}
 		args = append(args, "--print-id", title, text)
 	} else {
 		args = append(args, title, text)
 	}
 
-	out, err := exec.CommandContext(context.Background(), "notify-send", args...).Output()
+	out, err := p.newExec(context.Background(), "notify-send", args...).Output()
 	if err == nil && p.canCloseNotifs && id != "" {
 		if desktopID := strings.TrimSpace(string(out)); desktopID != "" {
-			p.notifIDs.Store(id, desktopID)
+			p.notifIDs.Store(p.notifKey(devID, id), desktopID)
 		}
 	}
 }
