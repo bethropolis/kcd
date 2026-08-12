@@ -189,15 +189,26 @@ func TestRunClipboard_TimesOutHungSubprocess(t *testing.T) {
 
 	// A hung subprocess must be killed by the 2s timeout — and not instantly
 	// (that would regress to the old premature-cancel bug).
-	start := time.Now()
-	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30"))
-	if err == nil {
-		t.Fatal("expected a timeout error from a hung clipboard subprocess")
-	}
-	if elapsed := time.Since(start); elapsed < time.Second {
-		t.Fatalf("subprocess killed too early (instant cancel regression?), elapsed=%v", elapsed)
-	} else if elapsed > 3*clipboardTimeout {
-		t.Fatalf("expected subprocess killed within ~2s, took %v", elapsed)
+	//
+	// Two shapes of "hung" are covered: a plain child (sh -c 'sleep 30') and
+	// a child that forks a grandchild still holding the stdout pipe
+	// (sh -c 'sleep 30 & wait'). The grandchild survives the parent's SIGKILL,
+	// so without a WaitDelay bound Output() would block on the pipe until the
+	// grandchild exits — pinning runClipboard open for the whole 30s.
+	for _, cmd := range []*exec.Cmd{
+		exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30"),
+		exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30 & wait"),
+	} {
+		start := time.Now()
+		_, err := p.runClipboard(context.Background(), cmd)
+		if err == nil {
+			t.Fatal("expected a timeout error from a hung clipboard subprocess")
+		}
+		if elapsed := time.Since(start); elapsed < time.Second {
+			t.Fatalf("subprocess killed too early (instant cancel regression?), elapsed=%v", elapsed)
+		} else if elapsed > 3*clipboardTimeout {
+			t.Fatalf("expected subprocess killed within ~2s, took %v", elapsed)
+		}
 	}
 }
 

@@ -144,7 +144,7 @@ func (p *ClipboardPlugin) runClipboard(ctx context.Context, cmd *exec.Cmd) ([]by
 
 	timed := exec.CommandContext(tctx, cmd.Path, cmd.Args[1:]...)
 	timed.Env = cmd.Env
-	timed.WaitDelay = cmd.WaitDelay
+	timed.WaitDelay = capKillDelay(cmd.WaitDelay)
 	timed.Stdin = nil
 
 	var stderr bytes.Buffer
@@ -172,11 +172,25 @@ func (p *ClipboardPlugin) runCopy(ctx context.Context, cmd *exec.Cmd, stdin io.R
 
 	timed := exec.CommandContext(tctx, cmd.Path, cmd.Args[1:]...)
 	timed.Env = cmd.Env
-	timed.WaitDelay = cmd.WaitDelay
+	timed.WaitDelay = capKillDelay(cmd.WaitDelay)
 	timed.Stdin = stdin
 	timed.Stdout = nil
 	timed.Stderr = nil
 	return timed.Run()
+}
+
+// capKillDelay returns nonzero bound on how long Wait may block on the
+// stdout/stderr pipes after the timeout kills the child. Callers built via
+// clipboardCmd start with WaitDelay=1s, but a bare exec.CommandContext
+// (tests, or any future caller) defaults to 0, which means Wait blocks until
+// the pipes EOF — and a killed child that forked a grandchild holding those
+// fds would pin runClipboard open until the grandchild exits (e.g. a whole
+// 30s sleep). Ensure it always returns promptly after the deadline.
+func capKillDelay(d time.Duration) time.Duration {
+	if d <= 0 {
+		return time.Second
+	}
+	return d
 }
 
 // isNoSelection reports whether a clipboard tool failure actually means the
