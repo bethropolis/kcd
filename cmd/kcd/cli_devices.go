@@ -29,7 +29,7 @@ var devicesCmd = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "connected",
-			Usage: "Only show connected AND paired (usable) devices",
+			Usage: "Only show paired devices (including offline ones)",
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -47,9 +47,10 @@ var devicesCmd = &cli.Command{
 		if c.Bool("connected") {
 			filtered := make([]device.DeviceInfo, 0, len(devices))
 			for _, d := range devices {
-				// Usable means both paired and connected: strangers may
-				// hold a raw TCP connection but can't do anything.
-				if d.Connected && d.State == device.StatePaired {
+				// Paired devices show even when offline — the CONNECTED
+				// column carries liveness. Unpaired strangers (which may
+				// briefly hold a raw TCP connection) are hidden.
+				if d.State == device.StatePaired {
 					filtered = append(filtered, d)
 				}
 			}
@@ -114,54 +115,63 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 			result *ipc.PairListenResult
 			err    error
 		}
-		resultCh := make(chan listenResult, 1)
-		go func() {
-			r, err := cl.PairListen()
-			resultCh <- listenResult{r, err}
-		}()
 
-		select {
-		case <-sigCh:
-			fmt.Println("\nCancelled")
-			return nil
-		case r := <-resultCh:
-			if r.err != nil {
-				return r.err
-			}
+		// Keep waiting past the daemon's 60s pair_listen timeout so a slow
+		// phone-side accept doesn't force a restart. Ctrl+C cancels.
+		for {
+			resultCh := make(chan listenResult, 1)
+			go func() {
+				r, err := cl.PairListen()
+				resultCh <- listenResult{r, err}
+			}()
 
-			fmt.Printf("\nIncoming pair request from:\n")
-			fmt.Printf("  Device: %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
-			if r.result.VerificationKey != "" {
-				fmt.Printf("  Verification code: %s\n", r.result.VerificationKey)
-			}
-
-			// Headless / auto-accept flag
-			if c.Bool("yes") {
-				if err := cl.Pair(r.result.DeviceID); err != nil {
-					return fmt.Errorf("failed to accept pairing: %w", err)
+			select {
+			case <-sigCh:
+				fmt.Println("\nCancelled")
+				return nil
+			case r := <-resultCh:
+				if r.err != nil {
+					if strings.Contains(r.err.Error(), "timed out") {
+						fmt.Println("No pair requests yet, still listening… (Ctrl+C to cancel)")
+						continue
+					}
+					return r.err
 				}
-				fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+
+				fmt.Printf("\nIncoming pair request from:\n")
+				fmt.Printf("  Device: %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+				if r.result.VerificationKey != "" {
+					fmt.Printf("  Verification code: %s\n", r.result.VerificationKey)
+				}
+
+				// Headless / auto-accept flag
+				if c.Bool("yes") {
+					if err := cl.Pair(r.result.DeviceID); err != nil {
+						return fmt.Errorf("failed to accept pairing: %w", err)
+					}
+					fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+					return nil
+				}
+
+				// Interactive prompt (default: reject)
+				fmt.Print("\nAccept pairing? [y/N]: ")
+				var response string
+				fmt.Scanln(&response)
+
+				response = strings.TrimSpace(strings.ToLower(response))
+				if response == "y" || response == "yes" {
+					if err := cl.Pair(r.result.DeviceID); err != nil {
+						return fmt.Errorf("failed to accept pairing: %w", err)
+					}
+					fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+					return nil
+				}
+
+				// User rejected: reject and cancel request
+				_ = cl.Unpair(r.result.DeviceID)
+				fmt.Printf("Rejected pairing with %s\n", r.result.DeviceName)
 				return nil
 			}
-
-			// Interactive prompt (default: reject)
-			fmt.Print("\nAccept pairing? [y/N]: ")
-			var response string
-			fmt.Scanln(&response)
-
-			response = strings.TrimSpace(strings.ToLower(response))
-			if response == "y" || response == "yes" {
-				if err := cl.Pair(r.result.DeviceID); err != nil {
-					return fmt.Errorf("failed to accept pairing: %w", err)
-				}
-				fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
-				return nil
-			}
-
-			// User rejected: reject and cancel request
-			_ = cl.Unpair(r.result.DeviceID)
-			fmt.Printf("Rejected pairing with %s\n", r.result.DeviceName)
-			return nil
 		}
 	},
 }
