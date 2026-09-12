@@ -250,6 +250,32 @@ Battery: 31% (discharging)
 
 ---
 
+## connectivity
+
+Show the phone's cellular signal strength and network type (5G/LTE/…).
+
+```
+kcd connectivity [device-id] [--json]
+```
+
+If `device-id` is omitted, `kcd` automatically targets the first paired and connected device.
+
+**Example output**
+
+```
+LTE [███░] (3/4)
+```
+
+Dual-SIM phones print one line per SIM (`SIM 0: …`), primary first.
+`--json` prints the raw report (same shape as `connectivity.update` event
+payloads) for scripting. Exits non-zero with `no connectivity data` when
+the device is offline or never reported — reports are requested fresh on
+every connect.
+
+> For continuous monitoring, use `kcd watch --events=connectivity.update` instead.
+
+---
+
 ## clipboard
 
 Push the local clipboard content to a device.

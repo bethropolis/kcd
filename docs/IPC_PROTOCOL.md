@@ -240,6 +240,35 @@ device to respond and returns the value).
 | `charge` | number | Battery percentage (0–100) |
 | `charging` | bool | Whether the device is currently charging |
 
+#### `connectivity`
+
+Return the last cellular connectivity report cached for a device (same
+shape as `connectivity.update` event payloads).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:**
+
+```json
+{"signalStrengths": {"0": {"networkType": "LTE", "networkDetailedType": "LTE", "signalStrength": 4}}}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `signalStrengths` | object | Map of SIM subscription ID → signal info (dual-SIM aware) |
+| `networkType` | string | Network generation (`5G`, `LTE`, `GSM`, …) |
+| `networkDetailedType` | string | Finer-grained type when reported (may be absent) |
+| `signalStrength` | number | Level 0 (no signal) – 4 (full) |
+
+Errors: `device not found`, `connectivity plugin not enabled`,
+`no connectivity data (device offline or never reported)`. Reports are
+requested fresh on every connect; `kcd watch` also emits a cached
+`connectivity.update` on subscribe so clients never boot blind.
+
 #### `clipboard_push`
 
 Push the local clipboard content to a device.

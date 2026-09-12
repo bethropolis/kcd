@@ -34,7 +34,7 @@ function __kcd_at_arg
 end
 
 # All top-level subcommands (for "don't complete subcommands twice" guards)
-set -l __kcd_cmds daemon devices connect pair unpair ping battery watch \
+set -l __kcd_cmds daemon devices connect pair unpair ping battery connectivity watch \
     sftp reply call findmyphone lock unlock share clipboard run sms mpris doctor status
 
 # ---------------------------------------------------------------------------
@@ -68,6 +68,8 @@ complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a ping        -d 'Send a ping notification to a device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a battery     -d 'Fetch battery level and charging status'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a connectivity -d 'Show cellular signal strength and network type'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a watch       -d 'Monitor real-time events from the daemon'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
@@ -105,7 +107,7 @@ complete -c kcd -n "__fish_seen_subcommand_from devices" \
 complete -c kcd -n "__fish_seen_subcommand_from devices" \
     -l watch -s w -d 'Stream device changes in real time'
 complete -c kcd -n "__fish_seen_subcommand_from devices" \
-    -l connected -d 'Only show currently connected devices'
+    -l connected -d 'Only show paired devices (including offline)'
 
 # ---------------------------------------------------------------------------
 # connect  <ip-address>
@@ -120,12 +122,18 @@ complete -c kcd -n "__fish_seen_subcommand_from devices" \
 complete -c kcd -n "__fish_seen_subcommand_from pair && __kcd_at_arg 2" \
     -a '(__kcd_devices)' -d 'Device ID'
 
-# unpair / ping / battery / findmyphone / lock / unlock / clipboard
+# unpair / ping / battery / connectivity / findmyphone / lock / unlock / clipboard
 #   — only make sense with connected devices
-for _cmd in unpair ping battery findmyphone lock unlock clipboard
+for _cmd in unpair ping battery connectivity findmyphone lock unlock clipboard
     complete -c kcd -n "__fish_seen_subcommand_from $_cmd && __kcd_at_arg 2" \
         -a '(__kcd_connected_devices)' -d 'Device ID'
 end
+
+# ---------------------------------------------------------------------------
+# connectivity  (just --json flag; device-id handled above)
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from connectivity" \
+    -l json -d 'Output the raw report as JSON'
 
 # ---------------------------------------------------------------------------
 # clipboard  (just --watch flag; device-id handled above)

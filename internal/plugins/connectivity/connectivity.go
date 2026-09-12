@@ -89,6 +89,20 @@ func (p *ConnectivityPlugin) OnConnect(dev device.Sender) {
 	dev.Send(pkt)
 }
 
+// Report returns the last connectivity report received from a device.
+// The second return value is false when the device never reported (or the
+// entry was cleared on disconnect). Used for watch initial-state dumps and
+// on-demand CLI queries.
+func (p *ConnectivityPlugin) Report(deviceID string) (ConnectivityBody, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.lastReports == nil {
+		return ConnectivityBody{}, false
+	}
+	body, ok := p.lastReports[deviceID]
+	return body, ok
+}
+
 func (p *ConnectivityPlugin) OnDisconnect(dev device.Sender) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -155,6 +155,16 @@ func (c *Client) ClipboardPush(deviceID string) error {
 	return err
 }
 
+// Connectivity returns the last raw connectivity report for a device.
+// Callers decode it (same shape as connectivity.update event payloads).
+func (c *Client) Connectivity(deviceID string) (json.RawMessage, error) {
+	res, err := c.Call(ipc.CmdConnectivity, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	return res.Data, nil
+}
+
 // RunList requests the remote device to send its command list.
 func (c *Client) RunList(deviceID string) error {
 	_, err := c.Call(ipc.CmdRunList, ipc.DevicePayload{DeviceID: deviceID})

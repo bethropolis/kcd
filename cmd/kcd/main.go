@@ -113,6 +113,7 @@ func main() {
 			unpairCmd,
 			pingCmd,
 			batteryCmd,
+			connectivityCmd,
 			watchCmd,
 			sftpCmd,
 			replyCmd,

@@ -297,6 +297,7 @@ kcd pair [<id>]   — pair: with an ID sends a request; without one, listen mode
 kcd unpair <id>   — revoke trust
 kcd ping <id>     — send a ping
 kcd battery <id>  — fetch battery status
+kcd connectivity [id] — show cellular signal/network type
 kcd share <id> <file>              — send a file
 kcd clipboard [id]                 — push local clipboard to phone
 kcd sftp request <id>              — request SFTP credentials

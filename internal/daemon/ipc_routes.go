@@ -29,6 +29,9 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	if cfg.Plugins.Battery {
 		registerBatteryRoutes(handler, devices)
 	}
+	if cfg.Plugins.Connectivity {
+		registerConnectivityRoutes(handler, devices, plugins)
+	}
 	if cfg.Plugins.Clipboard {
 		registerClipboardRoutes(handler, devices, plugins)
 	}

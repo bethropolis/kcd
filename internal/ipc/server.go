@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"go.uber.org/zap"
 )
@@ -164,6 +165,25 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 		data = append(data, '\n')
 		if _, err := conn.Write(data); err != nil {
 			return
+		}
+
+		// Send initial connectivity state if the device already reported.
+		// Unlike battery there is no meaningful zero value, so devices
+		// without a report are skipped instead of emitting empty data.
+		if pl, ok := s.handler.plugins.GetByName("Connectivity"); ok {
+			if report, ok := pl.(*connectivity.ConnectivityPlugin).Report(dev.ID()); ok {
+				connEv := map[string]interface{}{
+					"type":      "connectivity.update",
+					"deviceId":  dev.ID(),
+					"timestamp": time.Now().UTC(),
+					"payload":   report,
+				}
+				data, _ = json.Marshal(connEv)
+				data = append(data, '\n')
+				if _, err := conn.Write(data); err != nil {
+					return
+				}
+			}
 		}
 
 		// Send initial mpris state if recently updated.

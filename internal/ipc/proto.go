@@ -12,6 +12,7 @@ const (
 	CmdUnpair               = "unpair"
 	CmdPing                 = "ping"
 	CmdBattery              = "battery"
+	CmdConnectivity         = "connectivity"
 	CmdClipboardPush        = "clipboard_push"
 	CmdRunList              = "run_list"
 	CmdRunExec              = "run_exec"
