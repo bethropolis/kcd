@@ -28,7 +28,10 @@ kcd daemon [--config <path>] [--log-level <level>]
 ```
 
 The daemon:
-- Listens for device announcements via UDP and mDNS (always on)
+- Listens for device announcements via UDP and mDNS (always on).
+  Unpaired strangers are recorded as `UNPAIRED` but never auto-dialled —
+  outbound connections open only to paired devices, in `kcd pair` listen
+  mode, or on explicit `kcd pair <id>` / `kcd connect` request.
 - Broadcasts its own identity only during `kcd pair` (listen mode)
 - Accepts inbound TCP connections on port 1716
 - Runs all enabled plugins
@@ -108,6 +111,7 @@ kcd devices [--json]
 |---|---|
 | `--json` | Output as a JSON array |
 | `--watch`, `-w` | Stream device changes live (clears screen on each change) |
+| `--connected` | Only show connected **and paired** (usable) devices — unpaired strangers holding a raw TCP connection are hidden |
 
 **Example output**
 
@@ -174,7 +178,7 @@ Pair with a device. Two modes depending on whether you provide a device ID.
 kcd pair <device-id>
 ```
 
-If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it sends a new pair request — accept on your phone.
+If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
 
 ### Listen mode (headless / server)
 
@@ -243,7 +247,7 @@ Push the local clipboard content to a device.
 kcd clipboard [device-id]
 ```
 
-If `device-id` is omitted, `kcd` automatically targets the first connected device.
+If `device-id` is omitted, `kcd` automatically targets the first paired and connected device.
 
 **Clipboard backend detection**
 
@@ -897,10 +901,10 @@ done
 
 ## Tips
 
-**Get the first connected device ID**
+**Get the first usable (paired + connected) device ID**
 
 ```bash
-kcd devices --json | jq -r '[.[] | select(.Connected)] | .[0].ID'
+kcd devices --json | jq -r '[.[] | select(.Connected and .State=="PAIRED")] | .[0].ID'
 ```
 
 **Send a file from a Nautilus script**

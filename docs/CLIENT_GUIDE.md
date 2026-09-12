@@ -88,6 +88,23 @@ for dev in resp["data"]:
 
 States: `UNPAIRED`, `PAIR_REQUESTED`, `PAIR_REQUESTED_BY_PEER`, `PAIRED`.
 
+> **Auto-device selection:** `connected: true` only means a raw TCP socket
+> is open — unpaired strangers on the LAN also appear connected. Never
+> auto-select the first entry with `connected == true`. Always prefer a
+> device with `connected and state == "PAIRED"`, falling back to any
+> `state == "PAIRED"` device, and to nothing otherwise:
+>
+> ```python
+> def pick_auto_device(devices):
+>     for d in devices or []:
+>         if d.get("connected") and d.get("state") == "PAIRED":
+>             return d
+>     for d in devices or []:
+>         if d.get("state") == "PAIRED":
+>             return d
+>     return None  # don't bind to unpaired stranger devices
+> ```
+
 ### 3.2 Pairing Flow
 
 Pairing requires a persistent watch connection to receive the pairing request

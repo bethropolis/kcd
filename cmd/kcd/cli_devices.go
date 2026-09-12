@@ -28,7 +28,7 @@ var devicesCmd = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "connected",
-			Usage: "Only show currently connected devices",
+			Usage: "Only show connected AND paired (usable) devices",
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -46,7 +46,9 @@ var devicesCmd = &cli.Command{
 		if c.Bool("connected") {
 			filtered := make([]device.DeviceInfo, 0, len(devices))
 			for _, d := range devices {
-				if d.Connected {
+				// Usable means both paired and connected: strangers may
+				// hold a raw TCP connection but can't do anything.
+				if d.Connected && d.State == device.StatePaired {
 					filtered = append(filtered, d)
 				}
 			}

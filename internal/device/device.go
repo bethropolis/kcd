@@ -29,6 +29,19 @@ type Device struct {
 	lastSeen time.Time
 	lastIP   net.IP // cached from last successful connection; survives Disconnect
 
+	// discoveryIP/discoveryPort remember where a device was last seen
+	// announcing itself (UDP/mDNS), even if we never opened a TCP
+	// connection to it. Used to dial on explicit user request
+	// (e.g. `kcd pair <id>`) without auto-dialling strangers.
+	discoveryIP   net.IP
+	discoveryPort int
+
+	// pairDialRequested is set when the user explicitly asked to pair with
+	// this device while it has no active connection. The next discovery
+	// announcement for it triggers a one-shot outbound dial so the pair
+	// request can be delivered.
+	pairDialRequested atomic.Bool
+
 	conn      *transport.Conn
 	sendChan  chan *protocol.Packet // buffered 32
 	done      chan struct{}
@@ -64,11 +77,13 @@ type Device struct {
 }
 
 // NewDevice creates a new disconnected device instance.
+// New devices start as Unpaired (not Unknown) so listings are unambiguous.
 func NewDevice(id, name, dtype string, logger *zap.Logger) *Device {
 	return &Device{
 		id:       id,
 		name:     name,
 		Type:     dtype,
+		state:    StateUnpaired,
 		sendChan: make(chan *protocol.Packet, 32),
 		done:     make(chan struct{}),
 		logger:   logger.With(zap.String("device_id", id)),
@@ -317,6 +332,33 @@ func (d *Device) SetLastSeen(t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastSeen = t
+}
+
+// SetDiscoveryAddr records where the device was last seen announcing itself.
+func (d *Device) SetDiscoveryAddr(ip net.IP, port int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.discoveryIP = ip
+	d.discoveryPort = port
+}
+
+// DiscoveryAddr returns the last-seen announcement address, or nil if unknown.
+func (d *Device) DiscoveryAddr() (net.IP, int) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.discoveryIP, d.discoveryPort
+}
+
+// RequestPairDial marks the device for a one-shot outbound dial on its next
+// discovery announcement. Used when the user explicitly runs `kcd pair <id>`
+// for a device with no active connection.
+func (d *Device) RequestPairDial() {
+	d.pairDialRequested.Store(true)
+}
+
+// ConsumePairDial reports and clears a pending explicit pair-dial request.
+func (d *Device) ConsumePairDial() bool {
+	return d.pairDialRequested.CompareAndSwap(true, false)
 }
 
 // TryReconnect attempts to mark the device as reconnecting.

@@ -74,7 +74,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	}
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, _ *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	// TCP Listener
 	tcpListener, err := transport.Listen(ctx, ":1716")
 	if err != nil {
@@ -99,6 +99,40 @@ func runTransport(ctx context.Context, cfg *tls.Config, _ *discovery.Broadcaster
 
 		if dev, ok := devices.Get(body.DeviceID); ok && dev.IsConnected() {
 			return
+		}
+
+		// Don't auto-dial strangers heard on the network. Only open an
+		// outbound TCP connection when the device is already paired, when
+		// the daemon is actively in pairing mode (`kcd pair` listen mode
+		// starts the broadcaster), or when the user explicitly requested
+		// pairing with this device (`kcd pair <id>` sets a one-shot flag).
+		// Otherwise just record/update the registry entry so `kcd devices`
+		// still shows the discovered device as UNPAIRED.
+		dev, known := devices.Get(body.DeviceID)
+		isPaired := known && dev.State() == device.StatePaired
+		pairingMode := bc != nil && bc.IsRunning()
+		if !isPaired && !pairingMode {
+			if known && dev.ConsumePairDial() {
+				dev.SetDiscoveryAddr(ip, tcpPort)
+				dev.SetLastSeen(time.Now())
+				// Fall through to dial below: explicit user intent.
+			} else {
+				safeName := protocol.SanitizeDeviceName(body.DeviceName)
+				if !known {
+					nd := device.NewDevice(body.DeviceID, safeName, body.DeviceType, logger)
+					nd.SetDiscoveryAddr(ip, tcpPort)
+					nd.SetLastSeen(time.Now())
+					devices.Add(nd)
+				} else {
+					dev.SetName(safeName)
+					dev.SetDiscoveryAddr(ip, tcpPort)
+					dev.SetLastSeen(time.Now())
+				}
+				logger.Debug("discovered unpaired device, not dialling (not in pairing mode)",
+					zap.String("device_id", body.DeviceID),
+					zap.String("ip", ip.String()))
+				return
+			}
 		}
 
 		// Spawn goroutine to prevent blocking the discovery listener

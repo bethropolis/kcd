@@ -20,6 +20,11 @@ type Handler struct {
 	bus            *events.Bus
 	routes         map[string]func(Request) Response
 	pruneThreshold time.Duration
+	// pairDialHook, when set, dials a disconnected device on explicit user
+	// pair request (`kcd pair <id>`). The daemon wires this to DialDevice
+	// using the device's last-seen discovery address, so pairing an unpaired
+	// device doesn't depend on background auto-dial.
+	pairDialHook func(deviceID string) error
 }
 
 // NewHandler creates a new IPC command handler.
@@ -38,6 +43,12 @@ func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *
 // Register adds a custom handler for a given command.
 func (h *Handler) Register(command string, fn func(Request) Response) {
 	h.routes[command] = fn
+}
+
+// SetPairDialHook sets the hook used to connect to a disconnected device on
+// explicit user pair request. See the pairDialHook field for details.
+func (h *Handler) SetPairDialHook(fn func(deviceID string) error) {
+	h.pairDialHook = fn
 }
 
 // HandleRequest processes an incoming IPC request and returns a response.
@@ -111,6 +122,18 @@ func (h *Handler) handlePair(payload []byte) Response {
 	dev, ok := h.devices.Get(p.DeviceID)
 	if !ok {
 		return Response{OK: false, Error: "device not found"}
+	}
+
+	// Pairing needs an active connection (pair packets go over TLS).
+	// Background auto-dial no longer connects to unpaired strangers, so an
+	// explicit `kcd pair <id>` triggers the on-demand dial hook when one is
+	// wired (the daemon always sets it). Without a hook, fall through to the
+	// legacy paths below.
+	if !dev.IsConnected() && h.pairDialHook != nil {
+		if err := h.pairDialHook(dev.ID()); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true}
 	}
 
 	// Use the pair plugin to handle pairing properly

@@ -94,10 +94,10 @@ Fields:
 | `id` | string | Permanent device identifier |
 | `name` | string | Human-readable device name |
 | `type` | string | `"phone"`, `"tablet"`, `"laptop"`, `"desktop"` |
-| `state` | string | `"UNPAIRED"`, `"PAIR_REQUESTED"`, `"PAIR_REQUESTED_BY_PEER"`, `"PAIRED"`, `"UNKNOWN"` |
+| `state` | string | `"UNPAIRED"`, `"PAIR_REQUESTED"`, `"PAIR_REQUESTED_BY_PEER"`, `"PAIRED"` (`"UNKNOWN"` may appear in state files written by older versions and means unpaired) |
 | `cert_fp` | string | Not populated in this response (empty) |
 | `last_seen` | string (RFC3339) | Not populated in this response (zero time) |
-| `connected` | bool | Whether the device currently has an active TCP connection |
+| `connected` | bool | Whether the device currently has an active TCP connection. Note: `connected: true` alone does **not** mean usable — a stranger on the LAN can hold a raw connection while `state` is `UNPAIRED`. Clients must check `state == "PAIRED"` before sending commands or auto-selecting a device. |
 
 #### `pair`
 
@@ -118,6 +118,9 @@ Optional fields:
 - If neither `accept` nor `reject` is set, sends a pair request to the device.
 - If `accept: true`, accepts an incoming pair request from the device.
 - If `reject: true`, rejects or unpairs.
+- If the device has no active connection, the daemon dials it on demand
+  using its last-seen discovery address (background auto-dial no longer
+  connects to unpaired devices), then sends the pair request.
 
 **Response data:** none (`{"ok": true}`)
 

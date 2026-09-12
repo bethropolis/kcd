@@ -78,6 +78,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if loaded, err := device.LoadDevices(statePath); err == nil {
 		for _, info := range loaded {
 			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
+			// Migrate pre-fix state: devices persisted as UNKNOWN (the old
+			// zero value) are simply unpaired.
+			if info.State == device.StateUnknown {
+				info.State = device.StateUnpaired
+			}
 			dev.SetState(info.State)
 			dev.CertFP = info.CertFP
 			dev.SetLastSeen(info.LastSeen)
@@ -134,6 +139,47 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
 
 	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
+
+	// Explicit `kcd pair <id>` dials on demand (background auto-dial no
+	// longer touches unpaired devices). Marks a one-shot dial flag so the
+	// next discovery announcement connects, and kicks an immediate dial if
+	// we already know where the device was last seen.
+	handler.SetPairDialHook(func(deviceID string) error {
+		dev, ok := devices.Get(deviceID)
+		if !ok {
+			return fmt.Errorf("device not found")
+		}
+		if dev.State() == device.StatePaired {
+			return fmt.Errorf("device already paired")
+		}
+		dev.RequestPairDial()
+		ip, port := dev.DiscoveryAddr()
+		if ip == nil {
+			// No address yet — the flagged dial fires on the next
+			// broadcast from the phone; tell the user to retry then.
+			return fmt.Errorf("device address unknown yet, wait for discovery and retry")
+		}
+		if port == 0 {
+			port = 1716
+		}
+		go func() {
+			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger)
+			if !dev.IsConnected() {
+				logger.Warn("on-demand pair dial failed", zap.String("device_id", deviceID))
+				return
+			}
+			if dev.State() == device.StatePairRequestedByPeer {
+				if err := pairPlugin.AcceptPairing(dev); err != nil {
+					logger.Warn("auto-accept on pair dial failed", zap.Error(err))
+				}
+			} else if dev.State() != device.StatePaired {
+				if err := pairPlugin.RequestPairing(dev); err != nil {
+					logger.Warn("pair request on dial failed", zap.Error(err))
+				}
+			}
+		}()
+		return nil
+	})
 
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
