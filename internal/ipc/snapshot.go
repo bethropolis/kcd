@@ -1,6 +1,8 @@
 package ipc
 
 import (
+	"time"
+
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
@@ -33,13 +35,21 @@ type DeviceSummary struct {
 // SummarizeDevice builds the enriched view of one device. Absent plugins
 // or missing caches simply omit their section.
 func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary {
+	// A connected device is seen right now by definition: last_seen is only
+	// stamped at connect time and on discovery sightings (which skip
+	// connected devices), so without this it goes stale for the whole
+	// session and clients show "Xm ago" for a live phone.
+	lastSeen := dev.LastSeen()
+	if dev.IsConnected() {
+		lastSeen = time.Now()
+	}
 	sum := DeviceSummary{
 		DeviceInfo: device.DeviceInfo{
 			ID:        dev.ID(),
 			Name:      dev.Name(),
 			Type:      dev.Type,
 			State:     dev.State(),
-			LastSeen:  dev.LastSeen(),
+			LastSeen:  lastSeen,
 			Connected: dev.IsConnected(),
 		},
 	}

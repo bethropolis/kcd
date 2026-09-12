@@ -1,12 +1,17 @@
 package ipc_test
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -62,4 +67,40 @@ func TestBuildSnapshotCoversOfflineDevices(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A connected device is seen now by definition: last_seen is stamped at
+// connect time and discovery sightings skip connected devices, so the raw
+// stamp goes stale for the whole session. The summary must report now for
+// connected devices and preserve the stored stamp for offline ones.
+func TestSummarizeDeviceConnectedMeansSeenNow(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	stale := time.Now().Add(-53 * time.Minute)
+
+	offline := device.NewDevice("dev-off", "Offline Phone", "phone", logger)
+	offline.SetLastSeen(stale)
+	offlineSum := ipc.SummarizeDevice(offline, nil)
+	if !offlineSum.LastSeen.Equal(stale) {
+		t.Errorf("offline summary must preserve stored last_seen, got %v", offlineSum.LastSeen)
+	}
+
+	online := device.NewDevice("dev-on", "Online Phone", "phone", logger)
+	online.SetLastSeen(stale)
+	left, right := net.Pipe()
+	conn := transport.NewConn(tls.Client(left, &tls.Config{InsecureSkipVerify: true}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	online.Connect(ctx, conn, nil, nil, nil)
+
+	onlineSum := ipc.SummarizeDevice(online, nil)
+	if time.Since(onlineSum.LastSeen) > time.Minute {
+		t.Errorf("connected summary last_seen must be now, got %v", onlineSum.LastSeen)
+	}
+
+	_ = right.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for online.IsConnected() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	online.Disconnect()
 }
