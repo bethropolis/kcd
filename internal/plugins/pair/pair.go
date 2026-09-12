@@ -173,18 +173,21 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 		// We requested, they rejected
 		p.logger.Info("pair request rejected by peer", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
+		dev.ClearEphemeral()
 		p.emit(events.TypePairRejected, dev, "")
 
 	case device.StatePairRequestedByPeer:
 		// They requested, then cancelled
 		p.logger.Info("pair request cancelled by peer", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
+		dev.ClearEphemeral()
 		p.emit(events.TypePairRejected, dev, "")
 
 	case device.StatePaired:
 		// Unpair request
 		p.logger.Info("unpair request received", zap.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
+		dev.ClearEphemeral()
 
 	case device.StateUnpaired, device.StateUnknown:
 		// Already unpaired, ignore
@@ -213,6 +216,7 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 	if err := dev.Send(pkt); err != nil {
 		p.logger.Error("failed to send pair accept", zap.Error(err))
 		dev.SetState(device.StateUnpaired)
+		dev.ClearEphemeral()
 		return err
 	}
 
@@ -277,6 +281,7 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 
 	dev.Send(pkt) // best effort
 	dev.SetState(device.StateUnpaired)
+	dev.ClearEphemeral()
 
 	p.mu.Lock()
 	delete(p.pairingTimestamp, dev.ID())
@@ -299,6 +304,7 @@ func (p *PairPlugin) Unpair(dev *device.Device) error {
 
 	dev.Send(pkt) // best effort
 	dev.SetState(device.StateUnpaired)
+	dev.ClearEphemeral()
 
 	p.mu.Lock()
 	delete(p.pairingTimestamp, dev.ID())

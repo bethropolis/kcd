@@ -42,6 +42,15 @@ type Device struct {
 	// request can be delivered.
 	pairDialRequested atomic.Bool
 
+	// ephemeralDialed marks that this device already received its one
+	// ephemeral discovery dial for the current unpaired era. Ephemeral
+	// dials let a stranger complete the TCP identity exchange (so both
+	// sides list each other) without staying connected: the next sighting
+	// closes the socket again while the device is still unpaired. The
+	// marker is cleared when the device is explicitly unpaired/rejected,
+	// making it eligible again. Paired devices and pairing mode bypass it.
+	ephemeralDialed bool
+
 	conn      *transport.Conn
 	sendChan  chan *protocol.Packet // buffered 32
 	done      chan struct{}
@@ -359,6 +368,35 @@ func (d *Device) RequestPairDial() {
 // ConsumePairDial reports and clears a pending explicit pair-dial request.
 func (d *Device) ConsumePairDial() bool {
 	return d.pairDialRequested.CompareAndSwap(true, false)
+}
+
+// PairDialPending reports whether an explicit pair-dial was requested,
+// without clearing it.
+func (d *Device) PairDialPending() bool {
+	return d.pairDialRequested.Load()
+}
+
+// MarkEphemeralDialed records that the one ephemeral discovery dial for the
+// current unpaired era has been used.
+func (d *Device) MarkEphemeralDialed() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ephemeralDialed = true
+}
+
+// EphemeralDialed reports whether the ephemeral discovery dial was used.
+func (d *Device) EphemeralDialed() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.ephemeralDialed
+}
+
+// ClearEphemeral makes the device eligible for a fresh ephemeral discovery
+// dial (e.g. after an explicit unpair or rejection).
+func (d *Device) ClearEphemeral() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ephemeralDialed = false
 }
 
 // TryReconnect attempts to mark the device as reconnecting.

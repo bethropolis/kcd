@@ -74,6 +74,27 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	}
 }
 
+// shouldEphemeralClose reports whether an active connection that exists
+// only for the discovery handshake should be closed on a fresh sighting.
+// Connections are kept when pairing mode is active, when the device is
+// paired, when a pair request is in flight either way, or when the user
+// explicitly asked to pair with the device.
+func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
+	if pairingMode {
+		return false
+	}
+	if !dev.EphemeralDialed() {
+		return false
+	}
+	if dev.State() != device.StateUnpaired {
+		return false
+	}
+	if dev.PairDialPending() {
+		return false
+	}
+	return true
+}
+
 func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
 	// TCP Listener
 	tcpListener, err := transport.Listen(ctx, ":1716")
@@ -87,6 +108,14 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	// The controller is started in stopped state.
 
 	// UDP/mDNS Listener (onDeviceFound)
+	//
+	// Discovery is event-driven with no timers or polling:
+	//   - Paired devices, pairing mode (`kcd pair` listen), and explicit
+	//     `kcd pair <id>` intent dial and keep the connection.
+	//   - An unpaired stranger gets exactly one ephemeral dial per unpaired
+	//     era so both sides can list each other (the TCP identity exchange
+	//     is what makes the PC appear on the phone). The next sighting
+	//     closes the socket again while it is still unpaired.
 	onDeviceFound := func(ip net.IP, tcpPort int, peerIdentity *protocol.Packet) {
 		var body protocol.IdentityBody
 		if err := json.Unmarshal(peerIdentity.Body, &body); err != nil {
@@ -97,48 +126,48 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			return
 		}
 
-		if dev, ok := devices.Get(body.DeviceID); ok && dev.IsConnected() {
+		pairingMode := bc != nil && bc.IsRunning()
+		dev, known := devices.Get(body.DeviceID)
+
+		if known && dev.IsConnected() {
+			// Fresh sighting of a connected device: close it again if it
+			// exists only for the discovery handshake.
+			if shouldEphemeralClose(dev, pairingMode) {
+				logger.Debug("closing ephemeral discovery connection",
+					zap.String("device_id", body.DeviceID))
+				dev.Disconnect()
+			}
 			return
 		}
 
-		// Don't auto-dial strangers heard on the network. Only open an
-		// outbound TCP connection when the device is already paired, when
-		// the daemon is actively in pairing mode (`kcd pair` listen mode
-		// starts the broadcaster), or when the user explicitly requested
-		// pairing with this device (`kcd pair <id>` sets a one-shot flag).
-		// Otherwise just record/update the registry entry so `kcd devices`
-		// still shows the discovered device as UNPAIRED.
-		dev, known := devices.Get(body.DeviceID)
-		isPaired := known && dev.State() == device.StatePaired
-		pairingMode := bc != nil && bc.IsRunning()
-		if !isPaired && !pairingMode {
-			if known && dev.ConsumePairDial() {
-				dev.SetDiscoveryAddr(ip, tcpPort)
-				dev.SetLastSeen(time.Now())
-				// Fall through to dial below: explicit user intent.
-			} else {
-				safeName := protocol.SanitizeDeviceName(body.DeviceName)
-				if !known {
-					nd := device.NewDevice(body.DeviceID, safeName, body.DeviceType, logger)
-					nd.SetDiscoveryAddr(ip, tcpPort)
-					nd.SetLastSeen(time.Now())
-					devices.Add(nd)
-				} else {
-					dev.SetName(safeName)
-					dev.SetDiscoveryAddr(ip, tcpPort)
-					dev.SetLastSeen(time.Now())
-				}
-				logger.Debug("discovered unpaired device, not dialling (not in pairing mode)",
-					zap.String("device_id", body.DeviceID),
-					zap.String("ip", ip.String()))
-				return
-			}
+		safeName := protocol.SanitizeDeviceName(body.DeviceName)
+		if !known {
+			dev = device.NewDevice(body.DeviceID, safeName, body.DeviceType, logger)
+			devices.Add(dev)
+		} else {
+			dev.SetName(safeName)
+		}
+		dev.SetDiscoveryAddr(ip, tcpPort)
+		dev.SetLastSeen(time.Now())
+
+		if dev.State() == device.StatePaired || pairingMode || dev.ConsumePairDial() {
+			// Spawn goroutine to prevent blocking the discovery listener
+			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
+			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
+			return
 		}
 
-		// Spawn goroutine to prevent blocking the discovery listener
-		go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-			DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
-		}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
+		if !dev.EphemeralDialed() {
+			dev.MarkEphemeralDialed()
+			// Spawn goroutine to prevent blocking the discovery listener
+			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
+			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
+		}
+		// Otherwise the device already had its ephemeral dial for this
+		// unpaired era: stay silent instead of redialling on every
+		// announcement. Pairing mode and explicit `kcd pair <id>` bypass.
 	}
 
 	udpListener := discovery.NewListener(1716, localDeviceID, onDeviceFound, logger)

@@ -58,6 +58,19 @@ Devices are found via two parallel mechanisms that run concurrently:
 
 The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it only starts during `kcd pair` (listen mode) and stops when pairing completes. The UDP **listener** is always active, so paired devices reconnect without any broadcast.
 
+### Ephemeral discovery dials
+
+Hearing a device is not enough for the phone to list the PC — the TCP
+identity exchange is what makes both sides visible. So an unpaired
+stranger gets exactly **one ephemeral dial per unpaired era**: the socket
+is closed again on the next sighting while it is still unpaired, and the
+marker (`Device.ephemeralDialed`) suppresses further re-dials, so there is
+no connect/disconnect churn and no timers involved. Bypassed (dial and
+stay) by: paired state, pairing mode, and explicit `kcd pair <id>` intent.
+Explicit unpair/reject clears the marker, making the device eligible again.
+When broadcast stops (`kcd pair` exits), still-connected unpaired devices
+with no pair in flight are disconnected immediately.
+
 ### mDNS / Zeroconf (`_kdeconnect._udp`)
 
 At startup the `Broadcaster` registers the local device as a Zeroconf service with the `libp2p/zeroconf/v2` library. TXT records carry `id`, `name`, `type`, and `protocol` fields per the KDE Connect spec.
