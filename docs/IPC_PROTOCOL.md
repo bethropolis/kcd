@@ -147,6 +147,10 @@ The handler blocks until a pair request arrives or the context is cancelled.
 The 16-character verification key should be displayed to the user to verify
 identity match on both sides.
 
+> The daemon only **reports** the candidate — it does not accept it.
+> Accept explicitly with `pair`, reject with `unpair`. This keeps stale
+> requests (e.g. leftovers from tests) from pairing silently.
+
 #### `unpair`
 
 Remove a paired device.

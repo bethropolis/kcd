@@ -150,6 +150,10 @@ if resp["ok"]:
     print("Paired successfully!")
 ```
 
+> `pair_listen` never accepts on its own — it only returns the candidate.
+> Your client must ask the user and then call `pair` (accept) or `unpair`
+> (reject), mirroring `kcd pair` / `kcd pair --yes`.
+
 ### 3.3 Unpairing
 
 ```python

@@ -196,10 +196,14 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 }
 
 func (h *Handler) handlePairListen() Response {
-	// Check for any device already in StatePairRequestedByPeer
+	// Report any device already in StatePairRequestedByPeer WITHOUT
+	// accepting it. The caller (CLI / GUI / script) inspects the candidate
+	// and decides: accept via CmdPair, reject via CmdUnpair. Auto-accepting
+	// here would pair with stale requests (e.g. leftovers from tests)
+	// before the user ever sees a prompt.
 	for _, dev := range h.devices.List() {
 		if dev.State() == device.StatePairRequestedByPeer {
-			return h.pairAcceptResult(dev, "")
+			return h.pairListenResult(dev, "")
 		}
 	}
 
@@ -225,16 +229,16 @@ func (h *Handler) handlePairListen() Response {
 				vKey = k
 			}
 		}
-		return h.pairAcceptResult(dev, vKey)
+		return h.pairListenResult(dev, vKey)
 	case <-time.After(60 * time.Second):
 		return Response{OK: false, Error: "timed out waiting for pair request (60s)"}
 	}
 }
 
-func (h *Handler) pairAcceptResult(dev *device.Device, vKey string) Response {
-	if err := h.pairPlugin.AcceptPairing(dev); err != nil {
-		return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
-	}
+// pairListenResult returns the candidate device info without accepting it.
+// The caller (CLI / GUI / script) decides whether to accept via CmdPair or
+// reject via CmdUnpair.
+func (h *Handler) pairListenResult(dev *device.Device, vKey string) Response {
 	data, _ := json.Marshal(PairListenResult{
 		DeviceID:        dev.ID(),
 		DeviceName:      dev.Name(),

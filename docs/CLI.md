@@ -186,12 +186,22 @@ If the device has already sent a pair request to `kcd` (state `PairRequestedByPe
 kcd pair
 ```
 
-No arguments = listen mode. Broadcast is started automatically so the phone can discover the PC. The CLI waits for any incoming pair request and accepts it immediately, printing the verification code:
+No arguments = listen mode. Broadcast is started automatically so the phone can discover the PC. The CLI shows the incoming request with its verification code and asks for confirmation:
 
 ```
 Listening for pair requests… (Ctrl+C to cancel)
-Paired with Pixel 8 Pro (a1b2c3d4...)
-Verification code: 3a8f
+
+Incoming pair request from:
+  Device: Pixel 8 Pro (a1b2c3d4...)
+  Verification code: 3a8f12bc
+
+Accept pairing? [y/N]:
+```
+
+Answer `y` to pair, anything else (default) to reject. For headless systems and scripts, pass `-y` / `--yes` to accept without prompting:
+
+```bash
+kcd pair --yes
 ```
 
 Broadcast stops when pairing completes or you press Ctrl+C.

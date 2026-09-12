@@ -77,12 +77,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	statePath := config.StatePath()
 	if loaded, err := device.LoadDevices(statePath); err == nil {
 		for _, info := range loaded {
-			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
 			// Migrate pre-fix state: devices persisted as UNKNOWN (the old
 			// zero value) are simply unpaired.
 			if info.State == device.StateUnknown {
 				info.State = device.StateUnpaired
 			}
+			// Migrate pre-fix names: some senders transmit decimal byte
+			// escapes (e.g. "Caf\\195\\169"); decode to real UTF-8.
+			info.Name = protocol.SanitizeDeviceName(protocol.DecodeDeviceName(info.Name))
+			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
 			dev.SetState(info.State)
 			dev.CertFP = info.CertFP
 			dev.SetLastSeen(info.LastSeen)

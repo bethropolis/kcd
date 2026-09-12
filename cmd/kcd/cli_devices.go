@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -67,12 +68,18 @@ var devicesCmd = &cli.Command{
 var pairCmd = &cli.Command{
 
 	Name:  "pair",
-	Usage: "Initiate pairing with a remote device",
-	Description: `With a device ID: send a pair request to that device.
+	Usage: "Initiate pairing or accept incoming requests",
+	Description: `With a device ID: send a pair request to that device (or accept if they already requested).
 
-Without a device ID: enter listen mode. Waits for any incoming pair
-request and auto-accepts it. Press Ctrl+C to cancel.`,
+Without a device ID: enter listen mode to receive and verify incoming pairing requests.`,
 	ArgsUsage: "[device-id]",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "yes",
+			Aliases: []string{"y"},
+			Usage:   "Automatically accept incoming requests without confirmation (headless mode)",
+		},
+	},
 	Action: func(c *cli.Context) error {
 		cl, err := getClient(c)
 		if err != nil {
@@ -80,10 +87,11 @@ request and auto-accepts it. Press Ctrl+C to cancel.`,
 		}
 
 		if c.NArg() >= 1 {
-			if err := cl.Pair(c.Args().First()); err != nil {
+			targetID := c.Args().First()
+			if err := cl.Pair(targetID); err != nil {
 				return err
 			}
-			fmt.Println("Pairing request sent")
+			fmt.Printf("Pair request sent / accepted for %s\n", targetID)
 			return nil
 		}
 
@@ -120,10 +128,39 @@ request and auto-accepts it. Press Ctrl+C to cancel.`,
 			if r.err != nil {
 				return r.err
 			}
-			fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+
+			fmt.Printf("\nIncoming pair request from:\n")
+			fmt.Printf("  Device: %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
 			if r.result.VerificationKey != "" {
-				fmt.Printf("Verification code: %s\n", r.result.VerificationKey)
+				fmt.Printf("  Verification code: %s\n", r.result.VerificationKey)
 			}
+
+			// Headless / auto-accept flag
+			if c.Bool("yes") {
+				if err := cl.Pair(r.result.DeviceID); err != nil {
+					return fmt.Errorf("failed to accept pairing: %w", err)
+				}
+				fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+				return nil
+			}
+
+			// Interactive prompt (default: reject)
+			fmt.Print("\nAccept pairing? [y/N]: ")
+			var response string
+			fmt.Scanln(&response)
+
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response == "y" || response == "yes" {
+				if err := cl.Pair(r.result.DeviceID); err != nil {
+					return fmt.Errorf("failed to accept pairing: %w", err)
+				}
+				fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+				return nil
+			}
+
+			// User rejected: reject and cancel request
+			_ = cl.Unpair(r.result.DeviceID)
+			fmt.Printf("Rejected pairing with %s\n", r.result.DeviceName)
 			return nil
 		}
 	},
