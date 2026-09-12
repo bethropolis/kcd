@@ -123,10 +123,11 @@ a1b2c3d4_e5f6_7890_abcd_ef1234567890 Pixel 8 Pro       phone      Paired     tru
 b9e1f234_0000_1111_2222_333344445555 Galaxy Tab S9     tablet     Unpaired   false
 ```
 
-**JSON output**
+**JSON output** (enriched with cached battery/media/signal; sections omitted
+when the device never reported them):
 
 ```bash
-kcd devices --json | jq '.[0].ID'
+kcd devices --json | jq '.[0] | {name, battery: .battery.charge}'
 ```
 
 ```json
@@ -236,7 +237,7 @@ kcd ping <device-id>
 Fetch the current battery level and charging state of a device.
 
 ```
-kcd battery <device-id>
+kcd battery <device-id> [--json]
 ```
 
 **Example output**
@@ -245,6 +246,8 @@ kcd battery <device-id>
 Battery: 74% (charging)
 Battery: 31% (discharging)
 ```
+
+`--json` prints `{"deviceId":"...","charge":74,"charging":true}` for scripting.
 
 > For continuous monitoring, use `kcd watch --events=battery.update` instead.
 
@@ -584,7 +587,7 @@ kcd watch --json --events=sftp.mount | jq -r 'select(.type=="sftp.mount") | .pay
 Show cached SFTP connection details for a paired device, including available storage volumes:
 
 ```
-kcd sftp info <device-id>
+kcd sftp info <device-id> [--json]
 ```
 
 **Example output**
@@ -608,7 +611,7 @@ If the phone returned an error (e.g. storage permission not granted), the `error
 List available storage volumes without the full info output:
 
 ```
-kcd sftp volumes <device-id>
+kcd sftp volumes <device-id> [--json]
 ```
 
 **Example output**
@@ -778,7 +781,7 @@ Control the remote device's audio volume (requires `remotesystemvolume` plugin).
 List audio sinks on a remote device and their current volume/mute state.
 
 ```
-kcd volume list <device-id>
+kcd volume list <device-id> [--json]
 ```
 
 **Example output**
@@ -937,6 +940,10 @@ done
 ---
 
 ## Tips
+
+Fire-and-forget commands (`ping`, `lock`, `share`, `reply`, …) print a
+human ack and exit 0 — only commands that return data offer `--json`.
+Errors are always structured (`daemon error: …` on stderr/exit code).
 
 **Get the first paired device ID (works offline too)**
 

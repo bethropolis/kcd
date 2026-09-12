@@ -160,14 +160,19 @@ type MPRISRequest struct {
 }
 
 type NowPlaying struct {
-	Player         string `json:"player"`
-	Title          string `json:"title"`
-	Artist         string `json:"artist"`
-	Album          string `json:"album"`
-	AlbumArtUrl    string `json:"albumArtUrl"`
-	Url            string `json:"url,omitempty"`
-	Length         int64  `json:"length"`
-	Pos            int64  `json:"pos,omitempty"`
+	Player      string `json:"player"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	AlbumArtUrl string `json:"albumArtUrl"`
+	ArtPending  bool   `json:"artPending,omitempty"`
+	Url         string `json:"url,omitempty"`
+	Length      int64  `json:"length"`
+	Pos         int64  `json:"pos,omitempty"`
+	// PosAnchorMs is the wall-clock time (Unix millis) at which Pos was
+	// sampled. Clients compute the live position drift-free as
+	// Pos + (nowMs - PosAnchorMs) * (isPlaying ? 1 : 0).
+	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume,omitempty"`
 	CanControl     bool   `json:"canControl"`
@@ -312,6 +317,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		tracker.lastPosition = body.Pos
 		tracker.lastPositionAt = time.Now()
 		tracker.playing = body.IsPlaying
+		state.PosAnchorMs = tracker.lastPositionAt.UnixMilli()
 		shouldPublish := shouldPublishRemoteState(p.remoteStates[dev.ID()], state)
 		p.remoteStates[dev.ID()] = state
 		p.remoteStateTimes[dev.ID()] = time.Now()
@@ -328,6 +334,12 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			if p.artCache != nil {
 				if resolved := p.artCache.Resolve(pub.AlbumArtUrl); resolved != "" {
 					pub.AlbumArtUrl = resolved
+				} else if pub.AlbumArtUrl != "" && strings.HasPrefix(pub.AlbumArtUrl, "kdeconnect:") {
+					// Art still downloading: publish an empty URL with the
+					// pending flag instead of an unloadable kdeconnect:/
+					// URI. The arrival re-publish carries file://.
+					pub.AlbumArtUrl = ""
+					pub.ArtPending = true
 				}
 			}
 			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), pub)
@@ -842,6 +854,16 @@ func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
 }
 
 // RemoteState returns the last known NowPlaying state for a remote device,
+// markArtPending empties unloadable kdeconnect:/ art URIs and flags them,
+// so serving paths (status, snapshot, summaries) agree with published
+// events: art is either a loadable URL or "" with ArtPending set.
+func markArtPending(np *NowPlaying) {
+	if np.AlbumArtUrl != "" && strings.HasPrefix(np.AlbumArtUrl, "kdeconnect:") {
+		np.AlbumArtUrl = ""
+		np.ArtPending = true
+	}
+}
+
 // with position extrapolated from the last update time if playing.
 func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 	p.mu.RLock()
@@ -852,6 +874,7 @@ func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 	}
 	copy := state.DeepCopy()
 	copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
+	markArtPending(copy)
 	if tracker, ok := p.positionTrackers[deviceID]; ok && tracker.playing {
 		elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 		copy.Pos = tracker.lastPosition + elapsed
@@ -883,6 +906,7 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 		}
 		copy := state.DeepCopy()
 		copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
+		markArtPending(copy)
 		if tracker, ok := p.positionTrackers[id]; ok && tracker.playing {
 			elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 			copy.Pos = tracker.lastPosition + elapsed

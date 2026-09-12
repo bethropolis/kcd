@@ -130,8 +130,10 @@ for _cmd in unpair ping battery connectivity findmyphone lock unlock clipboard
 end
 
 # ---------------------------------------------------------------------------
-# connectivity  (just --json flag; device-id handled above)
+# battery / connectivity  (just --json flags; device-id handled above)
 # ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from battery" \
+    -l json -d 'Output raw JSON'
 complete -c kcd -n "__fish_seen_subcommand_from connectivity" \
     -l json -d 'Output the raw report as JSON'
 
@@ -194,6 +196,11 @@ for _sub in request info volumes mount unmount
     complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
         -a '(__kcd_connected_devices)' -d 'Device ID'
 end
+
+complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from info" \
+    -l json -d 'Output raw JSON'
+complete -c kcd -n "__fish_seen_subcommand_from sftp && __fish_seen_subcommand_from volumes" \
+    -l json -d 'Output raw JSON'
 
 # ---------------------------------------------------------------------------
 # reply  <device-id> <reply-id> <message>

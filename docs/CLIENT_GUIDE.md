@@ -281,6 +281,7 @@ except KeyboardInterrupt:
 
 | Filter string | When it fires |
 |---|---|
+| `state.snapshot` | Once per watch connection, right after the ack — full state for all known devices (online and offline); sent regardless of filters |
 | `device.connected` | TCP connection established |
 | `device.disconnected` | TCP connection lost |
 | `battery.update` | Battery level or charging state changed |
@@ -304,10 +305,13 @@ except KeyboardInterrupt:
 
 > **Album art:** `mpris.update` payloads (and `kcd mpris status --json`)
 > expose `albumArtUrl` as a loadable `file://` path once the daemon has
-> fetched the art from the phone into `$XDG_CACHE_HOME/kcd/art/`. If the
-> art is still being fetched or fails, the raw `kdeconnect:/artUri?...`
-> URI is emitted instead — treat anything that isn't `http(s)://` or
-> `file://` as "no art available" and show a placeholder.
+> fetched the art from the phone into `$XDG_CACHE_HOME/kcd/art/`. While the
+> fetch is in flight the payload carries `"albumArtUrl": ""` with
+> `"artPending": true` — render a placeholder whenever the URL is empty.
+
+> **Position:** payloads stamp `posAnchorMs` (Unix millis when `pos` was
+> sampled). Live position is `pos + (nowMs - posAnchorMs)` while playing,
+> frozen otherwise — no client-side timers needed.
 
 See [`IPC_PROTOCOL.md §5`](IPC_PROTOCOL.md#5-event-types) for the full list.
 
@@ -470,8 +474,11 @@ Each event type carries a different payload shape. Here are the common ones:
   "album": "Album",
   "isPlaying": true,
   "pos": 45000,
+  "posAnchorMs": 1712345678901,
   "length": 240000,
   "volume": 80,
+  "albumArtUrl": "",
+  "artPending": true,
   "canControl": true,
   "shuffle": false,
   "loopStatus": "None"

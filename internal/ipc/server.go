@@ -127,6 +127,21 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 	// Send OK response to indicate stream is starting
 	s.writeResponse(conn, Response{OK: true})
 
+	// Full-state snapshot first: every known device (online AND offline)
+	// with cached battery/media/signal, so clients boot with complete
+	// state from this single connection — no auxiliary bootstrap calls,
+	// no hydration races. Sent regardless of event filters.
+	snapEv := map[string]interface{}{
+		"type":      events.TypeStateSnapshot,
+		"timestamp": time.Now().UTC(),
+		"payload":   BuildSnapshot(s.handler.devices, s.handler.plugins),
+	}
+	data, _ := json.Marshal(snapEv)
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		return
+	}
+
 	// Initial State Dump
 	// For each connected device, we emit device.connected and battery.update.
 	devs := s.handler.devices.Connected()
@@ -144,7 +159,7 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			"timestamp": time.Now().UTC(),
 			"payload":   devData,
 		}
-		data, _ := json.Marshal(initEv)
+		data, _ = json.Marshal(initEv)
 		data = append(data, '\n')
 		if _, err := conn.Write(data); err != nil {
 			return

@@ -74,17 +74,12 @@ func (h *Handler) HandleRequest(req Request) Response {
 }
 
 func (h *Handler) handleDevices() Response {
-	// To convert the internal representation to JSON, we construct DeviceInfo structs
+	// Enriched summaries (battery/media/signal embedded, omitempty).
+	// Base identity fields are unchanged, so old clients keep working.
 	devs := h.devices.List()
-	infos := make([]device.DeviceInfo, 0, len(devs))
+	infos := make([]DeviceSummary, 0, len(devs))
 	for _, dev := range devs {
-		infos = append(infos, device.DeviceInfo{
-			ID:        dev.ID(),
-			Name:      dev.Name(),
-			Type:      dev.Type,
-			State:     dev.State(),
-			Connected: dev.IsConnected(),
-		})
+		infos = append(infos, SummarizeDevice(dev, h.plugins))
 	}
 
 	data, err := json.Marshal(infos)

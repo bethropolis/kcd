@@ -374,3 +374,54 @@ func TestHandleKeepsListedPlayer(t *testing.T) {
 	}
 	expectNoEvent(t, sub) // no spurious empty update
 }
+
+func TestPublishedEventHasAnchorAndPendingArt(t *testing.T) {
+	bus := events.NewBus(zap.NewNop())
+	sub := bus.Subscribe(4, events.TypeMprisUpdate)
+	defer sub.Close()
+
+	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	if plugin.watchCancel != nil {
+		defer plugin.watchCancel()
+	}
+	dev := testSender{id: "device-anchor"}
+
+	before := time.Now().UnixMilli()
+	state := MPRISRequest{
+		Player:         "Metrolist",
+		Title:          "Anchor Test",
+		Pos:            42000,
+		IsPlaying:      true,
+		PlaybackStatus: "Playing",
+		AlbumArtUrl:    "kdeconnect:/artUri?title=Anchor+Test&kdeArtHash=424242",
+	}
+	if err := plugin.Handle(context.Background(), dev, newMPRISPacket(t, state)); err != nil {
+		t.Fatal(err)
+	}
+
+	var ev events.Event
+	select {
+	case ev = <-sub.C:
+	case <-time.After(time.Second):
+		t.Fatal("expected event")
+	}
+	pub, ok := ev.Payload.(*NowPlaying)
+	if !ok {
+		t.Fatalf("expected *NowPlaying payload, got %T", ev.Payload)
+	}
+	if pub.PosAnchorMs < before {
+		t.Errorf("PosAnchorMs %d older than push start %d", pub.PosAnchorMs, before)
+	}
+	if pub.AlbumArtUrl != "" || !pub.ArtPending {
+		t.Errorf("expected empty URL with ArtPending, got url=%q pending=%v", pub.AlbumArtUrl, pub.ArtPending)
+	}
+
+	// Serving paths agree with the published event.
+	rs := plugin.RemoteState(dev.ID())
+	if rs == nil || rs.AlbumArtUrl != "" || !rs.ArtPending {
+		t.Errorf("RemoteState should hide unresolved art, got %+v", rs)
+	}
+	if rs.PosAnchorMs != pub.PosAnchorMs {
+		t.Errorf("anchor mismatch: published %d, served %d", pub.PosAnchorMs, rs.PosAnchorMs)
+	}
+}

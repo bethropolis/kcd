@@ -319,6 +319,7 @@ done
 
 | Event type | Payload fields | Description |
 |---|---|---|
+| `state.snapshot` | `devices[]` (enriched summaries, online and offline) | Full-state bootstrap, once per watch connection |
 | `device.added` | `name`, `type` | New device seen for the first time |
 | `device.removed` | — | Device unpaired and removed |
 | `device.connected` | `name`, `type` | TCP connection established |
@@ -339,7 +340,7 @@ done
 | `telephony.missed` | `contactName`, `phoneNumber` | Missed call |
 | `telephony.canceled` | — | Call ended |
 | `connectivity.update` | `signal`, `networkType` | Signal strength report |
-| `mpris.update` | `player`, `title`, `artist`, `album`, `isPlaying`, `pos`, `length`, `volume` | Phone now playing state changed |
+| `mpris.update` | `player`, `title`, `artist`, `album`, `isPlaying`, `pos`, `posAnchorMs`, `length`, `volume`, `albumArtUrl`, `artPending` | Phone now playing state changed |
 | `volume.update` | `name`, `volume`, `muted` | Desktop volume changed from phone |
 | `sftp.mount` | `uri`, `ip`, `port`, `user`, `password`, `path` | SFTP credentials received |
 
