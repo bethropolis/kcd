@@ -2,6 +2,7 @@ package share
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,39 @@ func SanitizeFilename(name string) string {
 	}
 
 	return name
+}
+
+// isOpenableURL reports whether a phone-shared URL may be handed to
+// xdg-open. Only http(s) with a host qualifies: other schemes (file://,
+// smb:, mailto:, custom app handlers) would dispatch phone-influenced input
+// to unrelated local programs.
+func isOpenableURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return u.Host != ""
+}
+
+// blockedAutoOpenExts are file types that must never be auto-opened after
+// download. Handing them to the desktop handler can execute code (notably
+// .desktop files, which most environments treat as launchers).
+var blockedAutoOpenExts = map[string]struct{}{
+	".desktop": {}, ".sh": {}, ".bin": {}, ".run": {}, ".jar": {},
+	".py": {}, ".pl": {}, ".rb": {}, ".php": {}, ".js": {},
+	".exe": {}, ".msi": {}, ".bat": {}, ".cmd": {}, ".com": {},
+	".scr": {}, ".ps1": {}, ".vbs": {}, ".vbe": {}, ".jse": {},
+	".wsf": {}, ".wsh": {}, ".hta": {}, ".lnk": {}, ".gadget": {},
+}
+
+// autoOpenBlocked reports whether a downloaded file must be excluded from
+// auto-open because of its extension.
+func autoOpenBlocked(path string) bool {
+	_, blocked := blockedAutoOpenExts[strings.ToLower(filepath.Ext(path))]
+	return blocked
 }
 
 // EnsureUnique finds a non-conflicting filename in the destination directory.

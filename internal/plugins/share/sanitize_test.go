@@ -28,6 +28,61 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 }
 
+func TestIsOpenableURL(t *testing.T) {
+	open := []string{
+		"https://example.com",
+		"http://example.com/path?q=1",
+		"HTTPS://EXAMPLE.COM",
+		"  https://example.com/pad  ",
+	}
+	for _, u := range open {
+		if !isOpenableURL(u) {
+			t.Errorf("isOpenableURL(%q) = false, want true", u)
+		}
+	}
+	blocked := []string{
+		"",
+		"file:///etc/passwd",
+		"ftp://example.com/x",
+		"smb://server/share",
+		"mailto:foo@example.com",
+		"javascript:alert(1)",
+		"data:text/html,hi",
+		"kdeconnect:/something",
+		"myapp://action",
+		"http://",
+		"https://",
+		"example.com/no-scheme",
+		"/just/a/path",
+		"http:noslashes",
+	}
+	for _, u := range blocked {
+		if isOpenableURL(u) {
+			t.Errorf("isOpenableURL(%q) = true, want false", u)
+		}
+	}
+}
+
+func TestAutoOpenBlocked(t *testing.T) {
+	blocked := []string{
+		"evil.desktop", "run.sh", "payload.bin", "setup.run", "app.jar",
+		"x.py", "X.PY", "s.pl", "r.rb", "p.php", "a.exe", "b.msi",
+		"c.bat", "d.cmd", "e.com", "f.scr", "g.ps1", "h.vbs", "i.lnk",
+		"EVIL.Desktop",
+	}
+	for _, n := range blocked {
+		if !autoOpenBlocked(n) {
+			t.Errorf("autoOpenBlocked(%q) = false, want true", n)
+		}
+	}
+	allowed := []string{"photo.jpg", "song.mp3", "doc.pdf", "movie.mp4", "notes.txt", "archive.zip", "noext"}
+	for _, n := range allowed {
+		if autoOpenBlocked(n) {
+			t.Errorf("autoOpenBlocked(%q) = true, want false", n)
+		}
+	}
+}
+
 func TestEnsureUnique(t *testing.T) {
 	dir := t.TempDir()
 	name := "test.txt"

@@ -134,7 +134,16 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
-		plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+		// xdg-open dispatches on URI scheme to arbitrary desktop handlers,
+		// so only http(s) may reach it: file://, smb:, mailto: and custom
+		// app schemes would hand phone-influenced input to unrelated local
+		// handlers. The URL event above still reaches clients either way.
+		if isOpenableURL(body.Url) {
+			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+		} else {
+			p.Logger.Warn("share: refusing to open non-http(s) URL",
+				zap.String("url", body.Url))
+		}
 		return nil
 	}
 
@@ -198,15 +207,23 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				})
 			}
 			if p.cfg.AutoOpen {
-				cmd := p.cfg.OpenCommand
-				if cmd == "" {
-					cmd = "xdg-open"
+				// Never auto-open executable content: handing .desktop files
+				// (or scripts) to the desktop handler can execute code. The
+				// file itself is still saved and announced — open it manually.
+				if autoOpenBlocked(destPath) {
+					p.Logger.Warn("share: refusing to auto-open executable file",
+						zap.String("file", destPath))
+				} else {
+					cmd := p.cfg.OpenCommand
+					if cmd == "" {
+						cmd = "xdg-open"
+					}
+					absPath, err := filepath.Abs(destPath)
+					if err != nil {
+						absPath = destPath
+					}
+					plugin.RunCommandAsync(p.Logger, cmd, absPath)
 				}
-				absPath, err := filepath.Abs(destPath)
-				if err != nil {
-					absPath = destPath
-				}
-				plugin.RunCommandAsync(p.Logger, cmd, absPath)
 			}
 		}
 	}()
