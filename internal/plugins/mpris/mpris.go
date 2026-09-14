@@ -610,15 +610,27 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 		return
 	}
 
+	p.stampAlbumArt(dev.ID(), player, artUrl, fileURL)
+}
+
+// stampAlbumArt publishes a resolved file:// URL for a completed album-art
+// fetch — but only if the device's current track still wants exactly this
+// art. The side-channel download can take up to 30s, during which the track
+// (or the active player) may have changed; stamping blindly would show the
+// old track's cover on the new track. On mismatch the bytes stay in the art
+// cache and the new track's own art request fulfills it.
+func (p *MPRISPlugin) stampAlbumArt(deviceID, player, artUrl, fileURL string) {
 	p.mu.Lock()
-	state := p.remoteStates[dev.ID()]
-	if state != nil {
-		state = state.DeepCopy()
-		state.AlbumArtUrl = fileURL
+	state := p.remoteStates[deviceID]
+	if state == nil || state.AlbumArtUrl != artUrl || state.Player != player {
+		p.mu.Unlock()
+		return
 	}
+	state = state.DeepCopy()
+	state.AlbumArtUrl = fileURL
 	p.mu.Unlock()
-	if state != nil && p.bus != nil {
-		p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+	if p.bus != nil {
+		p.bus.Publish(events.TypeMprisUpdate, deviceID, state)
 	}
 }
 

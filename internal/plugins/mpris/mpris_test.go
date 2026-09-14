@@ -207,6 +207,84 @@ func TestHandleIgnoresEmptyAlbumArtPayload(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let any goroutine finish
 }
 
+func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
+	bus := events.NewBus(zap.NewNop())
+	sub := bus.Subscribe(4, events.TypeMprisUpdate)
+	defer sub.Close()
+
+	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	if plugin.watchCancel != nil {
+		defer plugin.watchCancel()
+	}
+
+	const urlA = "kdeconnect:/artUri?title=Song+A&kdeArtHash=111"
+	const urlB = "kdeconnect:/artUri?title=Song+B&kdeArtHash=222"
+
+	seed := func(player, title, art string) {
+		plugin.mu.Lock()
+		plugin.remoteStates["dev-art-race"] = &NowPlaying{Player: player, Title: title, AlbumArtUrl: art}
+		plugin.mu.Unlock()
+	}
+	storedArt := func() string {
+		plugin.mu.Lock()
+		defer plugin.mu.Unlock()
+		return plugin.remoteStates["dev-art-race"].AlbumArtUrl
+	}
+
+	// Positive: art arrives for the track still current — publish file://
+	// against that track's metadata.
+	seed("Spotify", "Song A", urlA)
+	plugin.stampAlbumArt("dev-art-race", "Spotify", urlA, "file:///cache/a.jpg")
+	select {
+	case ev := <-sub.C:
+		got, ok := ev.Payload.(*NowPlaying)
+		if !ok {
+			t.Fatalf("expected *NowPlaying payload, got %T", ev.Payload)
+		}
+		if got.Title != "Song A" || got.AlbumArtUrl != "file:///cache/a.jpg" {
+			t.Fatalf("wrong attribution: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected mpris update for matching art")
+	}
+	if got := storedArt(); got != urlA {
+		t.Fatalf("stored state must keep the kdeconnect: URL, got %q", got)
+	}
+
+	// Negative: track advanced to B while A's fetch was in flight — drop
+	// A's bytes (the cache keeps them) and publish nothing.
+	seed("Spotify", "Song B", urlB)
+	plugin.stampAlbumArt("dev-art-race", "Spotify", urlA, "file:///cache/a.jpg")
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("stale art must not publish, got %#v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := storedArt(); got != urlB {
+		t.Fatalf("B's art URL must be untouched, got %q", got)
+	}
+
+	// Negative: same art URL but a different player took over — drop.
+	seed("YouTube", "Song A", urlA)
+	plugin.stampAlbumArt("dev-art-race", "Spotify", urlA, "file:///cache/a.jpg")
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("other-player art must not publish, got %#v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Negative: no state at all — drop without panicking.
+	plugin.mu.Lock()
+	delete(plugin.remoteStates, "dev-art-race")
+	plugin.mu.Unlock()
+	plugin.stampAlbumArt("dev-art-race", "Spotify", urlA, "file:///cache/a.jpg")
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("art with no state must not publish, got %#v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestPollRemoteStatesOnlyTargetsKnownPlayers(t *testing.T) {
 	plugin := NewMPRISPlugin(nil, events.NewBus(zap.NewNop()), false, zap.NewNop())
 	if plugin.watchCancel != nil {
