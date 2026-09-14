@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"go.uber.org/zap"
@@ -68,5 +69,64 @@ func TestEphemeralMarkerReset(t *testing.T) {
 	}
 	if dev.PairDialPending() {
 		t.Fatal("pair intent not cleared after consume")
+	}
+}
+
+func TestPairDialIntentLifetime(t *testing.T) {
+	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev.MarkEphemeralDialed()
+
+	if dev.PairDialActive() {
+		t.Fatal("new device must have no active pair intent")
+	}
+
+	dev.RequestPairDial()
+	if !dev.PairDialActive() {
+		t.Fatal("pair intent not active after request")
+	}
+
+	// Consuming the one-shot dial trigger must NOT clear the keep-alive
+	// intent: a slow phone-side accept must not downgrade into an
+	// ephemeral-close flap.
+	if !dev.ConsumePairDial() {
+		t.Fatal("pair intent not consumed")
+	}
+	if !dev.PairDialActive() {
+		t.Fatal("keep-alive intent lost after one-shot consume")
+	}
+	if shouldEphemeralClose(dev, false) {
+		t.Fatal("explicit intent must pin the connection after consume")
+	}
+
+	dev.ClearPairDial()
+	if dev.PairDialActive() {
+		t.Fatal("pair intent not cleared")
+	}
+	if !shouldEphemeralClose(dev, false) {
+		t.Fatal("idle stranger should close once intent is cleared")
+	}
+}
+
+func TestLastPortRoundTrip(t *testing.T) {
+	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	if dev.LastPort() != 0 {
+		t.Fatal("new device must have unknown port")
+	}
+	dev.SetLastPort(1716)
+	if dev.LastPort() != 1716 {
+		t.Fatalf("LastPort() = %d, want 1716", dev.LastPort())
+	}
+}
+
+func TestShouldDiscoveryDialThrottle(t *testing.T) {
+	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	if !dev.ShouldDiscoveryDial(10 * time.Second) {
+		t.Fatal("first dial must be allowed")
+	}
+	if dev.ShouldDiscoveryDial(10 * time.Second) {
+		t.Fatal("immediate redial must be throttled")
+	}
+	if !dev.ShouldDiscoveryDial(0) {
+		t.Fatal("zero interval must always allow")
 	}
 }

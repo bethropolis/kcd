@@ -83,9 +83,10 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		bc.Stop()
 		// Pairing window closed: drop discovery connections that never led
 		// to pairing so strangers don't linger. Paired devices, pair
-		// requests in flight, and explicit pair intents are left alone.
+		// requests in flight, and explicit pair intents (kept alive until
+		// pairing starts, ends, or expires) are left alone.
 		for _, dev := range devices.List() {
-			if !dev.IsConnected() || dev.State() != device.StateUnpaired || dev.PairDialPending() {
+			if !dev.IsConnected() || dev.State() != device.StateUnpaired || dev.PairDialActive() {
 				continue
 			}
 			logger.Debug("broadcast stopped, dropping unpaired discovery connection",

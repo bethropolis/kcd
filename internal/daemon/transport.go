@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -23,8 +24,22 @@ import (
 // escalating instead of resetting to the 2s floor on every drop.
 const reconnectFlapThreshold = 15 * time.Second
 
+// validDialPort reports whether a discovery-advertised TCP port is usable.
+// Port 0 and out-of-range values come from malformed or hostile packets and
+// must never reach the dialer (port 0 would dial ":0").
+func validDialPort(port int) bool {
+	return port > 0 && port <= 65535
+}
+
 // DialDevice manually connects to a device at the given IP and port.
 func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+	if targetIP == nil || !validDialPort(targetPort) {
+		logger.Debug("refusing to dial invalid target",
+			zap.String("device_id", targetID),
+			zap.String("ip", targetIP.String()),
+			zap.Int("port", targetPort))
+		return
+	}
 	addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
 	logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
 
@@ -40,6 +55,11 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 
 	var myID protocol.IdentityBody
 	json.Unmarshal(identity.Body, &myID)
+	// Clamp the echoed protocol version: discovery bodies are unauthenticated
+	// and a garbage value here would only confuse the peer.
+	if targetProto <= 0 || targetProto > protocol.ProtocolVersion {
+		targetProto = protocol.ProtocolVersion
+	}
 	preTlsId := protocol.IdentityBody{
 		DeviceID:              myID.DeviceID,
 		DeviceName:            myID.DeviceName,
@@ -89,7 +109,9 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	if dev.State() != device.StateUnpaired {
 		return false
 	}
-	if dev.PairDialPending() {
+	// An explicit `kcd pair <id>` intent outlives the one-shot dial trigger
+	// (consumed on first sighting) until pairing starts, ends, or expires.
+	if dev.PairDialActive() {
 		return false
 	}
 	return true
@@ -116,6 +138,36 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	//     era so both sides can list each other (the TCP identity exchange
 	//     is what makes the PC appear on the phone). The next sighting
 	//     closes the socket again while it is still unpaired.
+	// Ephemeral-dial rate limiting: a hostile or buggy peer minting fresh
+	// device IDs per broadcast could otherwise spawn an unbounded dial per
+	// announcement. Stranger dials are throttled globally (1/s) and per
+	// announcer IP (1/5s). Paired and explicit-intent dials bypass this —
+	// paired dials have their own per-device throttle below and intent
+	// dials are user-initiated.
+	var dialMu sync.Mutex
+	lastEphemeralGlobal := time.Now().Add(-time.Minute)
+	lastEphemeralByIP := map[string]time.Time{}
+	allowEphemeralDial := func(ip net.IP) bool {
+		dialMu.Lock()
+		defer dialMu.Unlock()
+		now := time.Now()
+		if now.Sub(lastEphemeralGlobal) < time.Second {
+			return false
+		}
+		if last, ok := lastEphemeralByIP[ip.String()]; ok && now.Sub(last) < 5*time.Second {
+			return false
+		}
+		// Opportunistic prune so spoofed source IPs can't grow the map.
+		for k, v := range lastEphemeralByIP {
+			if now.Sub(v) > time.Minute {
+				delete(lastEphemeralByIP, k)
+			}
+		}
+		lastEphemeralGlobal = now
+		lastEphemeralByIP[ip.String()] = now
+		return true
+	}
+
 	onDeviceFound := func(ip net.IP, tcpPort int, peerIdentity *protocol.Packet) {
 		var body protocol.IdentityBody
 		if err := json.Unmarshal(peerIdentity.Body, &body); err != nil {
@@ -123,6 +175,14 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		}
 
 		if body.DeviceID == localDeviceID {
+			return
+		}
+
+		// Never dial garbage ports from unauthenticated announcements.
+		if !validDialPort(tcpPort) {
+			logger.Debug("ignoring discovery with invalid tcpPort",
+				zap.String("device_id", body.DeviceID),
+				zap.Int("port", tcpPort))
 			return
 		}
 
@@ -140,6 +200,28 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			return
 		}
 
+		if known && dev.State() == device.StatePaired {
+			// Paired devices never trust discovery for their dial target:
+			// the DeviceID/TCPPort in these packets are unauthenticated, so
+			// a spoofed sighting must not redirect the auto-dial or clobber
+			// the name. Redial the last known-good address from the
+			// authenticated exchange instead; after a restart (no LastIP
+			// yet) wait for the phone's inbound connection.
+			dev.SetLastSeen(time.Now())
+			if !dev.IsConnected() {
+				if lastIP := dev.LastIP(); lastIP != nil {
+					port := dev.LastPort()
+					if !validDialPort(port) {
+						port = 1716
+					}
+					if dev.ShouldDiscoveryDial(10 * time.Second) {
+						go DialDevice(ctx, lastIP, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
+					}
+				}
+			}
+			return
+		}
+
 		safeName := protocol.SanitizeDeviceName(body.DeviceName)
 		if !known {
 			dev = device.NewDevice(body.DeviceID, safeName, body.DeviceType, logger)
@@ -150,7 +232,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		dev.SetDiscoveryAddr(ip, tcpPort)
 		dev.SetLastSeen(time.Now())
 
-		if dev.State() == device.StatePaired || pairingMode || dev.ConsumePairDial() {
+		if pairingMode || dev.ConsumePairDial() {
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
 				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
@@ -160,6 +242,9 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 
 		if !dev.EphemeralDialed() {
 			dev.MarkEphemeralDialed()
+			if !allowEphemeralDial(ip) {
+				return
+			}
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
 				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
@@ -267,6 +352,13 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		}
 	} else {
 		dev.CertFP = certFP
+	}
+
+	// Remember the peer's listening port from the authenticated exchange so
+	// paired auto-dials use a known-good target instead of trusting future
+	// (unauthenticated) discovery announcements.
+	if validDialPort(peerBody.TCPPort) {
+		dev.SetLastPort(peerBody.TCPPort)
 	}
 
 	dev.IncomingCaps = peerBody.IncomingCapabilities

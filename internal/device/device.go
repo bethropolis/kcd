@@ -28,6 +28,11 @@ type Device struct {
 
 	lastSeen time.Time
 	lastIP   net.IP // cached from last successful connection; survives Disconnect
+	// lastPort is the tcpPort the peer last advertised over the authenticated
+	// (post-TLS) identity exchange. Used with lastIP as the dial target for
+	// paired devices so unauthenticated discovery packets can never redirect
+	// a paired auto-dial. Zero means unknown (fall back to 1716).
+	lastPort int
 
 	// discoveryIP/discoveryPort remember where a device was last seen
 	// announcing itself (UDP/mDNS), even if we never opened a TCP
@@ -36,11 +41,24 @@ type Device struct {
 	discoveryIP   net.IP
 	discoveryPort int
 
-	// pairDialRequested is set when the user explicitly asked to pair with
-	// this device while it has no active connection. The next discovery
-	// announcement for it triggers a one-shot outbound dial so the pair
-	// request can be delivered.
+	// pairDialRequested is the one-shot outbound dial trigger for an explicit
+	// `kcd pair <id>` request. It is consumed by the first discovery
+	// announcement after the request so the pair request can be delivered.
 	pairDialRequested atomic.Bool
+
+	// pairIntentUntil is the Unix-nano deadline until which an explicit pair
+	// intent keeps a connection alive. Unlike pairDialRequested (consumed on
+	// first sighting), the intent survives dial/connect cycles until pairing
+	// starts, is rejected, succeeds, or the deadline (pairDialIntentTTL)
+	// expires — so a slow phone-side accept can't downgrade into an
+	// ephemeral-close flap.
+	pairIntentUntil atomic.Int64
+
+	// lastDiscoveryDial is when onDeviceFound last spawned a dial for this
+	// device. It throttles paired auto-redials to a dead LastIP so a phone
+	// that changed DHCP address (or a spoofed broadcast storm) can't cause
+	// a dial per announcement.
+	lastDiscoveryDial time.Time
 
 	// ephemeralDialed marks that this device already received its one
 	// ephemeral discovery dial for the current unpaired era. Ephemeral
@@ -358,11 +376,17 @@ func (d *Device) DiscoveryAddr() (net.IP, int) {
 	return d.discoveryIP, d.discoveryPort
 }
 
+// pairDialIntentTTL bounds how long an explicit `kcd pair <id>` intent pins
+// a connection while pairing hasn't started yet.
+const pairDialIntentTTL = 5 * time.Minute
+
 // RequestPairDial marks the device for a one-shot outbound dial on its next
-// discovery announcement. Used when the user explicitly runs `kcd pair <id>`
-// for a device with no active connection.
+// discovery announcement and arms the keep-alive intent until pairing starts,
+// is rejected, succeeds, or the TTL expires. Used when the user explicitly
+// runs `kcd pair <id>` for a device with no active connection.
 func (d *Device) RequestPairDial() {
 	d.pairDialRequested.Store(true)
+	d.pairIntentUntil.Store(time.Now().Add(pairDialIntentTTL).UnixNano())
 }
 
 // ConsumePairDial reports and clears a pending explicit pair-dial request.
@@ -374,6 +398,50 @@ func (d *Device) ConsumePairDial() bool {
 // without clearing it.
 func (d *Device) PairDialPending() bool {
 	return d.pairDialRequested.Load()
+}
+
+// PairDialActive reports whether an explicit pair intent is still keeping
+// the connection alive: requested and neither cleared nor expired. Unlike
+// PairDialPending (the one-shot dial trigger, consumed on first sighting),
+// this survives dial/connect cycles until pairing starts or ends.
+func (d *Device) PairDialActive() bool {
+	return d.pairIntentUntil.Load() > time.Now().UnixNano()
+}
+
+// ClearPairDial drops both the one-shot trigger and the keep-alive intent.
+// Call it when pairing completes, is rejected/cancelled, or is unpaired.
+func (d *Device) ClearPairDial() {
+	d.pairDialRequested.Store(false)
+	d.pairIntentUntil.Store(0)
+}
+
+// LastPort returns the last authenticated tcpPort advertised by the peer,
+// or 0 if unknown.
+func (d *Device) LastPort() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.lastPort
+}
+
+// SetLastPort records the peer's advertised listening port after a
+// successful authenticated exchange. Callers must pass a validated port.
+func (d *Device) SetLastPort(port int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastPort = port
+}
+
+// ShouldDiscoveryDial reports whether enough time has passed since the last
+// discovery-triggered dial for this device, and marks this dial if so. It
+// bounds redial storms to a stale LastIP (DHCP roam) or spoofed sightings.
+func (d *Device) ShouldDiscoveryDial(minInterval time.Duration) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastDiscoveryDial) < minInterval {
+		return false
+	}
+	d.lastDiscoveryDial = time.Now()
+	return true
 }
 
 // MarkEphemeralDialed records that the one ephemeral discovery dial for the

@@ -84,7 +84,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			}
 			// Migrate pre-fix names: some senders transmit decimal byte
 			// escapes (e.g. "Caf\\195\\169"); decode to real UTF-8.
-			info.Name = protocol.SanitizeDeviceName(protocol.DecodeDeviceName(info.Name))
+			// (SanitizeDeviceName already decodes; don't double-decode.)
+			info.Name = protocol.SanitizeDeviceName(info.Name)
 			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
 			dev.SetState(info.State)
 			dev.CertFP = info.CertFP
@@ -171,6 +172,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 				logger.Warn("on-demand pair dial failed", zap.String("device_id", deviceID))
 				return
 			}
+			// The immediate dial succeeded: consume the one-shot trigger so
+			// the next discovery announcement doesn't spawn a duplicate
+			// dial. The keep-alive intent (PairDialActive) stays armed until
+			// pairing starts, ends, or expires. On failure the trigger is
+			// left for the next sighting to retry.
+			dev.ConsumePairDial()
 			if dev.State() == device.StatePairRequestedByPeer {
 				if err := pairPlugin.AcceptPairing(dev); err != nil {
 					logger.Warn("auto-accept on pair dial failed", zap.Error(err))

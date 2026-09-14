@@ -10,6 +10,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/urfave/cli/v2"
 )
 
@@ -139,7 +140,7 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 				}
 
 				fmt.Printf("\nIncoming pair request from:\n")
-				fmt.Printf("  Device: %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+				fmt.Printf("  Device: %s (%s)\n", protocol.DisplayName(r.result.DeviceName), r.result.DeviceID)
 				if r.result.VerificationKey != "" {
 					fmt.Printf("  Verification code: %s\n", r.result.VerificationKey)
 				}
@@ -149,7 +150,7 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 					if err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
-					fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+					fmt.Printf("Paired with %s (%s)\n", protocol.DisplayName(r.result.DeviceName), r.result.DeviceID)
 					return nil
 				}
 
@@ -163,13 +164,13 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 					if err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
-					fmt.Printf("Paired with %s (%s)\n", r.result.DeviceName, r.result.DeviceID)
+					fmt.Printf("Paired with %s (%s)\n", protocol.DisplayName(r.result.DeviceName), r.result.DeviceID)
 					return nil
 				}
 
 				// User rejected: reject and cancel request
 				_ = cl.Unpair(r.result.DeviceID)
-				fmt.Printf("Rejected pairing with %s\n", r.result.DeviceName)
+				fmt.Printf("Rejected pairing with %s\n", protocol.DisplayName(r.result.DeviceName))
 				return nil
 			}
 		}
@@ -205,6 +206,6 @@ func printDeviceTable(devices []device.DeviceInfo) {
 	fmt.Printf("%-36s %-20s %-10s %-10s %s\n", "DEVICE ID", "NAME", "TYPE", "STATE", "CONNECTED")
 	fmt.Println("---------------------------------------------------------------------------------------------------")
 	for _, d := range devices {
-		fmt.Printf("%-36s %-20s %-10s %-10s %v\n", d.ID, d.Name, d.Type, d.State, d.Connected)
+		fmt.Printf("%-36s %-20s %-10s %-10s %v\n", d.ID, protocol.DisplayName(d.Name), d.Type, d.State, d.Connected)
 	}
 }

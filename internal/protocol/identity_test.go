@@ -38,6 +38,39 @@ func TestSanitizeDeviceName(t *testing.T) {
 	if got := SanitizeDeviceName("Phone (Work); rm -rf"); got != "Phone Work rm -rf" {
 		t.Errorf("injection chars not stripped: got %q", got)
 	}
+	// Shell metacharacters must not survive sanitization.
+	for _, tc := range []struct{ in, want string }{
+		{"`id`", "id"},
+		{"${HOME}", "HOME"},
+		{"$(whoami)", "whoami"},
+		{"a|cat /etc/passwd", "acat etcpasswd"},
+		{"a & rm", "a  rm"},
+		{`back\slash`, "backslash"},
+		{"a*b?c", "abc"},
+	} {
+		if got := SanitizeDeviceName(tc.in); got != tc.want {
+			t.Errorf("SanitizeDeviceName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// Control characters (NUL, newlines, ESC, bidi overrides) are dropped.
+	for _, in := range []string{
+		"A\x00B",
+		"Phone\nFAKE-INFO",
+		"Phone\r\nspam",
+		"\x1b]0;pwned\x07Phone",
+		"ab\u202ec routine",
+		"tab\there",
+	} {
+		got := SanitizeDeviceName(in)
+		for _, r := range got {
+			if r == 0 || r == '\n' || r == '\r' || r == '\x1b' || r == '\u202e' || r == '\t' {
+				t.Errorf("SanitizeDeviceName(%q) keeps control rune: got %q", in, got)
+			}
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("SanitizeDeviceName(%q) invalid UTF-8: %q", in, got)
+		}
+	}
 	// Multibyte truncation must never split a rune nor exceed the cap.
 	long := strings.Repeat("Ö", 40) // 80 bytes
 	got := SanitizeDeviceName(long)
@@ -49,5 +82,23 @@ func TestSanitizeDeviceName(t *testing.T) {
 	}
 	if n := len([]rune(got)); n != MaxDeviceNameLength/2 {
 		t.Errorf("expected 16 Ö runes (32 bytes), got %d runes", n)
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Pixel 8 Pro", "Pixel 8 Pro"},
+		{"Café", "Café"},
+		{"A\nB", "A B"},
+		{"A\r\nB", "A  B"},
+		{"A\tB", "A B"},
+		{"\x1b[2JPhone", "Phone"},
+		{"\x1b[31mRed\x1b[0m", "Red"},
+		{"\x1b]0;title\x07Phone", "Phone"},
+	}
+	for _, tc := range cases {
+		if got := DisplayName(tc.in); got != tc.want {
+			t.Errorf("DisplayName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
