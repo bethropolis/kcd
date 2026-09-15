@@ -97,13 +97,18 @@ func (h *Handler) saveDevices() {
 	devs := h.devices.List()
 	infos := make([]device.DeviceInfo, 0, len(devs))
 	for _, dev := range devs {
-		infos = append(infos, device.DeviceInfo{
-			ID:     dev.ID(),
-			Name:   dev.Name(),
-			Type:   dev.Type,
-			State:  dev.State(),
-			CertFP: dev.CertFP,
-		})
+		info := device.DeviceInfo{
+			ID:       dev.ID(),
+			Name:     dev.Name(),
+			Type:     dev.Type,
+			State:    dev.State(),
+			CertFP:   dev.CertFP,
+			LastPort: dev.LastPort(),
+		}
+		if ip := dev.LastIP(); ip != nil {
+			info.LastIP = ip.String()
+		}
+		infos = append(infos, info)
 	}
 	_ = device.SaveDevices(h.statePath, infos)
 }

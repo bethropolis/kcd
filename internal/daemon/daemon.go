@@ -90,6 +90,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			dev.SetState(info.State)
 			dev.CertFP = info.CertFP
 			dev.SetLastSeen(info.LastSeen)
+			// Restore the dial target so paired auto-dial works immediately
+			// after a restart (validation inside DialTarget — the file is
+			// user-editable).
+			if ip, port := info.DialTarget(); ip != nil {
+				dev.SetLastIP(ip)
+				dev.SetLastPort(port)
+			}
 			devices.Add(dev)
 		}
 	} else {
@@ -107,14 +114,20 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		devs := devices.List()
 		infos := make([]device.DeviceInfo, 0, len(devs))
 		for _, dev := range devs {
-			infos = append(infos, device.DeviceInfo{
+			info := device.DeviceInfo{
 				ID:       dev.ID(),
 				Name:     dev.Name(),
 				Type:     dev.Type,
 				State:    dev.State(),
 				CertFP:   dev.CertFP,
 				LastSeen: dev.LastSeen(),
-			})
+				LastPort: dev.LastPort(),
+			}
+			// net.IP.String() on nil renders "<nil>" — store empty instead.
+			if ip := dev.LastIP(); ip != nil {
+				info.LastIP = ip.String()
+			}
+			infos = append(infos, info)
 		}
 		_ = device.SaveDevices(statePath, infos)
 	}

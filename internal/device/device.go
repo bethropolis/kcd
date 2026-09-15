@@ -461,6 +461,14 @@ func (d *Device) SetLastPort(port int) {
 	d.lastPort = port
 }
 
+// SetLastIP records a dial target, used when restoring persisted state.
+// A nil IP clears the target.
+func (d *Device) SetLastIP(ip net.IP) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastIP = ip
+}
+
 // ShouldDiscoveryDial reports whether enough time has passed since the last
 // discovery-triggered dial for this device, and marks this dial if so. It
 // bounds redial storms to a stale LastIP (DHCP roam) or spoofed sightings.
