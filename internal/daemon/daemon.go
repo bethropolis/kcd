@@ -152,6 +152,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	bc := discovery.NewBroadcasterController(identity, 30*time.Second, logger, devices.AllPairedDevicesConnected)
 
+	// mDNS advertisement is always on: unlike UDP broadcast it is
+	// responder-only (zero idle timers), so phones keep a standing
+	// discovery path even while UDP broadcast is stopped.
+	go discovery.AdvertiseMDNS(ctx, identity, logger)
+
 	// 5. IPC Server
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
 

@@ -84,6 +84,41 @@ func (bc *BroadcasterController) IsRunning() bool {
 	return bc.running
 }
 
+// AdvertiseMDNS registers the local identity as _kdeconnect._udp until
+// ctx ends. Unlike UDP broadcast this is responder-only (it wakes on
+// incoming queries), so it stays up for the daemon lifetime at negligible
+// idle cost and gives phones a standing discovery path even while UDP
+// broadcast is stopped.
+func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger *zap.Logger) {
+	var idBody protocol.IdentityBody
+	if err := json.Unmarshal(identityPacket.Body, &idBody); err != nil {
+		logger.Warn("failed to parse identity for mDNS", zap.Error(err))
+		return
+	}
+	server, err := zeroconf.Register(
+		idBody.DeviceName,
+		"_kdeconnect._udp",
+		"local.",
+		idBody.TCPPort,
+		[]string{
+			"id=" + idBody.DeviceID,
+			"name=" + idBody.DeviceName,
+			"type=" + idBody.DeviceType,
+			"protocol=8",
+		},
+		nil,
+	)
+	if err != nil {
+		logger.Warn("failed to register mDNS service", zap.Error(err))
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		server.Shutdown()
+		logger.Info("mDNS service shut down")
+	}()
+}
+
 // Broadcaster sends identity packets over UDP to advertise the local device.
 type Broadcaster struct {
 	identityPacket *protocol.Packet
@@ -103,36 +138,8 @@ func NewBroadcaster(identity *protocol.Packet, interval time.Duration, logger *z
 // Run periodically sends the identity packet to 255.255.255.255:1716.
 // If shouldReduce is provided and returns true, the broadcast frequency
 // is reduced to 60 seconds to save CPU and network resources while idle.
+// (mDNS advertisement is no longer tied to this loop — see AdvertiseMDNS.)
 func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
-	// Register mDNS
-	var idBody protocol.IdentityBody
-	if err := json.Unmarshal(b.identityPacket.Body, &idBody); err == nil {
-		server, err := zeroconf.Register(
-			idBody.DeviceName,
-			"_kdeconnect._udp",
-			"local.",
-			idBody.TCPPort,
-			[]string{
-				"id=" + idBody.DeviceID,
-				"name=" + idBody.DeviceName,
-				"type=" + idBody.DeviceType,
-				"protocol=8",
-			},
-			nil,
-		)
-		if err != nil {
-			b.logger.Warn("failed to register mDNS service", zap.Error(err))
-		} else {
-			go func() {
-				<-ctx.Done()
-				server.Shutdown()
-				b.logger.Info("mDNS service shut down")
-			}()
-		}
-	} else {
-		b.logger.Warn("failed to parse identity for mDNS", zap.Error(err))
-	}
-
 	normalInterval := b.interval
 	reducedInterval := 60 * time.Second
 
