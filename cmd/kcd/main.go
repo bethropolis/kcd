@@ -125,6 +125,7 @@ func main() {
 			clipboardCmd,
 			runCmd,
 			smsCmd,
+			contactsCmd,
 			mprisCmd,
 			volumeCmd,
 			{

@@ -22,6 +22,7 @@ type PluginConfig struct {
 	SystemVolume       bool `toml:"systemvolume"`
 	PauseMusic         bool `toml:"pausemusic"`
 	SMS                bool `toml:"sms"`
+	Contacts           bool `toml:"contacts"`
 	Presenter          bool `toml:"presenter"`
 	FindThisDevice     bool `toml:"findthisdevice"`
 	RemoteSystemVolume bool `toml:"remotesystemvolume"`
@@ -113,6 +114,7 @@ func (p *PluginConfig) Defaults() {
 	p.SystemVolume = true
 	p.PauseMusic = true
 	p.SMS = true
+	p.Contacts = true
 	p.Presenter = true
 	p.FindThisDevice = true
 	p.RemoteSystemVolume = true

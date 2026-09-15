@@ -7,6 +7,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/plugins/contacts"
 	"github.com/bethropolis/kcd/internal/plugins/pair"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -182,6 +183,7 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 			return Response{OK: false, Error: "failed to unpair: " + err.Error()}
 		}
 		dev.Disconnect()
+		h.forgetContacts(p.DeviceID)
 		return Response{OK: true}
 	}
 
@@ -190,9 +192,25 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 	_ = dev.Send(pkt)
 	dev.Disconnect()
 	h.devices.Remove(p.DeviceID)
+	h.forgetContacts(p.DeviceID)
 	h.saveDevices()
 
 	return Response{OK: true}
+}
+
+// forgetContacts drops a device's cached contacts on unpair: revoked trust
+// drops the address book. Absent plugin or cache is a no-op.
+func (h *Handler) forgetContacts(deviceID string) {
+	if h.plugins == nil {
+		return
+	}
+	pl, ok := h.plugins.GetByName("Contacts")
+	if !ok {
+		return
+	}
+	if cpl, ok := pl.(*contacts.ContactsPlugin); ok {
+		_ = cpl.ForgetDevice(deviceID)
+	}
 }
 
 func (h *Handler) handlePairListen() Response {

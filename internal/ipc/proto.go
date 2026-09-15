@@ -33,6 +33,8 @@ const (
 	CmdSmsRequestConvs      = "sms_request_conversations"
 	CmdSmsRequestConv       = "sms_request_conversation"
 	CmdSmsRequestAttachment = "sms_request_attachment"
+	CmdContactsSync         = "contacts_sync"
+	CmdContactsList         = "contacts_list"
 	CmdSftpMountLocal       = "sftp_mount_local"
 	CmdSftpUnmount          = "sftp_unmount"
 	CmdStatus               = "status"

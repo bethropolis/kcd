@@ -35,6 +35,9 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	if cfg.Plugins.Clipboard {
 		registerClipboardRoutes(handler, devices, plugins)
 	}
+	if cfg.Plugins.Contacts {
+		registerContactsRoutes(handler, devices, plugins)
+	}
 	if cfg.Plugins.RunCommand {
 		registerRunCommandRoutes(handler, devices)
 	}

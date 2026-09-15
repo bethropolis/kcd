@@ -359,6 +359,37 @@ Request an MMS attachment file from a device.
 **Response data:** none (attachment arrives via side-channel transfer, emitted
 as `sms.attachment` event).
 
+#### `contacts_sync`
+
+Request a contacts sync round from a device (UID/timestamp list, then
+vCards for new or changed contacts).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** none (progress arrives as `contacts.updated` events;
+requires a connected device).
+
+#### `contacts_list`
+
+List cached contact summaries for a device.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** array of `{"uid", "name", "phones"?, "emails"?, "timestamp"}`.
+Empty when never synced — absent means unknown. Example:
+
+```json
+[{"uid": "1", "name": "Ada Lovelace", "phones": ["+1-555-0100"], "timestamp": 973486597}]
+```
+
 #### `call_mute`
 
 Mute an incoming phone call.
@@ -1138,7 +1169,26 @@ An MMS attachment has been downloaded.
 {"filename": "image.jpg", "path": "/tmp/kcd-sms-attachment-...", "thread_id": 42}
 ```
 
-### 5.12 Ring Events
+### 5.12 Contacts Events
+
+#### `contacts.updated`
+
+A contacts sync round made progress. Counts only — no contact content on
+the event stream; call `contacts_list` for data.
+
+**Payload** (uids round):
+
+```json
+{"phase": "uids", "added": 3, "updated": 1, "deleted": 0, "pending": 4}
+```
+
+**Payload** (vCards round):
+
+```json
+{"phase": "vcards", "stored": 4, "skipped": 0}
+```
+
+### 5.13 Ring Events
 
 #### `ring.received`
 
@@ -1147,7 +1197,7 @@ this daemon to ring).
 
 **Payload:** none (`null`)
 
-### 5.13 MPRIS Events
+### 5.14 MPRIS Events
 
 #### `mpris.update`
 
@@ -1246,6 +1296,8 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.sms.request_conversations` | SMS | Request conversation list |
 | `kdeconnect.sms.request_conversation` | SMS | Request a specific thread's messages |
 | `kdeconnect.sms.request_attachment` | SMS | Request an MMS attachment file |
+| `kdeconnect.contacts.request_all_uids_timestamps` | Contacts | Request all contact UIDs + timestamps (empty body) |
+| `kdeconnect.contacts.request_vcards_by_uid` | Contacts | Request vCards (`{"uids": [...]}`) |
 | `kdeconnect.telephony.request_mute` | Telephony | Mute incoming call ringer |
 | `kdeconnect.systemvolume` | SystemVolume | Push local sink list to phone |
 | `kdeconnect.systemvolume.request` | RemoteSystemVolume | Set phone volume/mute or request sink list |
@@ -1274,6 +1326,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.telephony` | Telephony | `TelephonyBody{Event, ContactName, PhoneNumber, IsCancel}` |
 | `kdeconnect.sms.messages` | SMS | `SMSMessagesPacket{Version, Messages []SMSMessage}` |
 | `kdeconnect.sms.attachment_file` | SMS | `AttachmentFileBody{Filename, ThreadID}` |
+| `kdeconnect.contacts.response_uids_timestamps` | Contacts | `{"uids": [...], "<uid>": <timestamp string|int>}` |
+| `kdeconnect.contacts.response_vcards` | Contacts | `{"uids": [...], "<uid>": "<vCard text>"}` |
 | `kdeconnect.findmyphone.request` | FindMyPhone | (empty, triggers ring event) |
 | `kdeconnect.connectivity_report` | Connectivity | `ConnectivityBody{SignalStrengths map[string]SignalStrength}` |
 | `kdeconnect.clipboard` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |

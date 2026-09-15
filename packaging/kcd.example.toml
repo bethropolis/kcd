@@ -148,6 +148,15 @@ systemvolume = true
 # See the [sms] section below for notification settings.
 sms = true
 
+# Sync the phone address book (vCards cached under
+# ~/.local/share/kcd/contacts/<device-id>/).
+# Commands:
+#   kcd contacts sync <id>                 — Request a sync (results via `kcd watch --events contacts.updated`)
+#   kcd contacts list <id> [--json]        — List cached contacts
+# The phone gates this on READ_CONTACTS plus per-device opt-in; unpairing
+# wipes the cached address book.
+contacts = true
+
 # Presenter remote — control slideshow presentations from the phone.
 # Gyroscope-based pointer: requires xdotool (X11) or ydotool (Wayland).
 # Screen size detection: requires xdpyinfo (X11) or wlr-randr (Wayland).

@@ -790,6 +790,32 @@ kcd sms attachment <device-id> <part-id> <unique-identifier>
 
 ---
 
+## contacts
+
+Sync and browse the phone address book. The phone gates this on
+`READ_CONTACTS` plus per-device opt-in — unanswered syncs simply produce
+no events. Unpairing wipes the cached address book.
+
+### contacts sync
+
+Request a sync round (UID/timestamp list, then vCards for new or changed
+contacts). Progress arrives as `contacts.updated` events (counts only).
+
+```
+kcd contacts sync <device-id>
+```
+
+### contacts list
+
+List cached contact summaries (empty when never synced — absent means
+unknown).
+
+```
+kcd contacts list <device-id> [--json]
+```
+
+---
+
 ## volume
 
 Control the remote device's audio volume (requires `remotesystemvolume` plugin).

@@ -290,6 +290,7 @@ except KeyboardInterrupt:
 | `share.complete` | File transfer finished |
 | `mpris.update` | Now-playing state changed (deduplicated — only on real changes) |
 | `sms.incoming` | SMS/MMS received |
+| `contacts.updated` | Contacts sync progress (counts only; call `contacts_list` for data) |
 | `pair.requested` | Remote device wants to pair |
 | `ping.received` | Ping from device |
 
@@ -370,6 +371,19 @@ ipc_request(sock, "send_sms", {
 ```python
 ipc_request(sock, "findmyphone", {"deviceId": dev_id})
 # or: ipc_request(sock, "ring", {"deviceId": dev_id})
+```
+
+### 5.7 Sync Contacts
+
+```python
+ipc_request(sock, "contacts_sync", {"deviceId": dev_id})
+# progress arrives as contacts.updated events (counts only)
+
+resp = ipc_request(sock, "contacts_list", {"deviceId": dev_id})
+if resp["ok"]:
+    for c in resp["data"]:
+        print(c["name"], c.get("phones", []))
+# empty list = never synced (unknown, not zero contacts)
 ```
 
 ### 5.7 Lock/Unlock
