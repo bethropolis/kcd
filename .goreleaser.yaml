@@ -138,8 +138,6 @@ homebrew_casks:
       owner: bethropolis
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    url:
-      verified: github.com/bethropolis/kcd
     binaries:
       - kcd
     completions:
