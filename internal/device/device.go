@@ -55,9 +55,8 @@ type Device struct {
 	pairIntentUntil atomic.Int64
 
 	// lastDiscoveryDial is when onDeviceFound last spawned a dial for this
-	// device. It throttles paired auto-redials to a dead LastIP so a phone
-	// that changed DHCP address (or a spoofed broadcast storm) can't cause
-	// a dial per announcement.
+	// device. It throttles sighting-triggered redials so announcements
+	// (or a spoofed broadcast storm) can't cause a dial per packet.
 	lastDiscoveryDial time.Time
 
 	// ephemeralDialed marks that this device already received its one

@@ -201,22 +201,17 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		}
 
 		if known && dev.State() == device.StatePaired {
-			// Paired devices never trust discovery for their dial target:
-			// the DeviceID/TCPPort in these packets are unauthenticated, so
-			// a spoofed sighting must not redirect the auto-dial or clobber
-			// the name. Redial the last known-good address from the
-			// authenticated exchange instead; after a restart (no LastIP
-			// yet) wait for the phone's inbound connection.
+			// A sighting proves the peer is alive at the sighted address,
+			// so dial it: whoever answers must present the paired
+			// certificate (CN + pinned fingerprint are verified in
+			// handleNewConnection) or setup fails. A spoofed sighting can
+			// only cost a throttled dial, never a session. The persisted
+			// LastIP remains the fallback for a silent (non-broadcasting)
+			// peer via the backoff loop.
 			dev.SetLastSeen(time.Now())
 			if !dev.IsConnected() {
-				if lastIP := dev.LastIP(); lastIP != nil {
-					port := dev.LastPort()
-					if !validDialPort(port) {
-						port = 1716
-					}
-					if dev.ShouldDiscoveryDial(10 * time.Second) {
-						go DialDevice(ctx, lastIP, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
-					}
+				if dev.ShouldDiscoveryDial(10 * time.Second) {
+					go DialDevice(ctx, ip, tcpPort, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
 				}
 			}
 			return
