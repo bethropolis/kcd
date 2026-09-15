@@ -210,6 +210,16 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// peer via the backoff loop.
 			dev.SetLastSeen(time.Now())
 			if !dev.IsConnected() {
+				// New information beats old backoff: a sighting from an
+				// address other than the failing target proves the peer
+				// roamed, so later cycles restart escalation at the floor.
+				// (The throttled dial below is what hurries this cycle;
+				// an in-flight backoff keeps its own counter.) Same-address
+				// sightings leave the counter alone, preserving flap
+				// protection for a dying peer that keeps announcing.
+				if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
+					dev.ResetReconnectAttempt()
+				}
 				if dev.ShouldDiscoveryDial(10 * time.Second) {
 					go DialDevice(ctx, ip, tcpPort, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
 				}
