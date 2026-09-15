@@ -112,14 +112,10 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 		t.Fatalf("send battery: %v", err)
 	}
 
-	select {
-	case ev := <-evCh:
-		payload, _ := json.Marshal(ev.Payload)
-		t.Logf("battery event: %s", payload)
-		if ev.Type != events.TypeBatteryUpdate {
-			t.Errorf("expected battery.update, got %s", ev.Type)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for battery.update event")
+	ev := nextDomainEvent(t, evCh, 3*time.Second)
+	payload, _ := json.Marshal(ev.Payload)
+	t.Logf("battery event: %s", payload)
+	if ev.Type != events.TypeBatteryUpdate {
+		t.Errorf("expected battery.update, got %s", ev.Type)
 	}
 }

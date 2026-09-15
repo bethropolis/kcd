@@ -16,7 +16,28 @@ import (
 	"github.com/bethropolis/kcd/internal/testutil"
 )
 
+// nextDomainEvent returns the next non-bootstrap event on a watch stream,
+// skipping the state.snapshot event the server sends first regardless of
+// filters. Fails the test on timeout.
+func nextDomainEvent(t *testing.T, evCh <-chan events.Event, timeout time.Duration) events.Event {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-evCh:
+			if ev.Type == events.TypeStateSnapshot {
+				continue
+			}
+			return ev
+		case <-deadline:
+			t.Fatal("timed out waiting for event")
+			return events.Event{}
+		}
+	}
+}
+
 func TestPairFlowIntegration(t *testing.T) {
+
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -100,13 +121,9 @@ func TestPairFlowIntegration(t *testing.T) {
 		t.Fatalf("accept pair: %v", err)
 	}
 
-	select {
-	case ev := <-evCh:
-		if ev.Type != events.TypePairAccepted {
-			t.Errorf("expected pair.accepted, got %s", ev.Type)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for pair.accepted event")
+	ev := nextDomainEvent(t, evCh, 3*time.Second)
+	if ev.Type != events.TypePairAccepted {
+		t.Errorf("expected pair.accepted, got %s", ev.Type)
 	}
 
 	// Verify devices list shows mock-peer as Paired
