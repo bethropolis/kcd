@@ -43,9 +43,15 @@ The daemon:
 
 ```bash
 cp packaging/kcd-user.service ~/.config/systemd/user/kcd.service
+cp packaging/kcd-user.socket ~/.config/systemd/user/kcd.socket
 systemctl --user daemon-reload
-systemctl --user enable --now kcd
+systemctl --user enable --now kcd.socket
 ```
+
+The socket unit listens on the IPC socket and starts the daemon on the
+first client connection — no manual start needed, cold commands just work.
+(`install.sh` sets this up automatically.) Only the default socket path
+activates this way; a custom `socket_path` in `kcd.toml` self-binds.
 
 Check status:
 ```bash

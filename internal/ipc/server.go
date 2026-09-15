@@ -8,8 +8,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
@@ -32,8 +34,42 @@ func NewServer(path string, handler *Handler, logger *zap.Logger) *Server {
 	}
 }
 
+// activatedListener adopts a Unix listener passed by systemd socket
+// activation (fd 3+), or returns nil when not running socket-activated.
+// Stdlib only: LISTEN_PID must match our pid and LISTEN_FDS must offer at
+// least one socket. The adopted fd is dup'd by net.FileListener, so the
+// *os.File wrapper is not retained.
+func activatedListener() net.Listener {
+	if os.Getenv("LISTEN_PID") != strconv.Itoa(os.Getpid()) {
+		return nil
+	}
+	n, err := strconv.Atoi(os.Getenv("LISTEN_FDS"))
+	if err != nil || n < 1 {
+		return nil
+	}
+	f := os.NewFile(3, "kcd-socket-activated")
+	l, err := net.FileListener(f)
+	if err != nil {
+		_ = f.Close()
+		return nil
+	}
+	// Children (sshfs, notify-send, …) must not inherit the activation
+	// environment and mistake it for sockets passed to them.
+	_ = os.Unsetenv("LISTEN_PID")
+	_ = os.Unsetenv("LISTEN_FDS")
+	return l
+}
+
 // Listen starts listening on the Unix socket and processes incoming connections.
+// When running under systemd socket activation with the default socket path,
+// the passed listener is adopted instead of binding cfg.SocketPath.
 func (s *Server) Listen(ctx context.Context) error {
+	if s.path == config.DefaultSocketPath() {
+		if l := activatedListener(); l != nil {
+			return s.serve(ctx, l, true)
+		}
+	}
+
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -54,13 +90,22 @@ func (s *Server) Listen(ctx context.Context) error {
 		return fmt.Errorf("failed to chmod ipc socket: %w", err)
 	}
 
+	return s.serve(ctx, l, false)
+}
+
+func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) error {
 	go func() {
 		<-ctx.Done()
 		l.Close()
-		os.Remove(s.path)
+		if !activated {
+			os.Remove(s.path)
+		}
 	}()
 
-	s.logger.Info("ipc server started", zap.String("path", s.path))
+	s.logger.Info("ipc server started",
+		zap.String("path", s.path),
+		zap.Bool("socket_activated", activated),
+	)
 
 	for {
 		conn, err := l.Accept()

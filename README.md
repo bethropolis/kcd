@@ -109,10 +109,10 @@ sudo ufw allow 1739:1764/tcp
 ### 1. Start the daemon
 
 If you installed via the script, `.deb`, `.rpm`, or AUR, the systemd user service
-is already set up — enable and start it:
+is already set up — enable the socket and the daemon starts on first use:
 
 ```bash
-systemctl --user enable --now kcd
+systemctl --user enable --now kcd.socket
 ```
 
 Check that it's running:

@@ -28,9 +28,12 @@ TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5
 
-# IPC socket directory, created automatically by systemd under $XDG_RUNTIME_DIR.
-RuntimeDirectory=kcd
-RuntimeDirectoryMode=0700
+# NOTE: no RuntimeDirectory= here on purpose. The kcd.socket unit owns
+# $XDG_RUNTIME_DIR/kcd (creating it is required before the socket can be
+# bound), and systemd tears a RuntimeDirectory down when its unit stops —
+# if both units declared it, stopping the service would delete the socket
+# file out from under the still-active socket unit. In non-socket mode the
+# daemon creates the directory itself (ipc server MkdirAll, mode 0700).
 
 # ── Process hardening ─────────────────────────────────────────────────────────
 # Namespace-based hardening (ProtectSystem, PrivateTmp, etc.) is intentionally
