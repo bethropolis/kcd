@@ -208,6 +208,18 @@ kcd pair --yes
 
 Broadcast stops when pairing completes or you press Ctrl+C.
 
+> **Constraining auto-accept:** bare `--yes` accepts the first device that
+> asks, which is risky on shared networks (a warning is printed). Pin the
+> expected peer instead:
+>
+> ```bash
+> kcd pair --yes --expected-fingerprint "aa:bb:cc:..."   # exact cert match (colons optional)
+> kcd pair --yes --known-only                            # only devices already in the known-devices file
+> ```
+>
+> Non-matching candidates are rejected and listening continues. Both flags
+> also apply to the interactive confirmation prompt.
+
 ---
 
 ## unpair

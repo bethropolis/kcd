@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -81,6 +82,14 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 			Aliases: []string{"y"},
 			Usage:   "Automatically accept incoming requests without confirmation (headless mode)",
 		},
+		&cli.StringFlag{
+			Name:  "expected-fingerprint",
+			Usage: "Only accept a candidate whose TLS cert fingerprint matches (hex, colons optional)",
+		},
+		&cli.BoolFlag{
+			Name:  "known-only",
+			Usage: "Only accept candidates already recorded in the known-devices file",
+		},
 	},
 	Action: func(c *cli.Context) error {
 		cl, err := getClient(c)
@@ -99,6 +108,18 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 
 		// Listen mode — wait for any incoming pair request
 		fmt.Println("Listening for pair requests… (Ctrl+C to cancel)")
+
+		if c.Bool("yes") && c.String("expected-fingerprint") == "" && !c.Bool("known-only") {
+			fmt.Fprintln(os.Stderr, "WARNING: auto-accepting pairing requests from ANY device on the local network.")
+			fmt.Fprintln(os.Stderr, "Use --expected-fingerprint or --known-only to restrict which device may pair.")
+		}
+
+		// Snapshot of previously seen devices for --known-only. A stranger
+		// that was never recorded in the state file is never auto-accepted.
+		var known map[string]bool
+		if c.Bool("known-only") {
+			known = loadKnownDeviceIDs()
+		}
 
 		if err := cl.BroadcastStart(); err != nil {
 			return fmt.Errorf("failed to start broadcast: %w", err)
@@ -147,6 +168,12 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 
 				// Headless / auto-accept flag
 				if c.Bool("yes") {
+					if err := checkPairCandidate(c.String("expected-fingerprint"), c.Bool("known-only"), r.result, known); err != nil {
+						fmt.Printf("Refusing candidate: %s\n", err)
+						_ = cl.Unpair(r.result.DeviceID)
+						fmt.Println("Still listening… (Ctrl+C to cancel)")
+						continue
+					}
 					if err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
@@ -161,6 +188,11 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 
 				response = strings.TrimSpace(strings.ToLower(response))
 				if response == "y" || response == "yes" {
+					if err := checkPairCandidate(c.String("expected-fingerprint"), c.Bool("known-only"), r.result, known); err != nil {
+						fmt.Printf("Refusing candidate: %s\n", err)
+						_ = cl.Unpair(r.result.DeviceID)
+						return nil
+					}
 					if err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
@@ -196,6 +228,43 @@ var unpairCmd = &cli.Command{
 		fmt.Println("Unpaired successfully")
 		return nil
 	},
+}
+
+// normalizeFingerprint strips separators and lowercases a hex fingerprint so
+// user-supplied values (aa:bb:.., AA BB ..) compare against daemon hex.
+func normalizeFingerprint(fp string) string {
+	fp = strings.ReplaceAll(fp, ":", "")
+	fp = strings.ReplaceAll(fp, " ", "")
+	return strings.ToLower(fp)
+}
+
+// loadKnownDeviceIDs returns the set of device IDs recorded in the daemon's
+// persisted state file. Missing or unreadable state means nothing is known.
+func loadKnownDeviceIDs() map[string]bool {
+	known := make(map[string]bool)
+	infos, err := device.LoadDevices(config.StatePath())
+	if err != nil {
+		return known
+	}
+	for _, info := range infos {
+		known[info.ID] = true
+	}
+	return known
+}
+
+// checkPairCandidate enforces the --expected-fingerprint and --known-only
+// constraints on a pairing candidate. Fail-closed: a candidate without a
+// reported fingerprint never satisfies an expected fingerprint.
+func checkPairCandidate(expectedFP string, knownOnly bool, result *ipc.PairListenResult, known map[string]bool) error {
+	if expectedFP != "" {
+		if got := normalizeFingerprint(result.Fingerprint); got == "" || got != normalizeFingerprint(expectedFP) {
+			return fmt.Errorf("candidate fingerprint does not match --expected-fingerprint")
+		}
+	}
+	if knownOnly && !known[result.DeviceID] {
+		return fmt.Errorf("candidate %s is not in the known-devices file (--known-only)", result.DeviceID)
+	}
+	return nil
 }
 
 func printDeviceTable(devices []device.DeviceInfo) {

@@ -73,6 +73,9 @@ type PairListenResult struct {
 	DeviceID        string `json:"deviceId"`
 	DeviceName      string `json:"deviceName"`
 	VerificationKey string `json:"verificationKey,omitempty"`
+	// Fingerprint is the SHA256 hex of the candidate's live TLS
+	// certificate, so callers can pin the expected peer.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // DevicePayload is sent in requests requiring a device ID (like pair/unpair/ping).

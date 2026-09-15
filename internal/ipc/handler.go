@@ -238,6 +238,7 @@ func (h *Handler) pairListenResult(dev *device.Device, vKey string) Response {
 		DeviceID:        dev.ID(),
 		DeviceName:      dev.Name(),
 		VerificationKey: vKey,
+		Fingerprint:     dev.CertFP,
 	})
 	return Response{OK: true, Data: data}
 }
