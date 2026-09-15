@@ -112,6 +112,8 @@ func (f *fakeNotifier) command(name string, args ...string) *exec.Cmd {
 }
 
 func (f *fakeNotifier) argFor(call int, flag string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for i, a := range f.calls[call] {
 		if a == flag {
 			if i+1 < len(f.calls[call]) {
@@ -120,6 +122,19 @@ func (f *fakeNotifier) argFor(call int, flag string) string {
 		}
 	}
 	return ""
+}
+
+// lastCall returns a copy of the most recent recorded invocation, or nil
+// if none has arrived yet. The plugin invokes notify-send from a goroutine
+// (Handle must return immediately), so tests must poll this under the lock
+// instead of reading f.calls directly.
+func (f *fakeNotifier) lastCall() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return nil
+	}
+	return append([]string(nil), f.calls[len(f.calls)-1]...)
 }
 
 func newFakePlugin(t *testing.T, replace bool) (*NotificationPlugin, *fakeNotifier) {
@@ -277,10 +292,11 @@ func TestNotifySendEndsOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond) // sendDesktopNotification runs async
-	if len(f.calls) == 0 {
-		t.Fatal("expected notify-send invocation")
-	}
-	call := f.calls[len(f.calls)-1]
+	var call []string
+	waitFor(t, "notify-send invocation", func() bool {
+		call = f.lastCall()
+		return call != nil
+	})
 	sep := -1
 	for i, a := range call {
 		if a == "--" {
