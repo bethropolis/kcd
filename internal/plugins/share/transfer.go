@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"go.uber.org/zap"
 )
@@ -29,7 +30,7 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, onProgress func(int64, int64), logger *zap.Logger) error {
+func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger) error {
 	if size < 0 {
 		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
 	}
@@ -48,6 +49,23 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 		return fmt.Errorf("share: dial side-channel %s: %w", addr, err)
 	}
 	defer conn.Close()
+
+	// The phone's TLS cert isn't verified against the paired fingerprint by
+	// default (self-signed), so confirm the peer is the device we expect
+	// before pulling bytes from it.
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		return fmt.Errorf("share: side-channel connection is not TLS")
+	} else if expectedFP == "" {
+		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
+			zap.String("remote_addr", addr))
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		logger.Error("share: side-channel peer verification failed",
+			zap.String("remote_addr", addr),
+			zap.String("expected_fp", expectedFP),
+			zap.Error(err),
+		)
+		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
+	}
 
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
@@ -91,7 +109,7 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 }
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger) error {
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
@@ -162,6 +180,20 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 			zap.String("cert_cn", certCN),
 		)
 		return fmt.Errorf("share: cert CN mismatch: expected device %s, got %s", expectedDeviceID, certCN)
+	}
+	// The CN check above only confirms the device ID claim; pin the actual
+	// paired certificate fingerprint so a holder of a different cert minted
+	// with the same CN can't pull the file.
+	if expectedFP == "" {
+		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
+			zap.String("expected_device", expectedDeviceID))
+	} else if err := cert.VerifySideChannelPeer(state, expectedFP); err != nil {
+		logger.Error("share: side-channel peer verification failed",
+			zap.String("expected_device", expectedDeviceID),
+			zap.String("expected_fp", expectedFP),
+			zap.Error(err),
+		)
+		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
 	}
 
 	logger.Info("share: TLS OK, streaming file",

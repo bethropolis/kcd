@@ -38,7 +38,9 @@ const (
 	TypeSMSIncoming          EventType = "sms.incoming"
 	TypeSMSAttachment        EventType = "sms.attachment"
 	TypeRingReceived         EventType = "ring.received"
+	TypeContactsUpdated      EventType = "contacts.updated"
 	TypeMprisUpdate          EventType = "mpris.update"
+	TypeStateSnapshot        EventType = "state.snapshot"
 )
 
 const (

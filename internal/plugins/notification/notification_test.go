@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,6 +112,8 @@ func (f *fakeNotifier) command(name string, args ...string) *exec.Cmd {
 }
 
 func (f *fakeNotifier) argFor(call int, flag string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for i, a := range f.calls[call] {
 		if a == flag {
 			if i+1 < len(f.calls[call]) {
@@ -119,6 +122,19 @@ func (f *fakeNotifier) argFor(call int, flag string) string {
 		}
 	}
 	return ""
+}
+
+// lastCall returns a copy of the most recent recorded invocation, or nil
+// if none has arrived yet. The plugin invokes notify-send from a goroutine
+// (Handle must return immediately), so tests must poll this under the lock
+// instead of reading f.calls directly.
+func (f *fakeNotifier) lastCall() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return nil
+	}
+	return append([]string(nil), f.calls[len(f.calls)-1]...)
 }
 
 func newFakePlugin(t *testing.T, replace bool) (*NotificationPlugin, *fakeNotifier) {
@@ -206,23 +222,100 @@ func TestNotificationPlugin_FetchIconReusesCacheOnRepost(t *testing.T) {
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 
 	// Seed the cached icon for this (app, id) — simulates the first post
-	// having downloaded the phone's icon.
+	// having downloaded the phone's icon. The seed uses the same
+	// sanitization as fetchIcon.
 	cachedPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png",
-		nonAlphaNumeric.ReplaceAllString(app, "_"), id))
+		nonAlphaNumeric.ReplaceAllString(app, "_"), sanitizeNotifID(id)))
 	if err := os.WriteFile(cachedPath, []byte("png"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Re-post without an icon payload must reuse the cached file so the
 	// popup keeps the real app icon instead of a placeholder.
-	got := p.fetchIcon(context.Background(), app, id, nil, 0, 0, false)
+	got := p.fetchIcon(context.Background(), app, id, nil, 0, 0, false, "")
 	if got != cachedPath {
 		t.Fatalf("expected cached icon reuse %q, got %q", cachedPath, got)
 	}
 
 	// Unknown id, no payload, no cache → empty (theme fallback downstream).
-	if got := p.fetchIcon(context.Background(), app, "unknown-id", nil, 0, 0, false); got != "" {
+	if got := p.fetchIcon(context.Background(), app, "unknown-id", nil, 0, 0, false, ""); got != "" {
 		t.Fatalf("expected empty icon for uncached payload-less repost, got %q", got)
+	}
+}
+
+func TestSanitizeNotifID(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"0|com.arn.scrobble|10247", "0_com.arn.scrobble_10247"},
+		{"plain-id_1.2", "plain-id_1.2"},
+		{"../../../etc/cron.d/job", ".._.._.._etc_cron.d_job"},
+		{"/abs/path", "_abs_path"},
+		{"a/b\\c", "a_b_c"},
+		{"", "default"},
+	}
+	for _, tc := range cases {
+		if got := sanitizeNotifID(tc.in); got != tc.want {
+			t.Errorf("sanitizeNotifID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if strings.ContainsAny(sanitizeNotifID(tc.in), `/\`) {
+			t.Errorf("sanitizeNotifID(%q) keeps separators", tc.in)
+		}
+	}
+}
+
+func TestFetchIconRefusesTraversal(t *testing.T) {
+	p := newPlugin(t)
+	p.tlsConfig = &tls.Config{}
+	p.iconDir = t.TempDir()
+
+	// A traversal ID must resolve inside the icon dir. With no payload and
+	// no cache it returns "" — assert nothing escapes to the parent.
+	canary := filepath.Join(filepath.Dir(p.iconDir), "kcd-traversal-canary.png")
+	_ = os.Remove(canary)
+	traversal := "../" + filepath.Base(canary)
+	if got := p.fetchIcon(context.Background(), "App", traversal, nil, 0, 0, false, ""); got != "" {
+		t.Fatalf("expected empty icon for traversal id, got %q", got)
+	}
+	if _, err := os.Stat(canary); !os.IsNotExist(err) {
+		t.Fatalf("traversal escaped icon dir: %s exists (%v)", canary, err)
+	}
+}
+
+func TestNotifySendEndsOptions(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+
+	// A title starting with '-' must be passed after "--" so notify-send
+	// can't misparse it as a flag.
+	body := NotificationBody{ID: "dash", AppName: "App", Title: "-u", Text: "-t evil"}
+	pkt, _ := protocol.NewPacket("kdeconnect.notification", body)
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // sendDesktopNotification runs async
+	var call []string
+	waitFor(t, "notify-send invocation", func() bool {
+		call = f.lastCall()
+		return call != nil
+	})
+	sep := -1
+	for i, a := range call {
+		if a == "--" {
+			sep = i
+		}
+	}
+	if sep < 0 {
+		t.Fatalf("expected -- separator in notify-send args: %q", call)
+	}
+	for _, want := range []string{"-u", "-t evil"} {
+		found := false
+		for _, a := range call[sep+1:] {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected %q after -- in %q", want, call)
+		}
 	}
 }
 

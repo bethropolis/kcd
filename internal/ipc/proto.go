@@ -12,6 +12,7 @@ const (
 	CmdUnpair               = "unpair"
 	CmdPing                 = "ping"
 	CmdBattery              = "battery"
+	CmdConnectivity         = "connectivity"
 	CmdClipboardPush        = "clipboard_push"
 	CmdRunList              = "run_list"
 	CmdRunExec              = "run_exec"
@@ -32,6 +33,8 @@ const (
 	CmdSmsRequestConvs      = "sms_request_conversations"
 	CmdSmsRequestConv       = "sms_request_conversation"
 	CmdSmsRequestAttachment = "sms_request_attachment"
+	CmdContactsSync         = "contacts_sync"
+	CmdContactsList         = "contacts_list"
 	CmdSftpMountLocal       = "sftp_mount_local"
 	CmdSftpUnmount          = "sftp_unmount"
 	CmdStatus               = "status"
@@ -72,6 +75,9 @@ type PairListenResult struct {
 	DeviceID        string `json:"deviceId"`
 	DeviceName      string `json:"deviceName"`
 	VerificationKey string `json:"verificationKey,omitempty"`
+	// Fingerprint is the SHA256 hex of the candidate's live TLS
+	// certificate, so callers can pin the expected peer.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // DevicePayload is sent in requests requiring a device ID (like pair/unpair/ping).

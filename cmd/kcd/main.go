@@ -113,6 +113,7 @@ func main() {
 			unpairCmd,
 			pingCmd,
 			batteryCmd,
+			connectivityCmd,
 			watchCmd,
 			sftpCmd,
 			replyCmd,
@@ -124,6 +125,7 @@ func main() {
 			clipboardCmd,
 			runCmd,
 			smsCmd,
+			contactsCmd,
 			mprisCmd,
 			volumeCmd,
 			{

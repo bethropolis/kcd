@@ -14,6 +14,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Broadcast ownership: pairing mode (`kcd pair`) and the reconnect
+// watcher share one loop but must not cancel each other, so starts are
+// reference-counted per owner. The loop runs while any owner holds it.
+const (
+	OwnerPairing   = "pairing"
+	OwnerReconnect = "reconnect"
+)
+
 // BroadcasterController manages the broadcast lifecycle — start/stop on demand.
 // Starts in stopped state. Broadcast is only active while Start() is in effect.
 type BroadcasterController struct {
@@ -25,6 +33,7 @@ type BroadcasterController struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
+	owners  map[string]struct{}
 }
 
 // NewBroadcasterController creates a controller that starts in stopped state.
@@ -34,15 +43,28 @@ func NewBroadcasterController(identity *protocol.Packet, interval time.Duration,
 		interval:       interval,
 		shouldReduce:   shouldReduce,
 		logger:         logger.With(zap.String("component", "broadcaster")),
+		owners:         make(map[string]struct{}),
 	}
 }
 
-// Start launches the UDP broadcaster loop in a background goroutine using a
-// child of parentCtx. No-op if already running.
+// Start launches the UDP broadcaster loop for the pairing owner.
+// No-op if already running (ownership is still recorded).
 func (bc *BroadcasterController) Start(parentCtx context.Context) {
+	bc.StartOwned(parentCtx, OwnerPairing)
+}
+
+// Stop withdraws the pairing owner. The loop stops only when no owners
+// remain, so a reconnect-driven broadcast survives `kcd pair` exiting.
+func (bc *BroadcasterController) Stop() {
+	bc.StopOwned(OwnerPairing)
+}
+
+// StartOwned launches the loop (if needed) and records owner as needing it.
+func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
+	bc.owners[owner] = struct{}{}
 	if bc.running {
 		return
 	}
@@ -64,12 +86,16 @@ func (bc *BroadcasterController) Start(parentCtx context.Context) {
 	}()
 }
 
-// Stop cancels the broadcast loop. No-op if not running.
-func (bc *BroadcasterController) Stop() {
+// StopOwned withdraws owner's need. No-op if the owner holds nothing.
+func (bc *BroadcasterController) StopOwned(owner string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	if !bc.running || bc.cancel == nil {
+	if _, ok := bc.owners[owner]; !ok {
+		return
+	}
+	delete(bc.owners, owner)
+	if len(bc.owners) > 0 || !bc.running || bc.cancel == nil {
 		return
 	}
 	bc.cancel()
@@ -82,6 +108,41 @@ func (bc *BroadcasterController) IsRunning() bool {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 	return bc.running
+}
+
+// AdvertiseMDNS registers the local identity as _kdeconnect._udp until
+// ctx ends. Unlike UDP broadcast this is responder-only (it wakes on
+// incoming queries), so it stays up for the daemon lifetime at negligible
+// idle cost and gives phones a standing discovery path even while UDP
+// broadcast is stopped.
+func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger *zap.Logger) {
+	var idBody protocol.IdentityBody
+	if err := json.Unmarshal(identityPacket.Body, &idBody); err != nil {
+		logger.Warn("failed to parse identity for mDNS", zap.Error(err))
+		return
+	}
+	server, err := zeroconf.Register(
+		idBody.DeviceName,
+		"_kdeconnect._udp",
+		"local.",
+		idBody.TCPPort,
+		[]string{
+			"id=" + idBody.DeviceID,
+			"name=" + idBody.DeviceName,
+			"type=" + idBody.DeviceType,
+			"protocol=8",
+		},
+		nil,
+	)
+	if err != nil {
+		logger.Warn("failed to register mDNS service", zap.Error(err))
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		server.Shutdown()
+		logger.Info("mDNS service shut down")
+	}()
 }
 
 // Broadcaster sends identity packets over UDP to advertise the local device.
@@ -103,36 +164,8 @@ func NewBroadcaster(identity *protocol.Packet, interval time.Duration, logger *z
 // Run periodically sends the identity packet to 255.255.255.255:1716.
 // If shouldReduce is provided and returns true, the broadcast frequency
 // is reduced to 60 seconds to save CPU and network resources while idle.
+// (mDNS advertisement is no longer tied to this loop — see AdvertiseMDNS.)
 func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
-	// Register mDNS
-	var idBody protocol.IdentityBody
-	if err := json.Unmarshal(b.identityPacket.Body, &idBody); err == nil {
-		server, err := zeroconf.Register(
-			idBody.DeviceName,
-			"_kdeconnect._udp",
-			"local.",
-			idBody.TCPPort,
-			[]string{
-				"id=" + idBody.DeviceID,
-				"name=" + idBody.DeviceName,
-				"type=" + idBody.DeviceType,
-				"protocol=8",
-			},
-			nil,
-		)
-		if err != nil {
-			b.logger.Warn("failed to register mDNS service", zap.Error(err))
-		} else {
-			go func() {
-				<-ctx.Done()
-				server.Shutdown()
-				b.logger.Info("mDNS service shut down")
-			}()
-		}
-	} else {
-		b.logger.Warn("failed to parse identity for mDNS", zap.Error(err))
-	}
-
 	normalInterval := b.interval
 	reducedInterval := 60 * time.Second
 

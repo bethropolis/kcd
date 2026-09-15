@@ -42,7 +42,7 @@ These structural constraints must hold at all times:
 | `internal/config/` only imports `github.com/BurntSushi/toml` | Config must stay lean and cycle-free |
 | `internal/plugin/plugin.go` only imports `internal/protocol` and `internal/device` | Plugins never import each other |
 | Plugins are registered in `daemon.go`, never in their own `init()` | Explicit, ordered, conditional on config |
-| `pkg/client/` only imports `internal/ipc` from the `internal/` tree | Public client API must not depend on internals beyond the IPC protocol |
+| `pkg/client/` only imports `internal/device`, `internal/events`, `internal/ipc`, and `internal/plugins/contacts` from the `internal/` tree | Public client API must not depend on internals beyond the IPC protocol and the types it surfaces |
 | All binaries built with `CGO_ENABLED=0` | Required for static distribution |
 
 ---
@@ -97,13 +97,14 @@ error message may be confusing.
 |---|---|
 | Battery | `battery.NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger) *BatteryPlugin` |
 | Notification | `notification.NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin` |
-| Share | `share.NewSharePlugin(cfg config.ShareConfig, tlsConfig *tls.Config, logger *zap.Logger) *SharePlugin` |
+| Share | `share.NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin` |
 | SFTP | `sftp.NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin` |
 | Ping | `ping.NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger) *PingPlugin` |
-| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, autoAccept bool, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin` |
+| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin` |
 | Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin` |
 | SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin` |
 | SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *SMSPlugin` |
+| Contacts | `contacts.NewContactsPlugin(bus *events.Bus, logger *zap.Logger) *ContactsPlugin` |
 
 ### Interface
 
@@ -248,7 +249,16 @@ Discovery is dual-mode and runs concurrently. Both paths call the same `onDevice
 | UDP broadcast | Sends identity to `255.255.255.255:1716` + per-interface directed broadcasts | Same LAN, simple home networks |
 | mDNS / Zeroconf | Registers `_kdeconnect._udp.local.` via `libp2p/zeroconf/v2`; browses for peers | Restricted networks, Docker, corporate Wi-Fi, newer Android |
 
-The broadcast interval is adaptive. When `shouldReduce()` returns true (all paired devices already connected), the UDP interval increases to 60 seconds. Setting `enable_broadcast = false` in config disables UDP entirely — the daemon reaches 0.0% idle CPU. Paired phones reconnect automatically via remembered IP.
+mDNS advertisement runs for the daemon lifetime (responder-only, negligible
+idle cost). UDP broadcast is on demand and reference-counted per owner
+(`pairing` for `kcd pair` listen mode, `reconnect` for offline pairs):
+it runs while any paired device is disconnected so roamed phones can find
+us back, and stops fully when all pairs are connected — connected steady
+state keeps zero timers. The 30s/60s interval only ticks while a reconnect
+is actually wanted. Dial targets (`LastIP`/`LastPort`) persist in
+`devices.json`; paired sightings dial the sighted address (authenticated
+post-connect by CN + pinned fingerprint), with `LastIP` as the fallback
+for silent peers.
 
 ---
 

@@ -4,6 +4,7 @@ package device
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -81,6 +82,26 @@ type DeviceInfo struct {
 	CertFP    string       `json:"cert_fp"`
 	LastSeen  time.Time    `json:"last_seen"`
 	Connected bool         `json:"connected"`
+	// LastIP/LastPort is the dial target from the most recent successful
+	// connection, so paired auto-dial survives daemon restarts. Both are
+	// validated on load (the file is user-editable); garbage is dropped.
+	LastIP   string `json:"last_ip,omitempty"`
+	LastPort int    `json:"last_port,omitempty"`
+}
+
+// DialTarget returns the persisted dial target for auto-dial after a
+// restart. A garbage IP yields nil (no target); an out-of-range port
+// yields 0 and callers fall back to the default port. The state file is
+// user-editable, so nothing here is trusted blindly.
+func (info DeviceInfo) DialTarget() (net.IP, int) {
+	ip := net.ParseIP(info.LastIP)
+	if ip == nil {
+		return nil, 0
+	}
+	if info.LastPort <= 0 || info.LastPort > 65535 {
+		return ip, 0
+	}
+	return ip, info.LastPort
 }
 
 // LoadDevices loads known devices from the given JSON file path.

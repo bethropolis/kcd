@@ -89,6 +89,12 @@ if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
     success "Service stopped"
   fi
 fi
+if systemctl --user is-active --quiet kcd.socket 2>/dev/null; then
+  step "Stopping existing kcd socket"
+  if try systemctl --user stop kcd.socket; then
+    success "Socket stopped"
+  fi
+fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 step "Building static binary"
@@ -184,25 +190,44 @@ if [[ "${INSTALL_SERVICE}" == true ]]; then
       warn "Could not install service file — skipping service setup"
       _systemd_ok=false
     fi
+
+    # Socket unit for on-demand activation: the first client connection
+    # starts the daemon automatically. The service file stays installed
+    # (activation needs it) but is not enabled directly.
+    if ! try install -m 644 "${REPO_ROOT}/packaging/kcd-user.socket" "${SYSTEMD_DIR}/kcd.socket"; then
+      warn "Could not install socket file — continuing without on-demand activation"
+    fi
   fi
 
   if [[ "${_systemd_ok}" == true ]]; then
     try systemctl --user daemon-reload \
       || warn "daemon-reload failed — service file may not be recognised yet"
 
-    try systemctl --user enable kcd.service \
-      || warn "Could not enable kcd.service — you may need to enable it manually"
-
-    try systemctl --user start kcd.service \
-      || warn "Could not start kcd.service — check 'journalctl --user -u kcd -n 30'"
-
-    # Wait briefly and check it actually started
-    sleep 2
-    if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
-      success "kcd.service enabled and running"
+    # Prefer socket activation: cold client commands summon the daemon.
+    if [[ -f "${SYSTEMD_DIR}/kcd.socket" ]] && try systemctl --user enable --now kcd.socket; then
+      try systemctl --user disable kcd.service 2>/dev/null
+      sleep 2
+      if systemctl --user is-active --quiet kcd.socket 2>/dev/null; then
+        success "kcd.socket enabled and listening (daemon starts on first use)"
+      else
+        warn "kcd.socket is installed but does not appear to be listening."
+      fi
     else
-      warn "kcd.service is installed but does not appear to be running."
-      printf "  Run ${BOLD}journalctl --user -u kcd -n 30${RESET} to see why.\n"
+      warn "Could not enable kcd.socket — falling back to persistent service"
+      try systemctl --user enable kcd.service \
+        || warn "Could not enable kcd.service — you may need to enable it manually"
+
+      try systemctl --user start kcd.service \
+        || warn "Could not start kcd.service — check 'journalctl --user -u kcd -n 30'"
+
+      # Wait briefly and check it actually started
+      sleep 2
+      if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
+        success "kcd.service enabled and running"
+      else
+        warn "kcd.service is installed but does not appear to be running."
+        printf "  Run ${BOLD}journalctl --user -u kcd -n 30${RESET} to see why.\n"
+      fi
     fi
   fi
 fi

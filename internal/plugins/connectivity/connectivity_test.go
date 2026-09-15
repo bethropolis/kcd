@@ -97,3 +97,41 @@ func expectNoEvent(t *testing.T, sub *events.Subscriber) {
 	case <-time.After(50 * time.Millisecond):
 	}
 }
+
+func TestReportCachesLastHandle(t *testing.T) {
+	plugin := NewConnectivityPlugin(nil)
+	dev := testSender{id: "device-1"}
+
+	if _, ok := plugin.Report("device-1"); ok {
+		t.Fatal("expected miss before any report")
+	}
+
+	body := ConnectivityBody{
+		SignalStrengths: map[string]SignalStrength{
+			"0": {NetworkType: "LTE", NetworkDetailedType: "LTE", SignalStrength: 4},
+		},
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.connectivity_report", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plugin.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := plugin.Report("device-1")
+	if !ok {
+		t.Fatal("expected hit after Handle")
+	}
+	if got.SignalStrengths["0"].SignalStrength != 4 {
+		t.Errorf("wrong cached level: %+v", got)
+	}
+	if _, ok := plugin.Report("unknown"); ok {
+		t.Error("expected miss for unknown device")
+	}
+
+	plugin.OnDisconnect(dev)
+	if _, ok := plugin.Report("device-1"); ok {
+		t.Error("expected miss after disconnect clears the cache")
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
@@ -322,6 +323,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 	payloadSize := pkt.PayloadSize
 	payloadPort := pkt.PayloadTransferInfo.Port
 	filename := body.Filename
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
 		// Download to a temp file
@@ -334,7 +336,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		tmpFile.Close()
 		defer os.Remove(tmpPath)
 
-		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, p.logger); err != nil {
+		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger); err != nil {
 			p.logger.Error("clipboard file: download failed", zap.Error(err))
 			return
 		}
@@ -369,7 +371,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 }
 
 // downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, _ *zap.Logger) error {
+func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger) error {
 	addr := fmt.Sprintf("%s:%d", ip.String(), port)
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{
@@ -383,6 +385,15 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 		return fmt.Errorf("clipboard: dial %s: %w", addr, err)
 	}
 	defer conn.Close()
+
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		return fmt.Errorf("clipboard: side-channel connection is not TLS")
+	} else if expectedFP == "" {
+		logger.Warn("clipboard: no pinned peer fingerprint, skipping side-channel verification",
+			zap.String("remote_addr", addr))
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		return fmt.Errorf("clipboard: side-channel peer verification failed: %w", err)
+	}
 
 	f, err := os.Create(dest)
 	if err != nil {

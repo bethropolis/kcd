@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -134,7 +135,16 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
-		plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+		// xdg-open dispatches on URI scheme to arbitrary desktop handlers,
+		// so only http(s) may reach it: file://, smb:, mailto: and custom
+		// app schemes would hand phone-influenced input to unrelated local
+		// handlers. The URL event above still reaches clients either way.
+		if isOpenableURL(body.Url) {
+			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+		} else {
+			p.Logger.Warn("share: refusing to open non-http(s) URL",
+				zap.String("url", body.Url))
+		}
 		return nil
 	}
 
@@ -163,6 +173,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 
 	payloadSize := pkt.PayloadSize
 	payloadPort := pkt.PayloadTransferInfo.Port
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
 		defer debug.FreeOSMemory()
@@ -173,7 +184,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			onProgress = throttle.Update
 		}
 
-		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, onProgress, p.Logger)
+		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, expectedFP, onProgress, p.Logger)
 		if err != nil {
 			p.Logger.Error("share receive failed", zap.Error(err))
 			if p.bus != nil {
@@ -198,15 +209,23 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				})
 			}
 			if p.cfg.AutoOpen {
-				cmd := p.cfg.OpenCommand
-				if cmd == "" {
-					cmd = "xdg-open"
+				// Never auto-open executable content: handing .desktop files
+				// (or scripts) to the desktop handler can execute code. The
+				// file itself is still saved and announced — open it manually.
+				if autoOpenBlocked(destPath) {
+					p.Logger.Warn("share: refusing to auto-open executable file",
+						zap.String("file", destPath))
+				} else {
+					cmd := p.cfg.OpenCommand
+					if cmd == "" {
+						cmd = "xdg-open"
+					}
+					absPath, err := filepath.Abs(destPath)
+					if err != nil {
+						absPath = destPath
+					}
+					plugin.RunCommandAsync(p.Logger, cmd, absPath)
 				}
-				absPath, err := filepath.Abs(destPath)
-				if err != nil {
-					absPath = destPath
-				}
-				plugin.RunCommandAsync(p.Logger, cmd, absPath)
 			}
 		}
 	}()
@@ -240,6 +259,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		throttle := newProgressThrottle(p.bus, dev.ID(), filepath.Base(filePath), stat.Size())
 		onProgress = throttle.Update
 	}
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	// Handle the transfer in the background so IPC returns instantly
 	go func() {
@@ -249,7 +269,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), timeout, onProgress, p.Logger)
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",

@@ -12,6 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/plugins/contacts"
 )
 
 // Client connects to the kcd daemon via Unix socket.
@@ -153,6 +154,16 @@ func (c *Client) Battery(deviceID string) (int, bool, error) {
 func (c *Client) ClipboardPush(deviceID string) error {
 	_, err := c.Call(ipc.CmdClipboardPush, ipc.DevicePayload{DeviceID: deviceID})
 	return err
+}
+
+// Connectivity returns the last raw connectivity report for a device.
+// Callers decode it (same shape as connectivity.update event payloads).
+func (c *Client) Connectivity(deviceID string) (json.RawMessage, error) {
+	res, err := c.Call(ipc.CmdConnectivity, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	return res.Data, nil
 }
 
 // RunList requests the remote device to send its command list.
@@ -336,6 +347,27 @@ func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdent
 		UniqueIdentifier: uniqueIdentifier,
 	})
 	return err
+}
+
+// ContactsSync asks the daemon to start a contacts sync round with a device.
+// Results arrive async via the contacts.updated event.
+func (c *Client) ContactsSync(deviceID string) error {
+	_, err := c.Call(ipc.CmdContactsSync, ipc.DevicePayload{DeviceID: deviceID})
+	return err
+}
+
+// ContactsList returns cached contact summaries for a device (empty when
+// never synced — absent means unknown).
+func (c *Client) ContactsList(deviceID string) ([]contacts.ContactSummary, error) {
+	res, err := c.Call(ipc.CmdContactsList, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	var list []contacts.ContactSummary
+	if err := json.Unmarshal(res.Data, &list); err != nil {
+		return nil, fmt.Errorf("decode contacts: %w", err)
+	}
+	return list, nil
 }
 
 // MprisStatus returns MPRIS plugin debug information.

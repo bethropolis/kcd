@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/urfave/cli/v2"
@@ -37,6 +38,12 @@ The device responds with connection credentials on 'kcd watch'.`,
 			ArgsUsage: "<device-id>",
 			Description: `Display the cached SFTP server credentials (IP, port, user, volumes).
 Use 'kcd sftp request' first to populate the cache.`,
+			Flags: []cli.Flag{
+				&cli.BoolFlag{
+					Name:  "json",
+					Usage: "Output raw JSON",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				if c.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
@@ -48,6 +55,11 @@ Use 'kcd sftp request' first to populate the cache.`,
 				info, err := cl.SftpInfo(c.Args().First())
 				if err != nil {
 					return err
+				}
+				if c.Bool("json") {
+					out, _ := json.Marshal(info)
+					fmt.Println(string(out))
+					return nil
 				}
 				fmt.Printf("IP:       %s\n", info.IP)
 				fmt.Printf("Port:     %s\n", info.Port)
@@ -69,6 +81,12 @@ Use 'kcd sftp request' first to populate the cache.`,
 			ArgsUsage: "<device-id>",
 			Description: `Show the browsable storage roots exposed by the device.
 Uses the multiPaths/pathNames fields from the cached SFTP credentials.`,
+			Flags: []cli.Flag{
+				&cli.BoolFlag{
+					Name:  "json",
+					Usage: "Output raw JSON",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				if c.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
@@ -80,6 +98,11 @@ Uses the multiPaths/pathNames fields from the cached SFTP credentials.`,
 				volumes, err := cl.SftpVolumes(c.Args().First())
 				if err != nil {
 					return err
+				}
+				if c.Bool("json") {
+					out, _ := json.Marshal(volumes)
+					fmt.Println(string(out))
+					return nil
 				}
 				if len(volumes) == 0 {
 					fmt.Println("No volumes available. Try 'kcd sftp request' first.")

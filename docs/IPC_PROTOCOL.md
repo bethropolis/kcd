@@ -94,10 +94,13 @@ Fields:
 | `id` | string | Permanent device identifier |
 | `name` | string | Human-readable device name |
 | `type` | string | `"phone"`, `"tablet"`, `"laptop"`, `"desktop"` |
-| `state` | string | `"UNPAIRED"`, `"PAIR_REQUESTED"`, `"PAIR_REQUESTED_BY_PEER"`, `"PAIRED"`, `"UNKNOWN"` |
+| `state` | string | `"UNPAIRED"`, `"PAIR_REQUESTED"`, `"PAIR_REQUESTED_BY_PEER"`, `"PAIRED"` (`"UNKNOWN"` may appear in state files written by older versions and means unpaired) |
 | `cert_fp` | string | Not populated in this response (empty) |
-| `last_seen` | string (RFC3339) | Not populated in this response (zero time) |
-| `connected` | bool | Whether the device currently has an active TCP connection |
+| `last_seen` | string (RFC3339) | Last time the device was seen (announcement or connection) |
+| `connected` | bool | Whether the device currently has an active TCP connection. Note: `connected: true` alone does **not** mean usable — a stranger on the LAN can hold a raw connection while `state` is `UNPAIRED`. Clients must check `state == "PAIRED"` before sending commands or auto-selecting a device. |
+| `battery` | object (optional) | `{"charge": 85, "charging": true, "batteryAgeMs": 1234}` — cached battery state; absent when the device never reported |
+| `media` | object (optional) | Cached `NowPlaying` plus `mediaAgeMs` (ms since the phone reported); absent when the device never reported media |
+| `signal` | object (optional) | Cached connectivity report (`{"signalStrengths": {...}}`); absent when never reported |
 
 #### `pair`
 
@@ -118,6 +121,9 @@ Optional fields:
 - If neither `accept` nor `reject` is set, sends a pair request to the device.
 - If `accept: true`, accepts an incoming pair request from the device.
 - If `reject: true`, rejects or unpairs.
+- If the device has no active connection, the daemon dials it on demand
+  using its last-seen discovery address (background auto-dial no longer
+  connects to unpaired devices), then sends the pair request.
 
 **Response data:** none (`{"ok": true}`)
 
@@ -143,6 +149,10 @@ Wait for an incoming pairing request and return the verification key.
 The handler blocks until a pair request arrives or the context is cancelled.
 The 16-character verification key should be displayed to the user to verify
 identity match on both sides.
+
+> The daemon only **reports** the candidate — it does not accept it.
+> Accept explicitly with `pair`, reject with `unpair`. This keeps stale
+> requests (e.g. leftovers from tests) from pairing silently.
 
 #### `unpair`
 
@@ -225,13 +235,47 @@ Request battery state from a device.
 {"deviceId": "a1b2c3d4e5f6_..."}
 ```
 
-**Response data:** `{"charge": 85, "charging": true}` (the daemon waits for the
-device to respond and returns the value).
+**Response data:** `{"charge": 85, "charging": true, "batteryAgeMs": 1234}` (the
+last cached reading plus its age in ms; the daemon does not live-query the
+device). Returns `{"ok": false, "error": "no battery reading yet"}` when no
+`kdeconnect.battery` packet was ever received — the `battery` object is
+likewise absent from summaries until the first real packet, so clients must
+treat absent as unknown, not 0%.
 
 | Field | Type | Description |
 |---|---|---|
 | `charge` | number | Battery percentage (0–100) |
 | `charging` | bool | Whether the device is currently charging |
+| `batteryAgeMs` | number | ms since the phone reported (mirrors `mediaAgeMs`) |
+
+#### `connectivity`
+
+Return the last cellular connectivity report cached for a device (same
+shape as `connectivity.update` event payloads).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:**
+
+```json
+{"signalStrengths": {"0": {"networkType": "LTE", "networkDetailedType": "LTE", "signalStrength": 4}}}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `signalStrengths` | object | Map of SIM subscription ID → signal info (dual-SIM aware) |
+| `networkType` | string | Network generation (`5G`, `LTE`, `GSM`, …) |
+| `networkDetailedType` | string | Finer-grained type when reported (may be absent) |
+| `signalStrength` | number | Level 0 (no signal) – 4 (full) |
+
+Errors: `device not found`, `connectivity plugin not enabled`,
+`no connectivity data (device offline or never reported)`. Reports are
+requested fresh on every connect; `kcd watch` also emits a cached
+`connectivity.update` on subscribe so clients never boot blind.
 
 #### `clipboard_push`
 
@@ -314,6 +358,37 @@ Request an MMS attachment file from a device.
 
 **Response data:** none (attachment arrives via side-channel transfer, emitted
 as `sms.attachment` event).
+
+#### `contacts_sync`
+
+Request a contacts sync round from a device (UID/timestamp list, then
+vCards for new or changed contacts).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** none (progress arrives as `contacts.updated` events;
+requires a connected device).
+
+#### `contacts_list`
+
+List cached contact summaries for a device.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** array of `{"uid", "name", "phones"?, "emails"?, "timestamp"}`.
+Empty when never synced — absent means unknown. Example:
+
+```json
+[{"uid": "1", "name": "Ada Lovelace", "phones": ["+1-555-0100"], "timestamp": 973486597}]
+```
 
 #### `call_mute`
 
@@ -648,16 +723,27 @@ are delivered.
    accepting the watch request. The client must read (and discard) this line
    before processing events.
 
-2. **State dump:** For each **connected** device, in arbitrary order:
+2. **`state.snapshot`:** One event covering **all known devices** (online
+   and offline) with cached battery/media/signal, so clients boot with full
+   state from this single connection:
+   ```json
+   {"type":"state.snapshot","timestamp":"2026-05-27T10:00:00Z","payload":{"devices":[{...DeviceSummary...}]}}
+   ```
+   Media entries carry `mediaAgeMs` (ms since the phone last reported) with
+   no freshness gate — clients apply their own staleness rules. This event
+   is sent regardless of `events` filters.
+
+3. **State dump:** For each **connected** device, in arbitrary order:
 
    **2a. `device.connected`:**
    ```json
    {"type":"device.connected","deviceId":"...","timestamp":"2026-05-27T10:00:00Z","payload":{"id":"...","name":"Pixel 9","type":"phone"}}
    ```
 
-   **2b. `battery.update`:**
+   **2b. `battery.update`** (only if the device already reported battery —
+       no reading yet means no event, never a zero-value):
    ```json
-   {"type":"battery.update","deviceId":"...","timestamp":"...","payload":{"charge":85,"charging":true}}
+   {"type":"battery.update","deviceId":"...","timestamp":"...","payload":{"charge":85,"charging":true,"batteryAgeMs":1234}}
    ```
 
    **2c. `mpris.update`** (only if MPRIS plugin is registered AND the cached
@@ -741,6 +827,18 @@ A TCP connection was lost.
 
 **Payload:** none (`null`)
 
+#### `state.snapshot`
+
+Full-state bootstrap sent once per `watch` connection, right after the
+ack and regardless of `events` filters. Covers **all known devices**
+(online and offline) with the same enriched shape as `devices`.
+
+**Payload:**
+
+```json
+{"devices": [{...DeviceSummary (see `devices`)...}]}
+```
+
 ### 5.2 Pairing Events
 
 #### `pair.requested`
@@ -780,18 +878,20 @@ A pairing request was rejected, or a device was unpaired.
 
 #### `battery.update`
 
-Battery state changed or was requested.
+Battery state changed or was requested. Never emitted with zero values for
+a device that never reported — absent reading means no event.
 
 **Payload:**
 
 ```json
-{"charge": 85, "charging": true}
+{"charge": 85, "charging": true, "batteryAgeMs": 1234}
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `charge` | number | Battery percentage (0–100) |
 | `charging` | bool | Whether the device is currently charging |
+| `batteryAgeMs` | number | ms since the phone reported (cached/dump events only) |
 
 #### `battery.threshold`
 
@@ -1069,7 +1169,26 @@ An MMS attachment has been downloaded.
 {"filename": "image.jpg", "path": "/tmp/kcd-sms-attachment-...", "thread_id": 42}
 ```
 
-### 5.12 Ring Events
+### 5.12 Contacts Events
+
+#### `contacts.updated`
+
+A contacts sync round made progress. Counts only — no contact content on
+the event stream; call `contacts_list` for data.
+
+**Payload** (uids round):
+
+```json
+{"phase": "uids", "added": 3, "updated": 1, "deleted": 0, "pending": 4}
+```
+
+**Payload** (vCards round):
+
+```json
+{"phase": "vcards", "stored": 4, "skipped": 0}
+```
+
+### 5.13 Ring Events
 
 #### `ring.received`
 
@@ -1078,7 +1197,7 @@ this daemon to ring).
 
 **Payload:** none (`null`)
 
-### 5.13 MPRIS Events
+### 5.14 MPRIS Events
 
 #### `mpris.update`
 
@@ -1086,11 +1205,12 @@ Now-playing state from a device's media player.
 
 > **Album art:** when the phone advertises a `kdeconnect:/artUri?...` URI,
 > the daemon requests the art bytes over a side channel and caches them to
-> `$XDG_CACHE_HOME/kcd/art/<kdeArtHash>.<ext>`. Once fetched, `albumArtUrl`
-> is emitted as a loadable `file://` path. A second `mpris.update` event is
-> published when the art arrives. If the fetch is still in flight or fails,
-> the original URI is left untouched — clients should fall back to a
-> placeholder.
+> `$XDG_CACHE_HOME/kcd/art/<kdeArtHash>.<ext>`. While the fetch is in
+> flight, events carry `"albumArtUrl": ""` with `"artPending": true` — never
+> an unloadable URI, so clients can render a placeholder with no special
+> casing. Once fetched, `albumArtUrl` is emitted as a loadable `file://`
+> path in a second `mpris.update`. If the fetch fails, the pending flag
+> clears on the next state change.
 
 > **Freshness:** the daemon re-requests now-playing from every connected
 > device with an **actively-playing** player every 5 seconds
@@ -1101,6 +1221,11 @@ Now-playing state from a device's media player.
 > whose player is stopped/paused, are not polled — a stopped-but-alive
 > player keeps its last pushed track (so it can be resumed), but stops being
 > refreshed and ages out of the 10-second initial-dump gate.
+
+> **Position:** every event stamps `posAnchorMs` (Unix millis when `pos`
+> was sampled). Clients compute live position drift-free as
+> `pos + (nowMs - posAnchorMs)` while `isPlaying` (rate 1), frozen
+> otherwise — no local timers needed.
 
 > **Session teardown:** when the phone reports a `playerList` that no longer
 > contains the device's currently-tracked player (the media session was
@@ -1122,6 +1247,7 @@ Now-playing state from a device's media player.
   "url": "spotify:track:...",
   "length": 240000,
   "pos": 45000,
+  "posAnchorMs": 1712345678901,
   "isPlaying": true,
   "volume": 80,
   "canControl": true,
@@ -1170,6 +1296,8 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.sms.request_conversations` | SMS | Request conversation list |
 | `kdeconnect.sms.request_conversation` | SMS | Request a specific thread's messages |
 | `kdeconnect.sms.request_attachment` | SMS | Request an MMS attachment file |
+| `kdeconnect.contacts.request_all_uids_timestamps` | Contacts | Request all contact UIDs + timestamps (empty body) |
+| `kdeconnect.contacts.request_vcards_by_uid` | Contacts | Request vCards (`{"uids": [...]}`) |
 | `kdeconnect.telephony.request_mute` | Telephony | Mute incoming call ringer |
 | `kdeconnect.systemvolume` | SystemVolume | Push local sink list to phone |
 | `kdeconnect.systemvolume.request` | RemoteSystemVolume | Set phone volume/mute or request sink list |
@@ -1198,6 +1326,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.telephony` | Telephony | `TelephonyBody{Event, ContactName, PhoneNumber, IsCancel}` |
 | `kdeconnect.sms.messages` | SMS | `SMSMessagesPacket{Version, Messages []SMSMessage}` |
 | `kdeconnect.sms.attachment_file` | SMS | `AttachmentFileBody{Filename, ThreadID}` |
+| `kdeconnect.contacts.response_uids_timestamps` | Contacts | `{"uids": [...], "<uid>": <timestamp string|int>}` |
+| `kdeconnect.contacts.response_vcards` | Contacts | `{"uids": [...], "<uid>": "<vCard text>"}` |
 | `kdeconnect.findmyphone.request` | FindMyPhone | (empty, triggers ring event) |
 | `kdeconnect.connectivity_report` | Connectivity | `ConnectivityBody{SignalStrengths map[string]SignalStrength}` |
 | `kdeconnect.clipboard` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |

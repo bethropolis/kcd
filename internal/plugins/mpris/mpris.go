@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -160,14 +161,19 @@ type MPRISRequest struct {
 }
 
 type NowPlaying struct {
-	Player         string `json:"player"`
-	Title          string `json:"title"`
-	Artist         string `json:"artist"`
-	Album          string `json:"album"`
-	AlbumArtUrl    string `json:"albumArtUrl"`
-	Url            string `json:"url,omitempty"`
-	Length         int64  `json:"length"`
-	Pos            int64  `json:"pos,omitempty"`
+	Player      string `json:"player"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	AlbumArtUrl string `json:"albumArtUrl"`
+	ArtPending  bool   `json:"artPending,omitempty"`
+	Url         string `json:"url,omitempty"`
+	Length      int64  `json:"length"`
+	Pos         int64  `json:"pos,omitempty"`
+	// PosAnchorMs is the wall-clock time (Unix millis) at which Pos was
+	// sampled. Clients compute the live position drift-free as
+	// Pos + (nowMs - PosAnchorMs) * (isPlaying ? 1 : 0).
+	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume,omitempty"`
 	CanControl     bool   `json:"canControl"`
@@ -312,6 +318,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		tracker.lastPosition = body.Pos
 		tracker.lastPositionAt = time.Now()
 		tracker.playing = body.IsPlaying
+		state.PosAnchorMs = tracker.lastPositionAt.UnixMilli()
 		shouldPublish := shouldPublishRemoteState(p.remoteStates[dev.ID()], state)
 		p.remoteStates[dev.ID()] = state
 		p.remoteStateTimes[dev.ID()] = time.Now()
@@ -328,6 +335,12 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			if p.artCache != nil {
 				if resolved := p.artCache.Resolve(pub.AlbumArtUrl); resolved != "" {
 					pub.AlbumArtUrl = resolved
+				} else if pub.AlbumArtUrl != "" && strings.HasPrefix(pub.AlbumArtUrl, "kdeconnect:") {
+					// Art still downloading: publish an empty URL with the
+					// pending flag instead of an unloadable kdeconnect:/
+					// URI. The arrival re-publish carries file://.
+					pub.AlbumArtUrl = ""
+					pub.ArtPending = true
 				}
 			}
 			p.bus.Publish(events.TypeMprisUpdate, dev.ID(), pub)
@@ -514,7 +527,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 
 	go func() {
-		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), 10*time.Second, nil, p.logger)
+		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger)
 	}()
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
@@ -587,7 +600,7 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	// independent context so the side-channel dial isn't aborted.
 	dlCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, nil, p.logger); err != nil {
+	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, cert.PinnedFingerprint(dev.PeerCert()), nil, p.logger); err != nil {
 		p.logger.Warn("mpris: album art transfer failed", zap.Error(err))
 		return
 	}
@@ -598,15 +611,27 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 		return
 	}
 
+	p.stampAlbumArt(dev.ID(), player, artUrl, fileURL)
+}
+
+// stampAlbumArt publishes a resolved file:// URL for a completed album-art
+// fetch — but only if the device's current track still wants exactly this
+// art. The side-channel download can take up to 30s, during which the track
+// (or the active player) may have changed; stamping blindly would show the
+// old track's cover on the new track. On mismatch the bytes stay in the art
+// cache and the new track's own art request fulfills it.
+func (p *MPRISPlugin) stampAlbumArt(deviceID, player, artUrl, fileURL string) {
 	p.mu.Lock()
-	state := p.remoteStates[dev.ID()]
-	if state != nil {
-		state = state.DeepCopy()
-		state.AlbumArtUrl = fileURL
+	state := p.remoteStates[deviceID]
+	if state == nil || state.AlbumArtUrl != artUrl || state.Player != player {
+		p.mu.Unlock()
+		return
 	}
+	state = state.DeepCopy()
+	state.AlbumArtUrl = fileURL
 	p.mu.Unlock()
-	if state != nil && p.bus != nil {
-		p.bus.Publish(events.TypeMprisUpdate, dev.ID(), state)
+	if p.bus != nil {
+		p.bus.Publish(events.TypeMprisUpdate, deviceID, state)
 	}
 }
 
@@ -842,6 +867,16 @@ func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
 }
 
 // RemoteState returns the last known NowPlaying state for a remote device,
+// markArtPending empties unloadable kdeconnect:/ art URIs and flags them,
+// so serving paths (status, snapshot, summaries) agree with published
+// events: art is either a loadable URL or "" with ArtPending set.
+func markArtPending(np *NowPlaying) {
+	if np.AlbumArtUrl != "" && strings.HasPrefix(np.AlbumArtUrl, "kdeconnect:") {
+		np.AlbumArtUrl = ""
+		np.ArtPending = true
+	}
+}
+
 // with position extrapolated from the last update time if playing.
 func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 	p.mu.RLock()
@@ -852,6 +887,7 @@ func (p *MPRISPlugin) RemoteState(deviceID string) *NowPlaying {
 	}
 	copy := state.DeepCopy()
 	copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
+	markArtPending(copy)
 	if tracker, ok := p.positionTrackers[deviceID]; ok && tracker.playing {
 		elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 		copy.Pos = tracker.lastPosition + elapsed
@@ -883,6 +919,7 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 		}
 		copy := state.DeepCopy()
 		copy.AlbumArtUrl = p.resolveArtURL(copy.AlbumArtUrl)
+		markArtPending(copy)
 		if tracker, ok := p.positionTrackers[id]; ok && tracker.playing {
 			elapsed := time.Since(tracker.lastPositionAt).Milliseconds()
 			copy.Pos = tracker.lastPosition + elapsed

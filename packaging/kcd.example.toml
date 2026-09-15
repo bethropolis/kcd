@@ -21,9 +21,11 @@
 # Default: 1716
 # tcp_port = 1716
 
-# Broadcast is disabled by default. It starts automatically when you run
-# `kcd pair` (listen mode) and stops when pairing completes.
-# Paired phones reconnect automatically via the last known IP.
+# Broadcast is on demand. mDNS advertisement runs always (responder-only,
+# negligible cost); UDP broadcast starts automatically when you run
+# `kcd pair` (listen mode) and while any paired device is offline, and
+# stops otherwise. Paired phones reconnect via the last known address,
+# refreshed from sightings and persisted across restarts.
 
 # ─── Pairing ──────────────────────────────────────────────────────────────────
 
@@ -145,6 +147,15 @@ systemvolume = true
 #   kcd sms attachment <id> <part> <uid>   — Request an MMS attachment file
 # See the [sms] section below for notification settings.
 sms = true
+
+# Sync the phone address book (vCards cached under
+# ~/.local/share/kcd/contacts/<device-id>/).
+# Commands:
+#   kcd contacts sync <id>                 — Request a sync (results via `kcd watch --events contacts.updated`)
+#   kcd contacts list <id> [--json]        — List cached contacts
+# The phone gates this on READ_CONTACTS plus per-device opt-in; unpairing
+# wipes the cached address book.
+contacts = true
 
 # Presenter remote — control slideshow presentations from the phone.
 # Gyroscope-based pointer: requires xdotool (X11) or ydotool (Wayland).

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -126,6 +127,33 @@ func LoadOrGenerate(certFile, keyFile, deviceID string) (*tls.Certificate, error
 func Fingerprint(cert *x509.Certificate) string {
 	hash := sha256.Sum256(cert.Raw)
 	return hex.EncodeToString(hash[:])
+}
+
+// PinnedFingerprint returns the hex fingerprint of a pinned peer certificate,
+// or "" when no certificate is available (unpaired or legacy device). Callers
+// must log and proceed unverified in that case.
+func PinnedFingerprint(peer *x509.Certificate) string {
+	if peer == nil {
+		return ""
+	}
+	return Fingerprint(peer)
+}
+
+// VerifySideChannelPeer checks the certificate presented on a side-channel
+// TLS connection against the fingerprint pinned when the transfer was
+// requested. An empty expected fingerprint skips verification (the caller
+// logs a warning) so unpaired devices keep working.
+func VerifySideChannelPeer(state tls.ConnectionState, expectedFP string) error {
+	if len(state.PeerCertificates) == 0 {
+		return fmt.Errorf("cert: side-channel peer presented no certificate")
+	}
+	if expectedFP == "" {
+		return nil
+	}
+	if actual := Fingerprint(state.PeerCertificates[0]); !strings.EqualFold(actual, expectedFP) {
+		return fmt.Errorf("cert: side-channel peer fingerprint mismatch")
+	}
+	return nil
 }
 
 // VerificationKey generates a verification fingerprint used for out-of-band pairing verification.

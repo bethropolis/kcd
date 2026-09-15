@@ -11,6 +11,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/battery"
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
+	"github.com/bethropolis/kcd/internal/plugins/contacts"
 	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
 	"github.com/bethropolis/kcd/internal/plugins/findthisdevice"
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
@@ -83,6 +84,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	}
 	if cfg.Plugins.SMS {
 		plugins.Register(sms.NewSMSPlugin(cfg.SMS, bus, tlsCfg, logger))
+	}
+	if cfg.Plugins.Contacts {
+		plugins.Register(contacts.NewContactsPlugin(bus, logger))
 	}
 	if cfg.Plugins.RemoteSystemVolume {
 		plugins.Register(remotesystemvolume.NewRemoteSystemVolumePlugin(bus, logger))

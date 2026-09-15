@@ -8,9 +8,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"go.uber.org/zap"
 )
@@ -31,8 +34,42 @@ func NewServer(path string, handler *Handler, logger *zap.Logger) *Server {
 	}
 }
 
+// activatedListener adopts a Unix listener passed by systemd socket
+// activation (fd 3+), or returns nil when not running socket-activated.
+// Stdlib only: LISTEN_PID must match our pid and LISTEN_FDS must offer at
+// least one socket. The adopted fd is dup'd by net.FileListener, so the
+// *os.File wrapper is not retained.
+func activatedListener() net.Listener {
+	if os.Getenv("LISTEN_PID") != strconv.Itoa(os.Getpid()) {
+		return nil
+	}
+	n, err := strconv.Atoi(os.Getenv("LISTEN_FDS"))
+	if err != nil || n < 1 {
+		return nil
+	}
+	f := os.NewFile(3, "kcd-socket-activated")
+	l, err := net.FileListener(f)
+	if err != nil {
+		_ = f.Close()
+		return nil
+	}
+	// Children (sshfs, notify-send, …) must not inherit the activation
+	// environment and mistake it for sockets passed to them.
+	_ = os.Unsetenv("LISTEN_PID")
+	_ = os.Unsetenv("LISTEN_FDS")
+	return l
+}
+
 // Listen starts listening on the Unix socket and processes incoming connections.
+// When running under systemd socket activation with the default socket path,
+// the passed listener is adopted instead of binding cfg.SocketPath.
 func (s *Server) Listen(ctx context.Context) error {
+	if s.path == config.DefaultSocketPath() {
+		if l := activatedListener(); l != nil {
+			return s.serve(ctx, l, true)
+		}
+	}
+
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -53,13 +90,22 @@ func (s *Server) Listen(ctx context.Context) error {
 		return fmt.Errorf("failed to chmod ipc socket: %w", err)
 	}
 
+	return s.serve(ctx, l, false)
+}
+
+func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) error {
 	go func() {
 		<-ctx.Done()
 		l.Close()
-		os.Remove(s.path)
+		if !activated {
+			os.Remove(s.path)
+		}
 	}()
 
-	s.logger.Info("ipc server started", zap.String("path", s.path))
+	s.logger.Info("ipc server started",
+		zap.String("path", s.path),
+		zap.Bool("socket_activated", activated),
+	)
 
 	for {
 		conn, err := l.Accept()
@@ -126,6 +172,21 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 	// Send OK response to indicate stream is starting
 	s.writeResponse(conn, Response{OK: true})
 
+	// Full-state snapshot first: every known device (online AND offline)
+	// with cached battery/media/signal, so clients boot with complete
+	// state from this single connection — no auxiliary bootstrap calls,
+	// no hydration races. Sent regardless of event filters.
+	snapEv := map[string]interface{}{
+		"type":      events.TypeStateSnapshot,
+		"timestamp": time.Now().UTC(),
+		"payload":   BuildSnapshot(s.handler.devices, s.handler.plugins),
+	}
+	data, _ := json.Marshal(snapEv)
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		return
+	}
+
 	// Initial State Dump
 	// For each connected device, we emit device.connected and battery.update.
 	devs := s.handler.devices.Connected()
@@ -143,27 +204,52 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			"timestamp": time.Now().UTC(),
 			"payload":   devData,
 		}
-		data, _ := json.Marshal(initEv)
+		data, _ = json.Marshal(initEv)
 		data = append(data, '\n')
 		if _, err := conn.Write(data); err != nil {
 			return
 		}
 
-		// Send initial battery event
-		charge, charging := dev.GetBattery()
-		batEv := map[string]interface{}{
-			"type":      "battery.update",
-			"deviceId":  dev.ID(),
-			"timestamp": time.Now().UTC(),
-			"payload": map[string]interface{}{
-				"charge":   charge,
-				"charging": charging,
-			},
+		// Send initial battery event, but only when the daemon actually
+		// has a reading. Emitting zero values for a fresh pair would
+		// publish a bogus stable 0% (see Device.HasBattery) — same
+		// skip-if-absent rule as connectivity below.
+		if dev.HasBattery() {
+			charge, charging := dev.GetBattery()
+			batEv := map[string]interface{}{
+				"type":      "battery.update",
+				"deviceId":  dev.ID(),
+				"timestamp": time.Now().UTC(),
+				"payload": map[string]interface{}{
+					"charge":       charge,
+					"charging":     charging,
+					"batteryAgeMs": dev.BatteryAge().Milliseconds(),
+				},
+			}
+			data, _ = json.Marshal(batEv)
+			data = append(data, '\n')
+			if _, err := conn.Write(data); err != nil {
+				return
+			}
 		}
-		data, _ = json.Marshal(batEv)
-		data = append(data, '\n')
-		if _, err := conn.Write(data); err != nil {
-			return
+
+		// Send initial connectivity state if the device already reported.
+		// Unlike battery there is no meaningful zero value, so devices
+		// without a report are skipped instead of emitting empty data.
+		if pl, ok := s.handler.plugins.GetByName("Connectivity"); ok {
+			if report, ok := pl.(*connectivity.ConnectivityPlugin).Report(dev.ID()); ok {
+				connEv := map[string]interface{}{
+					"type":      "connectivity.update",
+					"deviceId":  dev.ID(),
+					"timestamp": time.Now().UTC(),
+					"payload":   report,
+				}
+				data, _ = json.Marshal(connEv)
+				data = append(data, '\n')
+				if _, err := conn.Write(data); err != nil {
+					return
+				}
+			}
 		}
 
 		// Send initial mpris state if recently updated.

@@ -7,6 +7,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/plugins/contacts"
 	"github.com/bethropolis/kcd/internal/plugins/pair"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -20,6 +21,11 @@ type Handler struct {
 	bus            *events.Bus
 	routes         map[string]func(Request) Response
 	pruneThreshold time.Duration
+	// pairDialHook, when set, dials a disconnected device on explicit user
+	// pair request (`kcd pair <id>`). The daemon wires this to DialDevice
+	// using the device's last-seen discovery address, so pairing an unpaired
+	// device doesn't depend on background auto-dial.
+	pairDialHook func(deviceID string) error
 }
 
 // NewHandler creates a new IPC command handler.
@@ -38,6 +44,12 @@ func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *
 // Register adds a custom handler for a given command.
 func (h *Handler) Register(command string, fn func(Request) Response) {
 	h.routes[command] = fn
+}
+
+// SetPairDialHook sets the hook used to connect to a disconnected device on
+// explicit user pair request. See the pairDialHook field for details.
+func (h *Handler) SetPairDialHook(fn func(deviceID string) error) {
+	h.pairDialHook = fn
 }
 
 // HandleRequest processes an incoming IPC request and returns a response.
@@ -63,17 +75,12 @@ func (h *Handler) HandleRequest(req Request) Response {
 }
 
 func (h *Handler) handleDevices() Response {
-	// To convert the internal representation to JSON, we construct DeviceInfo structs
+	// Enriched summaries (battery/media/signal embedded, omitempty).
+	// Base identity fields are unchanged, so old clients keep working.
 	devs := h.devices.List()
-	infos := make([]device.DeviceInfo, 0, len(devs))
+	infos := make([]DeviceSummary, 0, len(devs))
 	for _, dev := range devs {
-		infos = append(infos, device.DeviceInfo{
-			ID:        dev.ID(),
-			Name:      dev.Name(),
-			Type:      dev.Type,
-			State:     dev.State(),
-			Connected: dev.IsConnected(),
-		})
+		infos = append(infos, SummarizeDevice(dev, h.plugins))
 	}
 
 	data, err := json.Marshal(infos)
@@ -91,13 +98,18 @@ func (h *Handler) saveDevices() {
 	devs := h.devices.List()
 	infos := make([]device.DeviceInfo, 0, len(devs))
 	for _, dev := range devs {
-		infos = append(infos, device.DeviceInfo{
-			ID:     dev.ID(),
-			Name:   dev.Name(),
-			Type:   dev.Type,
-			State:  dev.State(),
-			CertFP: dev.CertFP,
-		})
+		info := device.DeviceInfo{
+			ID:       dev.ID(),
+			Name:     dev.Name(),
+			Type:     dev.Type,
+			State:    dev.State(),
+			CertFP:   dev.CertFP,
+			LastPort: dev.LastPort(),
+		}
+		if ip := dev.LastIP(); ip != nil {
+			info.LastIP = ip.String()
+		}
+		infos = append(infos, info)
 	}
 	_ = device.SaveDevices(h.statePath, infos)
 }
@@ -111,6 +123,18 @@ func (h *Handler) handlePair(payload []byte) Response {
 	dev, ok := h.devices.Get(p.DeviceID)
 	if !ok {
 		return Response{OK: false, Error: "device not found"}
+	}
+
+	// Pairing needs an active connection (pair packets go over TLS).
+	// Background auto-dial no longer connects to unpaired strangers, so an
+	// explicit `kcd pair <id>` triggers the on-demand dial hook when one is
+	// wired (the daemon always sets it). Without a hook, fall through to the
+	// legacy paths below.
+	if !dev.IsConnected() && h.pairDialHook != nil {
+		if err := h.pairDialHook(dev.ID()); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true}
 	}
 
 	// Use the pair plugin to handle pairing properly
@@ -159,6 +183,7 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 			return Response{OK: false, Error: "failed to unpair: " + err.Error()}
 		}
 		dev.Disconnect()
+		h.forgetContacts(p.DeviceID)
 		return Response{OK: true}
 	}
 
@@ -167,16 +192,36 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 	_ = dev.Send(pkt)
 	dev.Disconnect()
 	h.devices.Remove(p.DeviceID)
+	h.forgetContacts(p.DeviceID)
 	h.saveDevices()
 
 	return Response{OK: true}
 }
 
+// forgetContacts drops a device's cached contacts on unpair: revoked trust
+// drops the address book. Absent plugin or cache is a no-op.
+func (h *Handler) forgetContacts(deviceID string) {
+	if h.plugins == nil {
+		return
+	}
+	pl, ok := h.plugins.GetByName("Contacts")
+	if !ok {
+		return
+	}
+	if cpl, ok := pl.(*contacts.ContactsPlugin); ok {
+		_ = cpl.ForgetDevice(deviceID)
+	}
+}
+
 func (h *Handler) handlePairListen() Response {
-	// Check for any device already in StatePairRequestedByPeer
+	// Report any device already in StatePairRequestedByPeer WITHOUT
+	// accepting it. The caller (CLI / GUI / script) inspects the candidate
+	// and decides: accept via CmdPair, reject via CmdUnpair. Auto-accepting
+	// here would pair with stale requests (e.g. leftovers from tests)
+	// before the user ever sees a prompt.
 	for _, dev := range h.devices.List() {
 		if dev.State() == device.StatePairRequestedByPeer {
-			return h.pairAcceptResult(dev, "")
+			return h.pairListenResult(dev, "")
 		}
 	}
 
@@ -202,20 +247,21 @@ func (h *Handler) handlePairListen() Response {
 				vKey = k
 			}
 		}
-		return h.pairAcceptResult(dev, vKey)
+		return h.pairListenResult(dev, vKey)
 	case <-time.After(60 * time.Second):
 		return Response{OK: false, Error: "timed out waiting for pair request (60s)"}
 	}
 }
 
-func (h *Handler) pairAcceptResult(dev *device.Device, vKey string) Response {
-	if err := h.pairPlugin.AcceptPairing(dev); err != nil {
-		return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
-	}
+// pairListenResult returns the candidate device info without accepting it.
+// The caller (CLI / GUI / script) decides whether to accept via CmdPair or
+// reject via CmdUnpair.
+func (h *Handler) pairListenResult(dev *device.Device, vKey string) Response {
 	data, _ := json.Marshal(PairListenResult{
 		DeviceID:        dev.ID(),
 		DeviceName:      dev.Name(),
 		VerificationKey: vKey,
+		Fingerprint:     dev.CertFP,
 	})
 	return Response{OK: true, Data: data}
 }

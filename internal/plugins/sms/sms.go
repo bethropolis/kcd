@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -29,6 +32,11 @@ const (
 	PacketTypeSMSAttachmentFile = "kdeconnect.sms.attachment_file"
 
 	maxSMSMessages = 1000 // safety limit to prevent OOM from malicious payload
+
+	// maxSMSAttachmentBytes caps a single MMS attachment download (mirrors
+	// the clipboard 50MB safety limit). Anything larger is refused before
+	// any bytes hit disk.
+	maxSMSAttachmentBytes = 50 * 1024 * 1024
 )
 
 // SMSPlugin implements SMS sending, receiving, conversation browsing, and MMS
@@ -218,9 +226,10 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 
 	port := pkt.PayloadTransferInfo.Port
 	payloadSize := pkt.PayloadSize
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
-		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath); err != nil {
+		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath, expectedFP); err != nil {
 			p.logger.Error("sms: attachment download failed", zap.Error(err))
 			return
 		}
@@ -241,8 +250,13 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 }
 
 // receiveAttachment connects to the phone's side-channel port and downloads
-// the attachment file over TLS.
-func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, _ int64, destPath string) error {
+// the attachment file over TLS. The stream is capped at the declared
+// payload size (itself bounded by maxSMSAttachmentBytes) so a malicious
+// peer can't fill the disk with an unbounded stream.
+func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, size int64, destPath string, expectedFP string) error {
+	if size <= 0 || size > maxSMSAttachmentBytes {
+		return fmt.Errorf("sms: refusing attachment with invalid size %d (limit %d)", size, maxSMSAttachmentBytes)
+	}
 	addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 
 	dialer := &tls.Dialer{
@@ -258,13 +272,22 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 	}
 	defer conn.Close()
 
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		return fmt.Errorf("sms: attachment side-channel is not TLS")
+	} else if expectedFP == "" {
+		p.logger.Warn("sms: no pinned peer fingerprint, skipping side-channel verification",
+			zap.String("remote_addr", addr))
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		return fmt.Errorf("sms: side-channel peer verification failed: %w", err)
+	}
+
 	f, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("sms: create attachment file: %w", err)
 	}
 	defer f.Close()
 
-	_, err = io.Copy(f, conn)
+	_, err = io.Copy(f, io.LimitReader(conn, size))
 	if err != nil {
 		return fmt.Errorf("sms: receive attachment data: %w", err)
 	}
@@ -330,11 +353,25 @@ func (p *SMSPlugin) RequestAttachment(dev device.Sender, partID int64, uniqueIde
 	return dev.Send(pkt)
 }
 
+// maxFilenameLength caps attachment filenames to keep them manageable.
+const maxFilenameLength = 128
+
 // cleanFilename strips path components to prevent directory traversal in
-// attachment file paths.
+// attachment file paths. Backslashes are normalized first (Windows-style
+// paths), control characters dropped, and overlong names truncated.
 func cleanFilename(name string) string {
+	name = strings.ReplaceAll(name, "\\", "/")
 	name = filepath.Base(name)
-	if name == "." || name == ".." || name == "" {
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, name)
+	if len(name) > maxFilenameLength {
+		name = strings.ToValidUTF8(name[:maxFilenameLength], "")
+	}
+	if name == "." || name == ".." || name == "/" || name == "" {
 		return "downloaded_attachment"
 	}
 	return name

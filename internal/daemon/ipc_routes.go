@@ -29,8 +29,14 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	if cfg.Plugins.Battery {
 		registerBatteryRoutes(handler, devices)
 	}
+	if cfg.Plugins.Connectivity {
+		registerConnectivityRoutes(handler, devices, plugins)
+	}
 	if cfg.Plugins.Clipboard {
 		registerClipboardRoutes(handler, devices, plugins)
+	}
+	if cfg.Plugins.Contacts {
+		registerContactsRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.RunCommand {
 		registerRunCommandRoutes(handler, devices)
@@ -78,6 +84,18 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	})
 	handler.Register(ipc.CmdBroadcastStop, func(req ipc.Request) ipc.Response {
 		bc.Stop()
+		// Pairing window closed: drop discovery connections that never led
+		// to pairing so strangers don't linger. Paired devices, pair
+		// requests in flight, and explicit pair intents (kept alive until
+		// pairing starts, ends, or expires) are left alone.
+		for _, dev := range devices.List() {
+			if !dev.IsConnected() || dev.State() != device.StateUnpaired || dev.PairDialActive() {
+				continue
+			}
+			logger.Debug("broadcast stopped, dropping unpaired discovery connection",
+				zap.String("device_id", dev.ID()))
+			dev.Disconnect()
+		}
 		return ipc.Response{OK: true}
 	})
 

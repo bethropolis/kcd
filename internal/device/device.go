@@ -28,6 +28,45 @@ type Device struct {
 
 	lastSeen time.Time
 	lastIP   net.IP // cached from last successful connection; survives Disconnect
+	// lastPort is the tcpPort the peer last advertised over the authenticated
+	// (post-TLS) identity exchange. Used with lastIP as the dial target for
+	// paired devices so unauthenticated discovery packets can never redirect
+	// a paired auto-dial. Zero means unknown (fall back to 1716).
+	lastPort int
+
+	// discoveryIP/discoveryPort remember where a device was last seen
+	// announcing itself (UDP/mDNS), even if we never opened a TCP
+	// connection to it. Used to dial on explicit user request
+	// (e.g. `kcd pair <id>`) without auto-dialling strangers.
+	discoveryIP   net.IP
+	discoveryPort int
+
+	// pairDialRequested is the one-shot outbound dial trigger for an explicit
+	// `kcd pair <id>` request. It is consumed by the first discovery
+	// announcement after the request so the pair request can be delivered.
+	pairDialRequested atomic.Bool
+
+	// pairIntentUntil is the Unix-nano deadline until which an explicit pair
+	// intent keeps a connection alive. Unlike pairDialRequested (consumed on
+	// first sighting), the intent survives dial/connect cycles until pairing
+	// starts, is rejected, succeeds, or the deadline (pairDialIntentTTL)
+	// expires — so a slow phone-side accept can't downgrade into an
+	// ephemeral-close flap.
+	pairIntentUntil atomic.Int64
+
+	// lastDiscoveryDial is when onDeviceFound last spawned a dial for this
+	// device. It throttles sighting-triggered redials so announcements
+	// (or a spoofed broadcast storm) can't cause a dial per packet.
+	lastDiscoveryDial time.Time
+
+	// ephemeralDialed marks that this device already received its one
+	// ephemeral discovery dial for the current unpaired era. Ephemeral
+	// dials let a stranger complete the TCP identity exchange (so both
+	// sides list each other) without staying connected: the next sighting
+	// closes the socket again while the device is still unpaired. The
+	// marker is cleared when the device is explicitly unpaired/rejected,
+	// making it eligible again. Paired devices and pairing mode bypass it.
+	ephemeralDialed bool
 
 	conn      *transport.Conn
 	sendChan  chan *protocol.Packet // buffered 32
@@ -36,6 +75,15 @@ type Device struct {
 
 	BatteryCharge int
 	IsCharging    bool
+
+	// batterySeen marks that at least one kdeconnect.battery packet was
+	// received. Until then the zero values above are not measurements —
+	// they must not be published (a fresh pair would otherwise report a
+	// stable, bogus 0% that no later packet corrects at steady charge).
+	batterySeen bool
+	// lastBatteryAt is when the last battery packet arrived, so clients
+	// can apply their own staleness rules (mirrors mediaAgeMs).
+	lastBatteryAt time.Time
 
 	mu sync.RWMutex
 
@@ -64,11 +112,13 @@ type Device struct {
 }
 
 // NewDevice creates a new disconnected device instance.
+// New devices start as Unpaired (not Unknown) so listings are unambiguous.
 func NewDevice(id, name, dtype string, logger *zap.Logger) *Device {
 	return &Device{
 		id:       id,
 		name:     name,
 		Type:     dtype,
+		state:    StateUnpaired,
 		sendChan: make(chan *protocol.Packet, 32),
 		done:     make(chan struct{}),
 		logger:   logger.With(zap.String("device_id", id)),
@@ -213,6 +263,8 @@ func (d *Device) UpdateBattery(charge int, charging bool) {
 	d.mu.Lock()
 	d.BatteryCharge = charge
 	d.IsCharging = charging
+	d.batterySeen = true
+	d.lastBatteryAt = time.Now()
 	bus := d.bus
 	id := d.id
 	d.mu.Unlock()
@@ -230,6 +282,25 @@ func (d *Device) GetBattery() (int, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.BatteryCharge, d.IsCharging
+}
+
+// HasBattery reports whether at least one battery packet was received.
+// Until then the charge values are zero-value defaults, not measurements.
+func (d *Device) HasBattery() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.batterySeen
+}
+
+// BatteryAge returns how long ago the last battery packet arrived, or a
+// negative duration when no packet was ever received.
+func (d *Device) BatteryAge() time.Duration {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if !d.batterySeen {
+		return -1
+	}
+	return time.Since(d.lastBatteryAt)
 }
 
 // HasCapability checks if the device has a particular capability (incoming or outgoing).
@@ -317,6 +388,120 @@ func (d *Device) SetLastSeen(t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastSeen = t
+}
+
+// SetDiscoveryAddr records where the device was last seen announcing itself.
+func (d *Device) SetDiscoveryAddr(ip net.IP, port int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.discoveryIP = ip
+	d.discoveryPort = port
+}
+
+// DiscoveryAddr returns the last-seen announcement address, or nil if unknown.
+func (d *Device) DiscoveryAddr() (net.IP, int) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.discoveryIP, d.discoveryPort
+}
+
+// pairDialIntentTTL bounds how long an explicit `kcd pair <id>` intent pins
+// a connection while pairing hasn't started yet.
+const pairDialIntentTTL = 5 * time.Minute
+
+// RequestPairDial marks the device for a one-shot outbound dial on its next
+// discovery announcement and arms the keep-alive intent until pairing starts,
+// is rejected, succeeds, or the TTL expires. Used when the user explicitly
+// runs `kcd pair <id>` for a device with no active connection.
+func (d *Device) RequestPairDial() {
+	d.pairDialRequested.Store(true)
+	d.pairIntentUntil.Store(time.Now().Add(pairDialIntentTTL).UnixNano())
+}
+
+// ConsumePairDial reports and clears a pending explicit pair-dial request.
+func (d *Device) ConsumePairDial() bool {
+	return d.pairDialRequested.CompareAndSwap(true, false)
+}
+
+// PairDialPending reports whether an explicit pair-dial was requested,
+// without clearing it.
+func (d *Device) PairDialPending() bool {
+	return d.pairDialRequested.Load()
+}
+
+// PairDialActive reports whether an explicit pair intent is still keeping
+// the connection alive: requested and neither cleared nor expired. Unlike
+// PairDialPending (the one-shot dial trigger, consumed on first sighting),
+// this survives dial/connect cycles until pairing starts or ends.
+func (d *Device) PairDialActive() bool {
+	return d.pairIntentUntil.Load() > time.Now().UnixNano()
+}
+
+// ClearPairDial drops both the one-shot trigger and the keep-alive intent.
+// Call it when pairing completes, is rejected/cancelled, or is unpaired.
+func (d *Device) ClearPairDial() {
+	d.pairDialRequested.Store(false)
+	d.pairIntentUntil.Store(0)
+}
+
+// LastPort returns the last authenticated tcpPort advertised by the peer,
+// or 0 if unknown.
+func (d *Device) LastPort() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.lastPort
+}
+
+// SetLastPort records the peer's advertised listening port after a
+// successful authenticated exchange. Callers must pass a validated port.
+func (d *Device) SetLastPort(port int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastPort = port
+}
+
+// SetLastIP records a dial target, used when restoring persisted state.
+// A nil IP clears the target.
+func (d *Device) SetLastIP(ip net.IP) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastIP = ip
+}
+
+// ShouldDiscoveryDial reports whether enough time has passed since the last
+// discovery-triggered dial for this device, and marks this dial if so. It
+// bounds redial storms to a stale LastIP (DHCP roam) or spoofed sightings.
+func (d *Device) ShouldDiscoveryDial(minInterval time.Duration) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastDiscoveryDial) < minInterval {
+		return false
+	}
+	d.lastDiscoveryDial = time.Now()
+	return true
+}
+
+// MarkEphemeralDialed records that the one ephemeral discovery dial for the
+// current unpaired era has been used.
+func (d *Device) MarkEphemeralDialed() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ephemeralDialed = true
+}
+
+// EphemeralDialed reports whether the ephemeral discovery dial was used.
+func (d *Device) EphemeralDialed() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.ephemeralDialed
+}
+
+// ClearEphemeral makes the device eligible for a fresh ephemeral discovery
+// dial (e.g. after an explicit unpair or rejection).
+func (d *Device) ClearEphemeral() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ephemeralDialed = false
 }
 
 // TryReconnect attempts to mark the device as reconnecting.

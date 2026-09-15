@@ -1,0 +1,37 @@
+# kcd.socket — on-demand activation for the kcd daemon.
+#
+# Installed by scripts/install.sh as ~/.config/systemd/user/kcd.socket.
+# Enable once for login-persistent on-demand startup:
+#
+#   systemctl --user enable --now kcd.socket
+#
+# The first client connection to the IPC socket starts kcd.service
+# automatically; the daemon adopts this listener (see LISTEN_FDS handling
+# in internal/ipc/server.go) instead of binding the path itself. Clients
+# block briefly on a cold start, then behave identically — no reconnect
+# machinery needed to summon the daemon.
+#
+# Only applies to the default socket path ($XDG_RUNTIME_DIR/kcd/kcd.sock).
+# A custom socket_path in kcd.toml falls back to daemon-side self-bind.
+
+[Unit]
+Description=kcd — IPC socket (on-demand daemon activation)
+Documentation=https://github.com/bethropolis/kcd
+# The service stops at session end; the socket goes with it.
+PartOf=graphical-session.target
+Before=sockets.target
+
+[Socket]
+# Must match the daemon's default socket path. %t is $XDG_RUNTIME_DIR.
+ListenStream=%t/kcd/kcd.sock
+# Mirror the daemon's self-bind permissions (0600) — without this the
+# systemd-created socket would be world-accessible under a lax umask.
+SocketMode=0600
+# Create $XDG_RUNTIME_DIR/kcd (mode 0700) so the socket path exists.
+RuntimeDirectory=kcd
+RuntimeDirectoryMode=0700
+# Single-instance stream socket (Accept=false default): systemd spawns one
+# kcd.service and hands it every connection. Default trigger limits apply.
+
+[Install]
+WantedBy=sockets.target

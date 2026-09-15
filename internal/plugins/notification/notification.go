@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -229,12 +230,15 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		payloadSize = pkt.PayloadSize
 		payloadPort int
 		remoteIP    net.IP
+		expectedFP  string
 	)
 	if hasIcon {
 		payloadPort = pkt.PayloadTransferInfo.Port
 		remoteIP = dev.RemoteIP()
 		if remoteIP == nil {
 			hasIcon = false
+		} else {
+			expectedFP = cert.PinnedFingerprint(dev.PeerCert())
 		}
 	}
 
@@ -242,12 +246,26 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	go func() {
 		var iconPath string
 		if p.cfg.ShowIcons {
-			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon)
+			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP)
 		}
 		p.sendDesktopNotification(dev.ID(), appName, body.ID, body.Title, text, iconPath)
 	}()
 
 	return nil
+}
+
+// notifIDChars restricts phone-provided notification IDs to filename-safe
+// characters when they're embedded in icon cache paths.
+var notifIDChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
+// sanitizeNotifID strips everything but alphanumerics, dot, underscore and
+// hyphen from a notification ID so it can't escape the icon cache directory
+// via path separators. Empty results fall back to "default".
+func sanitizeNotifID(id string) string {
+	if safe := notifIDChars.ReplaceAllString(id, "_"); safe != "" {
+		return safe
+	}
+	return "default"
 }
 
 // notifKey scopes a notification id to its device so two paired phones with
@@ -265,6 +283,7 @@ func (p *NotificationPlugin) fetchIcon(
 	port int,
 	size int64,
 	hasIcon bool,
+	expectedFP string,
 ) string {
 	if !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
 		// Fall back to icon name derived from app name.
@@ -273,8 +292,19 @@ func (p *NotificationPlugin) fetchIcon(
 
 	// Use the notification ID as the filename so the same app reuses the
 	// cached icon rather than downloading it on every notification.
+	// The ID comes from the phone, so restrict it to filename-safe chars
+	// (no separators) — otherwise ../ in an ID would escape the icon dir.
 	safeName := nonAlphaNumeric.ReplaceAllString(appName, "_")
-	iconPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png", safeName, notifID))
+	safeID := sanitizeNotifID(notifID)
+	iconPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png", safeName, safeID))
+
+	// Belt and braces: confine the result to the icon dir even if the
+	// sanitizer above ever regresses.
+	if rel, err := filepath.Rel(p.iconDir, iconPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		p.logger.Warn("notification: icon path escapes cache dir, refusing",
+			zap.String("id", notifID))
+		return ""
+	}
 
 	// Reuse the cached icon even when the phone re-posts the notification
 	// without an icon payload (Android only sends the bytes when the icon
@@ -299,6 +329,16 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 	defer conn.Close()
+
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		p.logger.Debug("notification: icon connection is not TLS")
+		return ""
+	} else if expectedFP == "" {
+		p.logger.Warn("notification: no pinned peer fingerprint, skipping icon verification")
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		p.logger.Warn("notification: icon peer verification failed, refusing download", zap.Error(err))
+		return ""
+	}
 
 	f, err := os.Create(iconPath)
 	if err != nil {
@@ -377,9 +417,12 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 				}
 			}
 		}
-		args = append(args, "--print-id", title, text)
+		// "--" ends option parsing so a phone-provided title/body starting with
+		// '-' can't be misparsed as a notify-send flag (notify-send uses
+		// GOption, which honors the POSIX separator).
+		args = append(args, "--print-id", "--", title, text)
 	} else {
-		args = append(args, title, text)
+		args = append(args, "--", title, text)
 	}
 
 	out, err := p.newExec(context.Background(), "notify-send", args...).Output()

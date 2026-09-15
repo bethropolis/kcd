@@ -304,8 +304,10 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 	} else if body.Key != "" {
 		// Unicode strings cannot be typed via uinput directly.
 		// Use display-server tool for text input regardless of uinput backend.
+		// "--" ends option parsing (supported by both wtype and xdotool)
+		// so phone-provided text starting with '-' can't be misparsed.
 		if p.isWayland {
-			p.runCmd("wtype", body.Key)
+			p.runCmd("wtype", "--", body.Key)
 		} else {
 			p.runCmd("xdotool", "type", "--", body.Key)
 		}

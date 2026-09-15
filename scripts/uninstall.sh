@@ -52,7 +52,7 @@ printf "${BOLD}${RED}│${RESET}   ${BOLD}kcd${RESET} — Uninstall             
 printf "${BOLD}${RED}└─────────────────────────────────────────┘${RESET}\n"
 printf "\n"
 
-# ── Stop and disable service ──────────────────────────────────────────────────
+# ── Stop and disable service + socket ─────────────────────────────────────────
 step "systemd service"
 
 if systemctl --user is-active --quiet kcd.service 2>/dev/null; then
@@ -63,9 +63,22 @@ else
   skip "kcd.service is not running"
 fi
 
+if systemctl --user is-active --quiet kcd.socket 2>/dev/null; then
+  info "Stopping kcd.socket …"
+  systemctl --user stop kcd.socket
+  success "Socket stopped"
+else
+  skip "kcd.socket is not listening"
+fi
+
 if systemctl --user is-enabled --quiet kcd.service 2>/dev/null; then
   systemctl --user disable kcd.service
   success "Service disabled"
+fi
+
+if systemctl --user is-enabled --quiet kcd.socket 2>/dev/null; then
+  systemctl --user disable kcd.socket
+  success "Socket disabled"
 fi
 
 if [[ -f "${SYSTEMD_DIR}/kcd.service" ]]; then
@@ -74,6 +87,14 @@ if [[ -f "${SYSTEMD_DIR}/kcd.service" ]]; then
   success "Removed ${SYSTEMD_DIR}/kcd.service"
 else
   skip "No service file found at ${SYSTEMD_DIR}/kcd.service"
+fi
+
+if [[ -f "${SYSTEMD_DIR}/kcd.socket" ]]; then
+  rm "${SYSTEMD_DIR}/kcd.socket"
+  systemctl --user daemon-reload
+  success "Removed ${SYSTEMD_DIR}/kcd.socket"
+else
+  skip "No socket file found at ${SYSTEMD_DIR}/kcd.socket"
 fi
 
 # ── Remove binary ─────────────────────────────────────────────────────────────

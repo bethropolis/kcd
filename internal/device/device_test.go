@@ -106,3 +106,88 @@ func TestDevice_ConnectionAge(t *testing.T) {
 	}
 	d.Disconnect()
 }
+
+func TestDevice_BatterySeen(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("bat-seen", "Phone", "phone", logger)
+
+	if d.HasBattery() {
+		t.Error("fresh device must report no battery reading")
+	}
+	if got := d.BatteryAge(); got >= 0 {
+		t.Errorf("fresh device battery age must be negative, got %v", got)
+	}
+
+	d.UpdateBattery(80, true)
+	if !d.HasBattery() {
+		t.Error("device must report a reading after UpdateBattery")
+	}
+	if charge, charging := d.GetBattery(); charge != 80 || !charging {
+		t.Errorf("GetBattery = (%d, %v), want (80, true)", charge, charging)
+	}
+	if got := d.BatteryAge(); got < 0 {
+		t.Errorf("battery age must be non-negative after a reading, got %v", got)
+	}
+
+	// A true zero is a real reading, not an unknown.
+	d2 := NewDevice("bat-zero", "Phone", "phone", logger)
+	d2.UpdateBattery(0, false)
+	if !d2.HasBattery() {
+		t.Error("true 0% reading must count as seen")
+	}
+}
+
+func TestDeviceInfoDialTargetRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/devices.json"
+
+	infos := []DeviceInfo{
+		{ID: "paired-1", Name: "Phone", Type: "phone", State: StatePaired, LastIP: "192.168.1.20", LastPort: 1716},
+		{ID: "fresh-1", Name: "New", Type: "phone", State: StateUnpaired},
+	}
+	if err := SaveDevices(path, infos); err != nil {
+		t.Fatalf("SaveDevices failed: %v", err)
+	}
+	loaded, err := LoadDevices(path)
+	if err != nil {
+		t.Fatalf("LoadDevices failed: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 devices, got %d", len(loaded))
+	}
+
+	ip, port := loaded[0].DialTarget()
+	if ip == nil || ip.String() != "192.168.1.20" || port != 1716 {
+		t.Errorf("dial target not preserved: ip=%v port=%d", ip, port)
+	}
+	if ip, port := loaded[1].DialTarget(); ip != nil || port != 0 {
+		t.Errorf("device without target must yield nil/0, got %v/%d", ip, port)
+	}
+}
+
+func TestDeviceInfoDialTargetRejectsGarbage(t *testing.T) {
+	cases := []struct {
+		name     string
+		info     DeviceInfo
+		wantIP   bool
+		wantPort int
+	}{
+		{"valid", DeviceInfo{LastIP: "10.0.0.5", LastPort: 1716}, true, 1716},
+		{"garbage ip", DeviceInfo{LastIP: "not-an-ip", LastPort: 1716}, false, 0},
+		{"empty ip", DeviceInfo{LastPort: 1716}, false, 0},
+		{"hostname not ip", DeviceInfo{LastIP: "phone.local", LastPort: 1716}, false, 0},
+		{"zero port falls back", DeviceInfo{LastIP: "10.0.0.5"}, true, 0},
+		{"port out of range", DeviceInfo{LastIP: "10.0.0.5", LastPort: 99999}, true, 0},
+		{"negative port", DeviceInfo{LastIP: "10.0.0.5", LastPort: -1}, true, 0},
+		{"ipv6", DeviceInfo{LastIP: "fd00::5", LastPort: 1716}, true, 1716},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ip, port := tc.info.DialTarget()
+			if (ip != nil) != tc.wantIP || port != tc.wantPort {
+				t.Errorf("DialTarget() = (%v, %d), want ip-present=%v port=%d",
+					ip, port, tc.wantIP, tc.wantPort)
+			}
+		})
+	}
+}

@@ -88,6 +88,23 @@ for dev in resp["data"]:
 
 States: `UNPAIRED`, `PAIR_REQUESTED`, `PAIR_REQUESTED_BY_PEER`, `PAIRED`.
 
+> **Auto-device selection:** `connected: true` only means a raw TCP socket
+> is open — unpaired strangers on the LAN also appear connected. Never
+> auto-select the first entry with `connected == true`. Always prefer a
+> device with `connected and state == "PAIRED"`, falling back to any
+> `state == "PAIRED"` device, and to nothing otherwise:
+>
+> ```python
+> def pick_auto_device(devices):
+>     for d in devices or []:
+>         if d.get("connected") and d.get("state") == "PAIRED":
+>             return d
+>     for d in devices or []:
+>         if d.get("state") == "PAIRED":
+>             return d
+>     return None  # don't bind to unpaired stranger devices
+> ```
+
 ### 3.2 Pairing Flow
 
 Pairing requires a persistent watch connection to receive the pairing request
@@ -132,6 +149,10 @@ resp = ipc_request(sock, "pair", {"deviceId": device_id, "accept": True})
 if resp["ok"]:
     print("Paired successfully!")
 ```
+
+> `pair_listen` never accepts on its own — it only returns the candidate.
+> Your client must ask the user and then call `pair` (accept) or `unpair`
+> (reject), mirroring `kcd pair` / `kcd pair --yes`.
 
 ### 3.3 Unpairing
 
@@ -260,6 +281,7 @@ except KeyboardInterrupt:
 
 | Filter string | When it fires |
 |---|---|
+| `state.snapshot` | Once per watch connection, right after the ack — full state for all known devices (online and offline); sent regardless of filters |
 | `device.connected` | TCP connection established |
 | `device.disconnected` | TCP connection lost |
 | `battery.update` | Battery level or charging state changed |
@@ -268,6 +290,7 @@ except KeyboardInterrupt:
 | `share.complete` | File transfer finished |
 | `mpris.update` | Now-playing state changed (deduplicated — only on real changes) |
 | `sms.incoming` | SMS/MMS received |
+| `contacts.updated` | Contacts sync progress (counts only; call `contacts_list` for data) |
 | `pair.requested` | Remote device wants to pair |
 | `ping.received` | Ping from device |
 
@@ -283,10 +306,13 @@ except KeyboardInterrupt:
 
 > **Album art:** `mpris.update` payloads (and `kcd mpris status --json`)
 > expose `albumArtUrl` as a loadable `file://` path once the daemon has
-> fetched the art from the phone into `$XDG_CACHE_HOME/kcd/art/`. If the
-> art is still being fetched or fails, the raw `kdeconnect:/artUri?...`
-> URI is emitted instead — treat anything that isn't `http(s)://` or
-> `file://` as "no art available" and show a placeholder.
+> fetched the art from the phone into `$XDG_CACHE_HOME/kcd/art/`. While the
+> fetch is in flight the payload carries `"albumArtUrl": ""` with
+> `"artPending": true` — render a placeholder whenever the URL is empty.
+
+> **Position:** payloads stamp `posAnchorMs` (Unix millis when `pos` was
+> sampled). Live position is `pos + (nowMs - posAnchorMs)` while playing,
+> frozen otherwise — no client-side timers needed.
 
 See [`IPC_PROTOCOL.md §5`](IPC_PROTOCOL.md#5-event-types) for the full list.
 
@@ -345,6 +371,19 @@ ipc_request(sock, "send_sms", {
 ```python
 ipc_request(sock, "findmyphone", {"deviceId": dev_id})
 # or: ipc_request(sock, "ring", {"deviceId": dev_id})
+```
+
+### 5.7 Sync Contacts
+
+```python
+ipc_request(sock, "contacts_sync", {"deviceId": dev_id})
+# progress arrives as contacts.updated events (counts only)
+
+resp = ipc_request(sock, "contacts_list", {"deviceId": dev_id})
+if resp["ok"]:
+    for c in resp["data"]:
+        print(c["name"], c.get("phones", []))
+# empty list = never synced (unknown, not zero contacts)
 ```
 
 ### 5.7 Lock/Unlock
@@ -449,8 +488,11 @@ Each event type carries a different payload shape. Here are the common ones:
   "album": "Album",
   "isPlaying": true,
   "pos": 45000,
+  "posAnchorMs": 1712345678901,
   "length": 240000,
   "volume": 80,
+  "albumArtUrl": "",
+  "artPending": true,
   "canControl": true,
   "shuffle": false,
   "loopStatus": "None"

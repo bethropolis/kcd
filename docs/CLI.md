@@ -28,7 +28,11 @@ kcd daemon [--config <path>] [--log-level <level>]
 ```
 
 The daemon:
-- Listens for device announcements via UDP and mDNS (always on)
+- Listens for device announcements via UDP and mDNS (always on).
+  Unpaired strangers get one ephemeral TCP handshake so both sides list
+  each other, closed again on the next sighting — no lingering, no
+  re-dial churn. Persistent connections are for paired devices, active
+  `kcd pair` listen mode, or explicit `kcd pair <id>` / `kcd connect`.
 - Broadcasts its own identity only during `kcd pair` (listen mode)
 - Accepts inbound TCP connections on port 1716
 - Runs all enabled plugins
@@ -39,9 +43,15 @@ The daemon:
 
 ```bash
 cp packaging/kcd-user.service ~/.config/systemd/user/kcd.service
+cp packaging/kcd-user.socket ~/.config/systemd/user/kcd.socket
 systemctl --user daemon-reload
-systemctl --user enable --now kcd
+systemctl --user enable --now kcd.socket
 ```
+
+The socket unit listens on the IPC socket and starts the daemon on the
+first client connection — no manual start needed, cold commands just work.
+(`install.sh` sets this up automatically.) Only the default socket path
+activates this way; a custom `socket_path` in `kcd.toml` self-binds.
 
 Check status:
 ```bash
@@ -108,6 +118,7 @@ kcd devices [--json]
 |---|---|
 | `--json` | Output as a JSON array |
 | `--watch`, `-w` | Stream device changes live (clears screen on each change) |
+| `--connected` | Only show paired devices, including offline ones (unpaired strangers are hidden; check the `CONNECTED` column for liveness) |
 
 **Example output**
 
@@ -118,10 +129,11 @@ a1b2c3d4_e5f6_7890_abcd_ef1234567890 Pixel 8 Pro       phone      Paired     tru
 b9e1f234_0000_1111_2222_333344445555 Galaxy Tab S9     tablet     Unpaired   false
 ```
 
-**JSON output**
+**JSON output** (enriched with cached battery/media/signal; sections omitted
+when the device never reported them):
 
 ```bash
-kcd devices --json | jq '.[0].ID'
+kcd devices --json | jq '.[0] | {name, battery: .battery.charge}'
 ```
 
 ```json
@@ -174,7 +186,7 @@ Pair with a device. Two modes depending on whether you provide a device ID.
 kcd pair <device-id>
 ```
 
-If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it sends a new pair request — accept on your phone.
+If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
 
 ### Listen mode (headless / server)
 
@@ -182,15 +194,37 @@ If the device has already sent a pair request to `kcd` (state `PairRequestedByPe
 kcd pair
 ```
 
-No arguments = listen mode. Broadcast is started automatically so the phone can discover the PC. The CLI waits for any incoming pair request and accepts it immediately, printing the verification code:
+No arguments = listen mode. Broadcast is started automatically so the phone can discover the PC. The CLI shows the incoming request with its verification code and asks for confirmation:
 
 ```
 Listening for pair requests… (Ctrl+C to cancel)
-Paired with Pixel 8 Pro (a1b2c3d4...)
-Verification code: 3a8f
+
+Incoming pair request from:
+  Device: Pixel 8 Pro (a1b2c3d4...)
+  Verification code: 3a8f12bc
+
+Accept pairing? [y/N]:
+```
+
+Answer `y` to pair, anything else (default) to reject. For headless systems and scripts, pass `-y` / `--yes` to accept without prompting:
+
+```bash
+kcd pair --yes
 ```
 
 Broadcast stops when pairing completes or you press Ctrl+C.
+
+> **Constraining auto-accept:** bare `--yes` accepts the first device that
+> asks, which is risky on shared networks (a warning is printed). Pin the
+> expected peer instead:
+>
+> ```bash
+> kcd pair --yes --expected-fingerprint "aa:bb:cc:..."   # exact cert match (colons optional)
+> kcd pair --yes --known-only                            # only devices already in the known-devices file
+> ```
+>
+> Non-matching candidates are rejected and listening continues. Both flags
+> also apply to the interactive confirmation prompt.
 
 ---
 
@@ -221,7 +255,7 @@ kcd ping <device-id>
 Fetch the current battery level and charging state of a device.
 
 ```
-kcd battery <device-id>
+kcd battery <device-id> [--json]
 ```
 
 **Example output**
@@ -231,7 +265,35 @@ Battery: 74% (charging)
 Battery: 31% (discharging)
 ```
 
+`--json` prints `{"deviceId":"...","charge":74,"charging":true}` for scripting.
+
 > For continuous monitoring, use `kcd watch --events=battery.update` instead.
+
+---
+
+## connectivity
+
+Show the phone's cellular signal strength and network type (5G/LTE/…).
+
+```
+kcd connectivity [device-id] [--json]
+```
+
+If `device-id` is omitted, `kcd` automatically targets the first paired and connected device.
+
+**Example output**
+
+```
+LTE [███░] (3/4)
+```
+
+Dual-SIM phones print one line per SIM (`SIM 0: …`), primary first.
+`--json` prints the raw report (same shape as `connectivity.update` event
+payloads) for scripting. Exits non-zero with `no connectivity data` when
+the device is offline or never reported — reports are requested fresh on
+every connect.
+
+> For continuous monitoring, use `kcd watch --events=connectivity.update` instead.
 
 ---
 
@@ -243,7 +305,7 @@ Push the local clipboard content to a device.
 kcd clipboard [device-id]
 ```
 
-If `device-id` is omitted, `kcd` automatically targets the first connected device.
+If `device-id` is omitted, `kcd` automatically targets the first paired and connected device.
 
 **Clipboard backend detection**
 
@@ -543,7 +605,7 @@ kcd watch --json --events=sftp.mount | jq -r 'select(.type=="sftp.mount") | .pay
 Show cached SFTP connection details for a paired device, including available storage volumes:
 
 ```
-kcd sftp info <device-id>
+kcd sftp info <device-id> [--json]
 ```
 
 **Example output**
@@ -567,7 +629,7 @@ If the phone returned an error (e.g. storage permission not granted), the `error
 List available storage volumes without the full info output:
 
 ```
-kcd sftp volumes <device-id>
+kcd sftp volumes <device-id> [--json]
 ```
 
 **Example output**
@@ -728,6 +790,32 @@ kcd sms attachment <device-id> <part-id> <unique-identifier>
 
 ---
 
+## contacts
+
+Sync and browse the phone address book. The phone gates this on
+`READ_CONTACTS` plus per-device opt-in — unanswered syncs simply produce
+no events. Unpairing wipes the cached address book.
+
+### contacts sync
+
+Request a sync round (UID/timestamp list, then vCards for new or changed
+contacts). Progress arrives as `contacts.updated` events (counts only).
+
+```
+kcd contacts sync <device-id>
+```
+
+### contacts list
+
+List cached contact summaries (empty when never synced — absent means
+unknown).
+
+```
+kcd contacts list <device-id> [--json]
+```
+
+---
+
 ## volume
 
 Control the remote device's audio volume (requires `remotesystemvolume` plugin).
@@ -737,7 +825,7 @@ Control the remote device's audio volume (requires `remotesystemvolume` plugin).
 List audio sinks on a remote device and their current volume/mute state.
 
 ```
-kcd volume list <device-id>
+kcd volume list <device-id> [--json]
 ```
 
 **Example output**
@@ -897,10 +985,20 @@ done
 
 ## Tips
 
-**Get the first connected device ID**
+Fire-and-forget commands (`ping`, `lock`, `share`, `reply`, …) print a
+human ack and exit 0 — only commands that return data offer `--json`.
+Errors are always structured (`daemon error: …` on stderr/exit code).
+
+**Get the first paired device ID (works offline too)**
 
 ```bash
-kcd devices --json | jq -r '[.[] | select(.Connected)] | .[0].ID'
+kcd devices --json | jq -r '[.[] | select(.State=="PAIRED")] | .[0].ID'
+```
+
+**Get the first online (connected) paired device ID**
+
+```bash
+kcd devices --json | jq -r '[.[] | select(.Connected and .State=="PAIRED")] | .[0].ID'
 ```
 
 **Send a file from a Nautilus script**
