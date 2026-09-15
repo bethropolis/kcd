@@ -106,3 +106,33 @@ func TestDevice_ConnectionAge(t *testing.T) {
 	}
 	d.Disconnect()
 }
+
+func TestDevice_BatterySeen(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("bat-seen", "Phone", "phone", logger)
+
+	if d.HasBattery() {
+		t.Error("fresh device must report no battery reading")
+	}
+	if got := d.BatteryAge(); got >= 0 {
+		t.Errorf("fresh device battery age must be negative, got %v", got)
+	}
+
+	d.UpdateBattery(80, true)
+	if !d.HasBattery() {
+		t.Error("device must report a reading after UpdateBattery")
+	}
+	if charge, charging := d.GetBattery(); charge != 80 || !charging {
+		t.Errorf("GetBattery = (%d, %v), want (80, true)", charge, charging)
+	}
+	if got := d.BatteryAge(); got < 0 {
+		t.Errorf("battery age must be non-negative after a reading, got %v", got)
+	}
+
+	// A true zero is a real reading, not an unknown.
+	d2 := NewDevice("bat-zero", "Phone", "phone", logger)
+	d2.UpdateBattery(0, false)
+	if !d2.HasBattery() {
+		t.Error("true 0% reading must count as seen")
+	}
+}

@@ -77,6 +77,15 @@ type Device struct {
 	BatteryCharge int
 	IsCharging    bool
 
+	// batterySeen marks that at least one kdeconnect.battery packet was
+	// received. Until then the zero values above are not measurements —
+	// they must not be published (a fresh pair would otherwise report a
+	// stable, bogus 0% that no later packet corrects at steady charge).
+	batterySeen bool
+	// lastBatteryAt is when the last battery packet arrived, so clients
+	// can apply their own staleness rules (mirrors mediaAgeMs).
+	lastBatteryAt time.Time
+
 	mu sync.RWMutex
 
 	// reconnecting is an atomic flag preventing multiple concurrent
@@ -255,6 +264,8 @@ func (d *Device) UpdateBattery(charge int, charging bool) {
 	d.mu.Lock()
 	d.BatteryCharge = charge
 	d.IsCharging = charging
+	d.batterySeen = true
+	d.lastBatteryAt = time.Now()
 	bus := d.bus
 	id := d.id
 	d.mu.Unlock()
@@ -272,6 +283,25 @@ func (d *Device) GetBattery() (int, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.BatteryCharge, d.IsCharging
+}
+
+// HasBattery reports whether at least one battery packet was received.
+// Until then the charge values are zero-value defaults, not measurements.
+func (d *Device) HasBattery() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.batterySeen
+}
+
+// BatteryAge returns how long ago the last battery packet arrived, or a
+// negative duration when no packet was ever received.
+func (d *Device) BatteryAge() time.Duration {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if !d.batterySeen {
+		return -1
+	}
+	return time.Since(d.lastBatteryAt)
 }
 
 // HasCapability checks if the device has a particular capability (incoming or outgoing).

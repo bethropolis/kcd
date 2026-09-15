@@ -165,21 +165,27 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			return
 		}
 
-		// Send initial battery event
-		charge, charging := dev.GetBattery()
-		batEv := map[string]interface{}{
-			"type":      "battery.update",
-			"deviceId":  dev.ID(),
-			"timestamp": time.Now().UTC(),
-			"payload": map[string]interface{}{
-				"charge":   charge,
-				"charging": charging,
-			},
-		}
-		data, _ = json.Marshal(batEv)
-		data = append(data, '\n')
-		if _, err := conn.Write(data); err != nil {
-			return
+		// Send initial battery event, but only when the daemon actually
+		// has a reading. Emitting zero values for a fresh pair would
+		// publish a bogus stable 0% (see Device.HasBattery) — same
+		// skip-if-absent rule as connectivity below.
+		if dev.HasBattery() {
+			charge, charging := dev.GetBattery()
+			batEv := map[string]interface{}{
+				"type":      "battery.update",
+				"deviceId":  dev.ID(),
+				"timestamp": time.Now().UTC(),
+				"payload": map[string]interface{}{
+					"charge":       charge,
+					"charging":     charging,
+					"batteryAgeMs": dev.BatteryAge().Milliseconds(),
+				},
+			}
+			data, _ = json.Marshal(batEv)
+			data = append(data, '\n')
+			if _, err := conn.Write(data); err != nil {
+				return
+			}
 		}
 
 		// Send initial connectivity state if the device already reported.

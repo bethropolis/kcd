@@ -17,10 +17,16 @@ func registerBatteryRoutes(handler *ipc.Handler, devices *device.Registry) {
 		if !ok {
 			return ipc.Response{OK: false, Error: "device not found"}
 		}
+		// Fail closed when no packet was ever received: returning the
+		// zero values would be indistinguishable from a real 0% reading.
+		if !dev.HasBattery() {
+			return ipc.Response{OK: false, Error: "no battery reading yet"}
+		}
 		charge, charging := dev.GetBattery()
 		data, _ := json.Marshal(map[string]interface{}{
-			"charge":   charge,
-			"charging": charging,
+			"charge":       charge,
+			"charging":     charging,
+			"batteryAgeMs": dev.BatteryAge().Milliseconds(),
 		})
 		return ipc.Response{OK: true, Data: data}
 	})

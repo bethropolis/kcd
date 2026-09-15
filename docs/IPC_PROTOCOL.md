@@ -98,7 +98,7 @@ Fields:
 | `cert_fp` | string | Not populated in this response (empty) |
 | `last_seen` | string (RFC3339) | Last time the device was seen (announcement or connection) |
 | `connected` | bool | Whether the device currently has an active TCP connection. Note: `connected: true` alone does **not** mean usable — a stranger on the LAN can hold a raw connection while `state` is `UNPAIRED`. Clients must check `state == "PAIRED"` before sending commands or auto-selecting a device. |
-| `battery` | object (optional) | `{"charge": 85, "charging": true}` — cached battery state |
+| `battery` | object (optional) | `{"charge": 85, "charging": true, "batteryAgeMs": 1234}` — cached battery state; absent when the device never reported |
 | `media` | object (optional) | Cached `NowPlaying` plus `mediaAgeMs` (ms since the phone reported); absent when the device never reported media |
 | `signal` | object (optional) | Cached connectivity report (`{"signalStrengths": {...}}`); absent when never reported |
 
@@ -235,13 +235,18 @@ Request battery state from a device.
 {"deviceId": "a1b2c3d4e5f6_..."}
 ```
 
-**Response data:** `{"charge": 85, "charging": true}` (the daemon waits for the
-device to respond and returns the value).
+**Response data:** `{"charge": 85, "charging": true, "batteryAgeMs": 1234}` (the
+last cached reading plus its age in ms; the daemon does not live-query the
+device). Returns `{"ok": false, "error": "no battery reading yet"}` when no
+`kdeconnect.battery` packet was ever received — the `battery` object is
+likewise absent from summaries until the first real packet, so clients must
+treat absent as unknown, not 0%.
 
 | Field | Type | Description |
 |---|---|---|
 | `charge` | number | Battery percentage (0–100) |
 | `charging` | bool | Whether the device is currently charging |
+| `batteryAgeMs` | number | ms since the phone reported (mirrors `mediaAgeMs`) |
 
 #### `connectivity`
 
@@ -704,9 +709,10 @@ are delivered.
    {"type":"device.connected","deviceId":"...","timestamp":"2026-05-27T10:00:00Z","payload":{"id":"...","name":"Pixel 9","type":"phone"}}
    ```
 
-   **2b. `battery.update`:**
+   **2b. `battery.update`** (only if the device already reported battery —
+       no reading yet means no event, never a zero-value):
    ```json
-   {"type":"battery.update","deviceId":"...","timestamp":"...","payload":{"charge":85,"charging":true}}
+   {"type":"battery.update","deviceId":"...","timestamp":"...","payload":{"charge":85,"charging":true,"batteryAgeMs":1234}}
    ```
 
    **2c. `mpris.update`** (only if MPRIS plugin is registered AND the cached
@@ -841,18 +847,20 @@ A pairing request was rejected, or a device was unpaired.
 
 #### `battery.update`
 
-Battery state changed or was requested.
+Battery state changed or was requested. Never emitted with zero values for
+a device that never reported — absent reading means no event.
 
 **Payload:**
 
 ```json
-{"charge": 85, "charging": true}
+{"charge": 85, "charging": true, "batteryAgeMs": 1234}
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `charge` | number | Battery percentage (0–100) |
 | `charging` | bool | Whether the device is currently charging |
+| `batteryAgeMs` | number | ms since the phone reported (cached/dump events only) |
 
 #### `battery.threshold`
 

@@ -11,8 +11,9 @@ import (
 
 // BatteryStatus mirrors the battery state for embedding in summaries.
 type BatteryStatus struct {
-	Charge   int  `json:"charge"`
-	Charging bool `json:"charging"`
+	Charge       int   `json:"charge"`
+	Charging     bool  `json:"charging"`
+	BatteryAgeMs int64 `json:"batteryAgeMs"`
 }
 
 // MediaState is the cached now-playing state plus its age, so clients can
@@ -54,8 +55,16 @@ func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary
 		},
 	}
 
-	charge, charging := dev.GetBattery()
-	sum.Battery = &BatteryStatus{Charge: charge, Charging: charging}
+	// Omit battery until the first real packet: the zero values are not
+	// a 0% measurement (see Device.HasBattery).
+	if dev.HasBattery() {
+		charge, charging := dev.GetBattery()
+		sum.Battery = &BatteryStatus{
+			Charge:       charge,
+			Charging:     charging,
+			BatteryAgeMs: dev.BatteryAge().Milliseconds(),
+		}
+	}
 
 	if plugins == nil {
 		return sum
