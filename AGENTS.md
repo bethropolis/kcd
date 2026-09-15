@@ -248,7 +248,16 @@ Discovery is dual-mode and runs concurrently. Both paths call the same `onDevice
 | UDP broadcast | Sends identity to `255.255.255.255:1716` + per-interface directed broadcasts | Same LAN, simple home networks |
 | mDNS / Zeroconf | Registers `_kdeconnect._udp.local.` via `libp2p/zeroconf/v2`; browses for peers | Restricted networks, Docker, corporate Wi-Fi, newer Android |
 
-The broadcast interval is adaptive. When `shouldReduce()` returns true (all paired devices already connected), the UDP interval increases to 60 seconds. Setting `enable_broadcast = false` in config disables UDP entirely — the daemon reaches 0.0% idle CPU. Paired phones reconnect automatically via remembered IP.
+mDNS advertisement runs for the daemon lifetime (responder-only, negligible
+idle cost). UDP broadcast is on demand and reference-counted per owner
+(`pairing` for `kcd pair` listen mode, `reconnect` for offline pairs):
+it runs while any paired device is disconnected so roamed phones can find
+us back, and stops fully when all pairs are connected — connected steady
+state keeps zero timers. The 30s/60s interval only ticks while a reconnect
+is actually wanted. Dial targets (`LastIP`/`LastPort`) persist in
+`devices.json`; paired sightings dial the sighted address (authenticated
+post-connect by CN + pinned fingerprint), with `LastIP` as the fallback
+for silent peers.
 
 ---
 

@@ -21,9 +21,11 @@
 # Default: 1716
 # tcp_port = 1716
 
-# Broadcast is disabled by default. It starts automatically when you run
-# `kcd pair` (listen mode) and stops when pairing completes.
-# Paired phones reconnect automatically via the last known IP.
+# Broadcast is on demand. mDNS advertisement runs always (responder-only,
+# negligible cost); UDP broadcast starts automatically when you run
+# `kcd pair` (listen mode) and while any paired device is offline, and
+# stops otherwise. Paired phones reconnect via the last known address,
+# refreshed from sightings and persisted across restarts.
 
 # ─── Pairing ──────────────────────────────────────────────────────────────────
 
