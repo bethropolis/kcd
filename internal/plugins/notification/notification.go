@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -229,12 +230,15 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		payloadSize = pkt.PayloadSize
 		payloadPort int
 		remoteIP    net.IP
+		expectedFP  string
 	)
 	if hasIcon {
 		payloadPort = pkt.PayloadTransferInfo.Port
 		remoteIP = dev.RemoteIP()
 		if remoteIP == nil {
 			hasIcon = false
+		} else {
+			expectedFP = cert.PinnedFingerprint(dev.PeerCert())
 		}
 	}
 
@@ -242,7 +246,7 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	go func() {
 		var iconPath string
 		if p.cfg.ShowIcons {
-			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon)
+			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP)
 		}
 		p.sendDesktopNotification(dev.ID(), appName, body.ID, body.Title, text, iconPath)
 	}()
@@ -279,6 +283,7 @@ func (p *NotificationPlugin) fetchIcon(
 	port int,
 	size int64,
 	hasIcon bool,
+	expectedFP string,
 ) string {
 	if !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
 		// Fall back to icon name derived from app name.
@@ -324,6 +329,16 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 	defer conn.Close()
+
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		p.logger.Debug("notification: icon connection is not TLS")
+		return ""
+	} else if expectedFP == "" {
+		p.logger.Warn("notification: no pinned peer fingerprint, skipping icon verification")
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		p.logger.Warn("notification: icon peer verification failed, refusing download", zap.Error(err))
+		return ""
+	}
 
 	f, err := os.Create(iconPath)
 	if err != nil {

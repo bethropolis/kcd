@@ -217,13 +217,13 @@ func TestNotificationPlugin_FetchIconReusesCacheOnRepost(t *testing.T) {
 
 	// Re-post without an icon payload must reuse the cached file so the
 	// popup keeps the real app icon instead of a placeholder.
-	got := p.fetchIcon(context.Background(), app, id, nil, 0, 0, false)
+	got := p.fetchIcon(context.Background(), app, id, nil, 0, 0, false, "")
 	if got != cachedPath {
 		t.Fatalf("expected cached icon reuse %q, got %q", cachedPath, got)
 	}
 
 	// Unknown id, no payload, no cache → empty (theme fallback downstream).
-	if got := p.fetchIcon(context.Background(), app, "unknown-id", nil, 0, 0, false); got != "" {
+	if got := p.fetchIcon(context.Background(), app, "unknown-id", nil, 0, 0, false, ""); got != "" {
 		t.Fatalf("expected empty icon for uncached payload-less repost, got %q", got)
 	}
 }
@@ -257,7 +257,7 @@ func TestFetchIconRefusesTraversal(t *testing.T) {
 	canary := filepath.Join(filepath.Dir(p.iconDir), "kcd-traversal-canary.png")
 	_ = os.Remove(canary)
 	traversal := "../" + filepath.Base(canary)
-	if got := p.fetchIcon(context.Background(), "App", traversal, nil, 0, 0, false); got != "" {
+	if got := p.fetchIcon(context.Background(), "App", traversal, nil, 0, 0, false, ""); got != "" {
 		t.Fatalf("expected empty icon for traversal id, got %q", got)
 	}
 	if _, err := os.Stat(canary); !os.IsNotExist(err) {

@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -225,9 +226,10 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 
 	port := pkt.PayloadTransferInfo.Port
 	payloadSize := pkt.PayloadSize
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
-		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath); err != nil {
+		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath, expectedFP); err != nil {
 			p.logger.Error("sms: attachment download failed", zap.Error(err))
 			return
 		}
@@ -251,7 +253,7 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 // the attachment file over TLS. The stream is capped at the declared
 // payload size (itself bounded by maxSMSAttachmentBytes) so a malicious
 // peer can't fill the disk with an unbounded stream.
-func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, size int64, destPath string) error {
+func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, size int64, destPath string, expectedFP string) error {
 	if size <= 0 || size > maxSMSAttachmentBytes {
 		return fmt.Errorf("sms: refusing attachment with invalid size %d (limit %d)", size, maxSMSAttachmentBytes)
 	}
@@ -269,6 +271,15 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 		return fmt.Errorf("sms: connect to attachment side-channel: %w", err)
 	}
 	defer conn.Close()
+
+	if tlsConn, ok := conn.(*tls.Conn); !ok {
+		return fmt.Errorf("sms: attachment side-channel is not TLS")
+	} else if expectedFP == "" {
+		p.logger.Warn("sms: no pinned peer fingerprint, skipping side-channel verification",
+			zap.String("remote_addr", addr))
+	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
+		return fmt.Errorf("sms: side-channel peer verification failed: %w", err)
+	}
 
 	f, err := os.Create(destPath)
 	if err != nil {

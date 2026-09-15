@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -526,7 +527,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 
 	go func() {
-		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), 10*time.Second, nil, p.logger)
+		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger)
 	}()
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
@@ -599,7 +600,7 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	// independent context so the side-channel dial isn't aborted.
 	dlCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, nil, p.logger); err != nil {
+	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, cert.PinnedFingerprint(dev.PeerCert()), nil, p.logger); err != nil {
 		p.logger.Warn("mpris: album art transfer failed", zap.Error(err))
 		return
 	}

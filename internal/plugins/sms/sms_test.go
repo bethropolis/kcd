@@ -35,7 +35,7 @@ func TestCleanFilename(t *testing.T) {
 func TestReceiveAttachmentRejectsBadSize(t *testing.T) {
 	p := NewSMSPlugin(config.SMSConfig{}, nil, nil, zap.NewNop())
 	for _, size := range []int64{0, -1, -999, maxSMSAttachmentBytes + 1} {
-		err := p.receiveAttachment(context.Background(), nil, 0, size, "/nonexistent/x")
+		err := p.receiveAttachment(context.Background(), nil, 0, size, "/nonexistent/x", "")
 		if err == nil {
 			t.Errorf("receiveAttachment(size=%d) = nil, want error", size)
 		}

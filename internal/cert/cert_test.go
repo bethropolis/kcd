@@ -1,6 +1,7 @@
 package cert
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"os"
 	"path/filepath"
@@ -75,5 +76,50 @@ func TestLoadOrGenerate(t *testing.T) {
 
 	if Fingerprint(x509Cert1) != Fingerprint(x509Cert2) {
 		t.Error("loaded certificate mismatch with generated one")
+	}
+}
+
+func TestPinnedFingerprint(t *testing.T) {
+	if got := PinnedFingerprint(nil); got != "" {
+		t.Errorf("expected empty fingerprint for nil cert, got %q", got)
+	}
+
+	c, err := GenerateSelfSigned("pinned_fp_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x509Cert, _ := x509.ParseCertificate(c.Certificate[0])
+	if got := PinnedFingerprint(x509Cert); got != Fingerprint(x509Cert) {
+		t.Error("PinnedFingerprint mismatch with Fingerprint")
+	}
+}
+
+func TestVerifySideChannelPeer(t *testing.T) {
+	c, err := GenerateSelfSigned("verify_peer_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x509Cert, _ := x509.ParseCertificate(c.Certificate[0])
+	fp := Fingerprint(x509Cert)
+
+	other, err := GenerateSelfSigned("verify_peer_other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherCert, _ := x509.ParseCertificate(other.Certificate[0])
+
+	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{x509Cert}}
+
+	if err := VerifySideChannelPeer(state, fp); err != nil {
+		t.Errorf("matching fingerprint rejected: %v", err)
+	}
+	if err := VerifySideChannelPeer(state, Fingerprint(otherCert)); err == nil {
+		t.Error("mismatched fingerprint accepted")
+	}
+	if err := VerifySideChannelPeer(state, ""); err != nil {
+		t.Errorf("empty expected fingerprint should skip verification: %v", err)
+	}
+	if err := VerifySideChannelPeer(tls.ConnectionState{}, fp); err == nil {
+		t.Error("missing peer certificate accepted")
 	}
 }

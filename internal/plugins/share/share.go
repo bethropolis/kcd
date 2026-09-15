@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -172,6 +173,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 
 	payloadSize := pkt.PayloadSize
 	payloadPort := pkt.PayloadTransferInfo.Port
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
 		defer debug.FreeOSMemory()
@@ -182,7 +184,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			onProgress = throttle.Update
 		}
 
-		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, onProgress, p.Logger)
+		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, expectedFP, onProgress, p.Logger)
 		if err != nil {
 			p.Logger.Error("share receive failed", zap.Error(err))
 			if p.bus != nil {
@@ -257,6 +259,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		throttle := newProgressThrottle(p.bus, dev.ID(), filepath.Base(filePath), stat.Size())
 		onProgress = throttle.Update
 	}
+	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	// Handle the transfer in the background so IPC returns instantly
 	go func() {
@@ -266,7 +269,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), timeout, onProgress, p.Logger)
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",
