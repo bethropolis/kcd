@@ -41,26 +41,22 @@ Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_k
 
 ## Installation
 
-
-### From source (Recommended)
-```bash
-git clone https://github.com/bethropolis/kcd.git
-cd kcd
-./scripts/install.sh
-```
-
-
 ### Arch Linux
 
 Install from the AUR using your preferred helper:
 
 ```bash
 yay -S kcd-bin
+
+systemctl --user enable --now kcd.socket
 ```
 
-### Container
-
-Multi-arch images on GHCR: [`docs/CONTAINER.md`](docs/CONTAINER.md)
+### From source
+```bash
+git clone https://github.com/bethropolis/kcd.git
+cd kcd
+./scripts/install.sh
+```
 
 ### Binary releases
 
@@ -109,11 +105,14 @@ sudo ufw allow 1739:1764/tcp
 ### 1. Start the daemon
 
 If you installed via the script, `.deb`, `.rpm`, or AUR, the systemd user service
-is already set up — enable the socket and the daemon starts on first use:
+is already set up, you need to enable the socket and the daemon starts on first use:
 
 ```bash
 systemctl --user enable --now kcd.socket
 ```
+
+Run any `kcd` command once after login to wake the daemon; from then on
+a paired phone reconnects by itself within seconds.
 
 Check that it's running:
 
@@ -277,11 +276,11 @@ kcd fits into WM setups without pulling in KDE Plasma — single binary,
 systemd user unit alongside your compositor. All `mpris` commands auto-
 discover your phone, no device ID needed.
 
-**Hyprland** (`~/.config/hypr/hyprland.conf`):
-```
-bind = SUPER, F9,  exec, kcd mpris toggle
-bind = SUPER, F10, exec, kcd mpris previous
-bind = SUPER, F11, exec, kcd mpris next
+**Hyprland** (`~/.config/hypr/hyprland.lua` personal overrides file):
+```lua
+hl.bind("SUPER + F9",  hl.dsp.exec_cmd("kcd mpris toggle"),   { description = "MPRIS toggle" })
+hl.bind("SUPER + F10", hl.dsp.exec_cmd("kcd mpris previous"), { description = "MPRIS previous" })
+hl.bind("SUPER + F11", hl.dsp.exec_cmd("kcd mpris next"),     { description = "MPRIS next" })
 ```
 
 **Sway / i3** (`~/.config/sway/config` or `~/.config/i3/config`):
