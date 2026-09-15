@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -128,5 +131,63 @@ func TestShouldDiscoveryDialThrottle(t *testing.T) {
 	}
 	if !dev.ShouldDiscoveryDial(0) {
 		t.Fatal("zero interval must always allow")
+	}
+}
+
+func newTestIdentity() (*protocol.Packet, error) {
+	return protocol.NewIdentityPacket("test-id", "Test", "desktop", 1716, nil, nil)
+}
+
+func TestSyncReconnectBroadcast(t *testing.T) {
+	logger := zap.NewNop()
+	ctx := context.Background()
+	identity, err := newTestIdentity()
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	newBC := func() *discovery.BroadcasterController {
+		return discovery.NewBroadcasterController(identity, time.Hour, logger, nil)
+	}
+
+	// Offline paired device starts the reconnect broadcast.
+	reg := device.NewRegistry(nil)
+	offline := device.NewDevice("off", "Phone", "phone", logger)
+	offline.SetState(device.StatePaired)
+	reg.Add(offline)
+	bc := newBC()
+	syncReconnectBroadcast(ctx, reg, bc)
+	if !bc.IsRunning() {
+		t.Error("offline paired device must start reconnect broadcast")
+	}
+
+	// Unpaired strangers never trigger it.
+	reg2 := device.NewRegistry(nil)
+	stranger := device.NewDevice("str", "Stranger", "phone", logger)
+	reg2.Add(stranger)
+	bc2 := newBC()
+	syncReconnectBroadcast(ctx, reg2, bc2)
+	if bc2.IsRunning() {
+		t.Error("unpaired devices must not start reconnect broadcast")
+		bc2.StopOwned(discovery.OwnerReconnect)
+	}
+
+	// Clearing the registry withdraws the owner again.
+	reg.Remove("off")
+	syncReconnectBroadcast(ctx, reg, bc)
+	if bc.IsRunning() {
+		t.Error("no offline pairs must stop reconnect broadcast")
+		bc.StopOwned(discovery.OwnerReconnect)
+	}
+
+	// Pairing-owned broadcast survives the sync withdrawing reconnect.
+	bc3 := newBC()
+	bc3.Start(ctx) // pairing owner
+	syncReconnectBroadcast(ctx, reg2, bc3)
+	if !bc3.IsRunning() {
+		t.Error("sync must not stop pairing-owned broadcast")
+	}
+	bc3.Stop()
+	if bc3.IsRunning() {
+		t.Error("pairing stop must end an unowned loop")
 	}
 }

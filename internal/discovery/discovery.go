@@ -14,6 +14,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Broadcast ownership: pairing mode (`kcd pair`) and the reconnect
+// watcher share one loop but must not cancel each other, so starts are
+// reference-counted per owner. The loop runs while any owner holds it.
+const (
+	OwnerPairing   = "pairing"
+	OwnerReconnect = "reconnect"
+)
+
 // BroadcasterController manages the broadcast lifecycle — start/stop on demand.
 // Starts in stopped state. Broadcast is only active while Start() is in effect.
 type BroadcasterController struct {
@@ -25,6 +33,7 @@ type BroadcasterController struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
+	owners  map[string]struct{}
 }
 
 // NewBroadcasterController creates a controller that starts in stopped state.
@@ -34,15 +43,28 @@ func NewBroadcasterController(identity *protocol.Packet, interval time.Duration,
 		interval:       interval,
 		shouldReduce:   shouldReduce,
 		logger:         logger.With(zap.String("component", "broadcaster")),
+		owners:         make(map[string]struct{}),
 	}
 }
 
-// Start launches the UDP broadcaster loop in a background goroutine using a
-// child of parentCtx. No-op if already running.
+// Start launches the UDP broadcaster loop for the pairing owner.
+// No-op if already running (ownership is still recorded).
 func (bc *BroadcasterController) Start(parentCtx context.Context) {
+	bc.StartOwned(parentCtx, OwnerPairing)
+}
+
+// Stop withdraws the pairing owner. The loop stops only when no owners
+// remain, so a reconnect-driven broadcast survives `kcd pair` exiting.
+func (bc *BroadcasterController) Stop() {
+	bc.StopOwned(OwnerPairing)
+}
+
+// StartOwned launches the loop (if needed) and records owner as needing it.
+func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
+	bc.owners[owner] = struct{}{}
 	if bc.running {
 		return
 	}
@@ -64,12 +86,16 @@ func (bc *BroadcasterController) Start(parentCtx context.Context) {
 	}()
 }
 
-// Stop cancels the broadcast loop. No-op if not running.
-func (bc *BroadcasterController) Stop() {
+// StopOwned withdraws owner's need. No-op if the owner holds nothing.
+func (bc *BroadcasterController) StopOwned(owner string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	if !bc.running || bc.cancel == nil {
+	if _, ok := bc.owners[owner]; !ok {
+		return
+	}
+	delete(bc.owners, owner)
+	if len(bc.owners) > 0 || !bc.running || bc.cancel == nil {
 		return
 	}
 	bc.cancel()

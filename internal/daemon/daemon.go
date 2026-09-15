@@ -28,6 +28,19 @@ import (
 // version is set via ldflags at build time.
 var version = "dev"
 
+// syncReconnectBroadcast starts UDP broadcast (reconnect owner) while any
+// paired device is offline, and withdraws it otherwise. Pure state, no
+// timers — callers invoke it from event handlers and startup.
+func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController) {
+	for _, dev := range devices.List() {
+		if dev.State() == device.StatePaired && !dev.IsConnected() {
+			bc.StartOwned(ctx, discovery.OwnerReconnect)
+			return
+		}
+	}
+	bc.StopOwned(discovery.OwnerReconnect)
+}
+
 // Run starts the core daemon lifecycle.
 func Run(ctx context.Context, cfg *config.Config) error {
 	startedAt := time.Now()
@@ -156,6 +169,22 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// responder-only (zero idle timers), so phones keep a standing
 	// discovery path even while UDP broadcast is stopped.
 	go discovery.AdvertiseMDNS(ctx, identity, logger)
+
+	// Advertise over UDP while a paired device is offline so it can find
+	// us back (DHCP roam, restart, mutual loss). Fully stopped otherwise —
+	// connected steady state keeps zero timers. Ownership is tracked, so
+	// this neither starts pairing broadcasts nor stops `kcd pair`'s. The
+	// subscription is channel-driven (no polling); the initial sync covers
+	// restarts with offline pairs.
+	go func() {
+		sub := bus.Subscribe(0, events.TypeDeviceConnected, events.TypeDeviceDisconnected)
+		defer sub.Close()
+		sync := func() { syncReconnectBroadcast(ctx, devices, bc) }
+		sync()
+		for range sub.C {
+			sync()
+		}
+	}()
 
 	// 5. IPC Server
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
