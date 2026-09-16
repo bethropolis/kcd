@@ -73,6 +73,12 @@ type Device struct {
 	done      chan struct{}
 	closeOnce sync.Once
 
+	// lastConnect marks the last completed handshake; new handshakes
+	// inside reconnectCooldown are refused to starve duplicate bursts.
+	lastConnect time.Time
+	// lastSightedIP remembers the previous discovery sighting so only
+	// confirmed roams reset the reconnect backoff (see NoteSighting).
+	lastSightedIP net.IP
 	BatteryCharge int
 	IsCharging    bool
 
@@ -132,23 +138,55 @@ func (d *Device) SetBus(bus *events.Bus) {
 	d.bus = bus
 }
 
+// reconnectCooldown refuses new handshakes this long after a completed
+// one, so post-roam bursts can't complete near-simultaneously and churn
+// the peer's duplicate resolution. Reference stacks rate-limit the same
+// way (desktop 500ms, Android MILLIS_DELAY_BETWEEN_CONNECTIONS_TO_SAME_DEVICE
+// 1000ms); 1s matches upstream Android.
+const reconnectCooldown = 1 * time.Second
+
 // Connect establishes a connection for the device and starts the reader and writer loops.
+// A new authenticated connection immediately replaces any existing one
+// (matching LanDeviceLink::reset / LanLink.reset). The old socket is
+// closed; its readLoop will exit and disconnectConn will ignore it
+// because d.conn no longer points at it.
 func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet) bool, onConnect func(*Device), onDisconnect func(*Device)) {
 	d.mu.Lock()
-	if d.conn != nil {
-		_ = d.conn.Close()
-	}
-	d.conn = conn
 	d.pluginDispatch = dispatch
 	d.onConnect = onConnect
 	d.onDisconnect = onDisconnect
 
-	// Renew the send channel on connect in case it was closed during disconnect.
+	var oldConn *transport.Conn
+	var oldAddr, newAddr string
+	if d.conn != nil {
+		oldConn = d.conn
+		oldDone := d.done
+		oldAddr = oldConn.RemoteAddr().String()
+		newAddr = conn.RemoteAddr().String()
+		// Close the old done so its writerLoop exits; the new
+		// writerLoop will own the fresh channel.
+		d.closeOnce.Do(func() {
+			if oldDone != nil {
+				close(oldDone)
+			}
+		})
+	}
+
+	d.conn = conn
+
+	// Renew the send channel on (re)connect in case it was closed during disconnect.
 	d.sendChan = make(chan *protocol.Packet, 32)
 	d.done = make(chan struct{})
 	d.closeOnce = sync.Once{}
 	bus := d.bus
 	d.mu.Unlock()
+
+	if oldConn != nil {
+		_ = oldConn.Close()
+		d.logger.Debug("replacing superseded connection",
+			zap.String("old_addr", oldAddr),
+			zap.String("new_addr", newAddr))
+	}
 
 	d.logger.Info("device connected", zap.String("remote_addr", conn.RemoteAddr().String()))
 	if bus != nil {
@@ -170,17 +208,18 @@ func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch fun
 		d.mu.Unlock()
 	}
 
-	// Record when the connection was established so a quick drop can be
-	// distinguished from a genuinely stable connection.
+	// connectStarted distinguishes quick drops from stable connections,
+	// and doubles as the duplicate-cooldown clock (see InCooldown).
 	d.mu.Lock()
 	d.connectStarted = time.Now()
+	d.lastConnect = d.connectStarted
 	d.mu.Unlock()
 
 	go d.readLoop(ctx, conn)
-	go d.writerLoop(ctx, conn)
+	go d.writerLoop(ctx)
 }
 
-// Disconnect terminates the connection and stops the loops.
+// Disconnect terminates the session and stops the loops.
 func (d *Device) Disconnect() {
 	d.mu.Lock()
 	d.lastSeen = time.Now()
@@ -193,6 +232,7 @@ func (d *Device) Disconnect() {
 	d.logger.Info("device disconnected")
 	_ = d.conn.Close()
 	d.conn = nil
+	d.lastConnect = time.Time{}
 
 	// Capture these to call outside the lock to prevent deadlocks!
 	onDisc := d.onDisconnect
@@ -221,15 +261,17 @@ func (d *Device) IsConnected() bool {
 	return d.conn != nil
 }
 
-// disconnectConn disconnects only if the provided connection matches the current one.
-// This prevents old readLoops from terminating new connections.
+// disconnectConn handles a session's death. If the conn that died is no
+// longer the current d.conn (it was superseded by a newer authenticated
+// connection via Connect), the event is ignored silently — matching
+// LanDeviceLink::reset's `if (m_socket == socket)` guard. Only the
+// current preferred session's death triggers the full disconnect.
 func (d *Device) disconnectConn(conn *transport.Conn) {
 	d.mu.Lock()
 
-	// Only disconnect if this conn is still the active one
 	if d.conn != conn {
 		d.mu.Unlock()
-		d.logger.Debug("ignoring disconnect from old connection")
+		d.logger.Debug("ignoring disconnect from superseded connection")
 		return
 	}
 
@@ -237,6 +279,7 @@ func (d *Device) disconnectConn(conn *transport.Conn) {
 	d.logger.Info("device disconnected")
 	_ = d.conn.Close()
 	d.conn = nil
+	d.lastConnect = time.Time{}
 
 	// Capture callbacks to execute outside the lock
 	onDisc := d.onDisconnect
@@ -502,6 +545,27 @@ func (d *Device) ClearEphemeral() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.ephemeralDialed = false
+}
+
+// InCooldown reports whether a handshake completed too recently to start
+// another one for this device.
+func (d *Device) InCooldown() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return !d.lastConnect.IsZero() && time.Since(d.lastConnect) < reconnectCooldown
+}
+
+// NoteSighting records a discovery sighting while disconnected, reporting
+// whether it confirms a genuine roam: same new address twice running.
+// Single sightings prove nothing (IPv4/IPv6 alternation, AP flicker).
+func (d *Device) NoteSighting(sighted net.IP) (roamed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	defer func() { d.lastSightedIP = sighted }()
+	if lastIP := d.lastIP; lastIP == nil || !lastIP.Equal(sighted) {
+		return sighted.Equal(d.lastSightedIP)
+	}
+	return false
 }
 
 // TryReconnect attempts to mark the device as reconnecting.

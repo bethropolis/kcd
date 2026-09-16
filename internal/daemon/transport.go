@@ -31,8 +31,11 @@ func validDialPort(port int) bool {
 	return port > 0 && port <= 65535
 }
 
-// DialDevice manually connects to a device at the given IP and port.
-func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+// DialDevice connects to a device at IP:port. Unless force is set, dials
+// inside reconnectCooldown are skipped so post-roam bursts can't complete
+// near-simultaneously and churn the peer's duplicate resolution.
+// Explicit user actions (pair intent, manual connect) pass force=true.
+func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, force bool) {
 	if targetIP == nil || !validDialPort(targetPort) {
 		logger.Debug("refusing to dial invalid target",
 			zap.String("device_id", targetID),
@@ -40,17 +43,35 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 			zap.Int("port", targetPort))
 		return
 	}
+	if !force {
+		if dev, ok := devices.Get(targetID); ok && dev.InCooldown() {
+			logger.Debug("skipping dial inside reconnect cooldown",
+				zap.String("device_id", targetID),
+				zap.String("ip", targetIP.String()))
+			return
+		}
+	}
 	addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
 	logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
 
 	dialer := &net.Dialer{
-		Timeout:   5 * time.Second,
-		KeepAlive: 30 * time.Second, // Crucial for detecting dead connections
+		Timeout: 5 * time.Second,
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		logger.Debug("failed to dial peer", zap.Error(err))
 		return
+	}
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if err := tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     30 * time.Second,
+			Interval: 10 * time.Second,
+			Count:    3,
+		}); err != nil {
+			_ = tcpConn.SetKeepAlive(true)
+			_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		}
 	}
 
 	var myID protocol.IdentityBody
@@ -196,32 +217,58 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				logger.Debug("closing ephemeral discovery connection",
 					zap.String("device_id", body.DeviceID))
 				dev.Disconnect()
+				return
 			}
-			return
+			if dev.State() != device.StatePaired {
+				return
+			}
 		}
 
 		if known && dev.State() == device.StatePaired {
-			// A sighting proves the peer is alive at the sighted address,
-			// so dial it: whoever answers must present the paired
-			// certificate (CN + pinned fingerprint are verified in
-			// handleNewConnection) or setup fails. A spoofed sighting can
-			// only cost a throttled dial, never a session. The persisted
-			// LastIP remains the fallback for a silent (non-broadcasting)
-			// peer via the backoff loop.
+			// Paired sighting proves the peer is alive at the sighted
+			// address. Redial (rate-limited) when disconnected or when
+			// the sighted IP differs (true roam — the live socket is a
+			// half-open zombie). A same-IP sighting on a live socket is
+			// ignored like upstream: phone traffic is event-driven with
+			// long quiet gaps, so read-idle can't tell a zombie from a
+			// healthy session, and redialling churns duplicates the peer
+			// RSTs (split-second flap). Same-IP roam repair arrives via
+			// phone-initiated inbound, which replaces via Connect().
+			// Whoever answers must present the paired certificate (CN +
+			// pinned fingerprint are verified in handleNewConnection) or
+			// setup fails.
 			dev.SetLastSeen(time.Now())
-			if !dev.IsConnected() {
-				// New information beats old backoff: a sighting from an
-				// address other than the failing target proves the peer
-				// roamed, so later cycles restart escalation at the floor.
-				// (The throttled dial below is what hurries this cycle;
-				// an in-flight backoff keeps its own counter.) Same-address
-				// sightings leave the counter alone, preserving flap
-				// protection for a dying peer that keeps announcing.
-				if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
-					dev.ResetReconnectAttempt()
+			if dev.NoteSighting(ip) {
+				dev.ResetReconnectAttempt()
+			}
+			// Instant dial only when the peer is somewhere new: the
+			// backoff loop already covers the last-known address, and the
+			// phone redials inbound on its own within a second of a drop.
+			// Racing either with a second outbound breeds crossing
+			// duplicates the peer RSTs (flap war that latches its UI to
+			// "not reachable"). A sighting at a new address is a genuine
+			// roam the backoff can't reach — dial it now.
+			if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
+				if dev.ShouldDiscoveryDial(2 * time.Second) {
+					// Prefer the peer's last authenticated listening port
+					// over the unauthenticated sighted one.
+					port := tcpPort
+					if p := dev.LastPort(); validDialPort(p) {
+						port = p
+					}
+					go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
 				}
-				if dev.ShouldDiscoveryDial(10 * time.Second) {
-					go DialDevice(ctx, ip, tcpPort, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
+			} else if dev.IsConnected() {
+				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
+					// Live socket is bound elsewhere: the peer roamed but
+					// kept its address assertion — replace the zombie.
+					if dev.ShouldDiscoveryDial(2 * time.Second) {
+						port := tcpPort
+						if p := dev.LastPort(); validDialPort(p) {
+							port = p
+						}
+						go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
+					}
 				}
 			}
 			return
@@ -240,7 +287,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if pairingMode || dev.ConsumePairDial() {
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, true)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 			return
 		}
@@ -252,7 +299,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			}
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger)
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 		}
 		// Otherwise the device already had its ephemeral dial for this
@@ -285,6 +332,29 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				preTlsPkt, newConn, err := transport.ReadPlaintextPacket(c)
 				if err != nil {
 					return
+				}
+				// Refuse duplicate bursts pre-TLS: a device that completed a
+				// handshake inside the cooldown already has a live session;
+				// letting this one through would churn both ends' duplicate
+				// resolution. Pairing traffic always passes (strangers have
+				// no cooldown entry anyway).
+				var preBody protocol.IdentityBody
+				if err := json.Unmarshal(preTlsPkt.Body, &preBody); err == nil {
+					if preBody.TargetDeviceID != "" && preBody.TargetDeviceID != localDeviceID {
+						// Log-only: a stale cached ID on the peer (e.g. after
+						// our reinstall minted a new device ID) must not kill
+						// an otherwise legitimate inbound.
+						logger.Debug("inbound addressed to another device",
+							zap.String("device_id", preBody.DeviceID),
+							zap.String("target_device_id", preBody.TargetDeviceID))
+					}
+					if dev, ok := devices.Get(preBody.DeviceID); ok && dev.InCooldown() &&
+						(bc == nil || !bc.IsRunning()) {
+						logger.Debug("refusing inbound inside reconnect cooldown",
+							zap.String("device_id", preBody.DeviceID))
+						protocol.ReleasePacket(preTlsPkt)
+						return
+					}
 				}
 				protocol.ReleasePacket(preTlsPkt)
 
@@ -488,7 +558,14 @@ func reconnectWithBackoff(
 			zap.Int("attempt", attempt+1),
 		)
 
-		DialDevice(ctx, ip, 1716, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger)
+		// Prefer the peer's last advertised listening port over the
+		// default: the identity may carry a non-standard port (or none
+		// at all, in which case LastPort is 0 and we fall back).
+		port := 1716
+		if p := dev.LastPort(); validDialPort(p) {
+			port = p
+		}
+		DialDevice(ctx, ip, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
 
 		if dev.IsConnected() {
 			logger.Info("auto-reconnect: succeeded",

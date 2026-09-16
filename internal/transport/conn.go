@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -40,6 +41,14 @@ func (c *Conn) WritePacket(p *protocol.Packet) error {
 // Close closes the underlying TLS connection.
 func (c *Conn) Close() error {
 	return c.tlsConn.Close()
+}
+
+// SetWriteDeadline bounds the next WritePacket call. A half-open socket
+// with a stuck retransmit queue (Send-Q never drains) would otherwise block
+// the writer forever while TCP keepalive — which only probes idle sockets —
+// never fires. Callers clear with the zero time after the write.
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	return c.tlsConn.SetWriteDeadline(t)
 }
 
 // PeerCert returns the validated client/server certificate presented by the peer.

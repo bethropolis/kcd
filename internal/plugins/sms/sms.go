@@ -313,8 +313,10 @@ func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) erro
 // --- Conversation browsing (Phase 2) ---------------------------------------
 
 // RequestConversations asks the phone for a summary of all conversations.
+// Bodyless requests use an empty object (never null) on the wire; see
+// contacts.RequestSync for why explicit null is dangerous.
 func (p *SMSPlugin) RequestConversations(dev device.Sender) error {
-	pkt, err := protocol.NewPacket(PacketTypeSMSRequestConvs, nil)
+	pkt, err := protocol.NewPacket(PacketTypeSMSRequestConvs, map[string]any{})
 	if err != nil {
 		return err
 	}

@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap/zaptest"
 )
@@ -189,5 +191,241 @@ func TestDeviceInfoDialTargetRejectsGarbage(t *testing.T) {
 					ip, port, tc.wantIP, tc.wantPort)
 			}
 		})
+	}
+}
+
+// pipeConn builds a transport.Conn over an in-memory pipe without a TLS
+// handshake. Closing peer tears the session down through the readLoop,
+// exactly like a dropped TCP connection.
+func pipeConn(t *testing.T) (*transport.Conn, net.Conn) {
+	t.Helper()
+	left, right := net.Pipe()
+	return transport.NewConn(tls.Client(left, &tls.Config{InsecureSkipVerify: true})), right
+}
+
+func waitConnected(t *testing.T, d *Device, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for d.IsConnected() != want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if d.IsConnected() != want {
+		t.Fatalf("expected connected=%v", want)
+	}
+}
+
+// waitCounter polls an atomic counter to a value. Callbacks fire on device
+// goroutines, so tests must never read plain ints set from them.
+func waitCounter(t *testing.T, c *atomic.Int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for c.Load() != want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.Load() != want {
+		t.Fatalf("expected counter %d, got %d", want, c.Load())
+	}
+}
+
+// quiesce drains every session loop so no goroutine logs after the test
+// returns (zaptest panics on late logs).
+func quiesce(t *testing.T, d *Device) {
+	t.Helper()
+	d.mu.RLock()
+	quiet := d.conn == nil
+	d.mu.RUnlock()
+	deadline := time.Now().Add(2 * time.Second)
+	for !quiet && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		d.mu.RLock()
+		quiet = d.conn == nil
+		d.mu.RUnlock()
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+// readAny asserts the writer loop delivers bytes to peer within the deadline.
+func readAny(t *testing.T, peer net.Conn) {
+	t.Helper()
+	_ = peer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := peer.Read(buf)
+	_ = peer.SetReadDeadline(time.Time{})
+	if err != nil {
+		t.Fatalf("expected bytes from writer loop, got error: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("expected bytes from writer loop, got 0")
+	}
+}
+
+func TestDevice_ReplaceOnNewAuth(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("dup", "Phone", "phone", logger)
+	var connects, disconnects atomic.Int32
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a, rightA := pipeConn(t)
+	d.Connect(ctx, a, nil,
+		func(*Device) { connects.Add(1) },
+		func(*Device) { disconnects.Add(1) })
+	// Second session while one is live: replaces the dead socket
+	// immediately (matching LanDeviceLink::reset).
+	b, rightB := pipeConn(t)
+	d.Connect(ctx, b, nil,
+		func(*Device) { connects.Add(1) },
+		func(*Device) { disconnects.Add(1) })
+
+	if !d.IsConnected() {
+		t.Fatal("device must stay connected after replace")
+	}
+
+	// Old peer must see EOF — old socket was closed.
+	_ = rightA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := rightA.Read(make([]byte, 1)); err == nil {
+		t.Fatal("old connection must be closed on replace")
+	}
+	_ = rightA.Close()
+
+	// No disconnect event for the superseded session.
+	time.Sleep(50 * time.Millisecond)
+	if disconnects.Load() != 0 {
+		t.Fatalf("superseded disconnect must not fire onDisconnect, got %d", disconnects.Load())
+	}
+
+	// Writer must serve the new session.
+	pkt, err := protocol.NewPacket("kdeconnect.ping", map[string]any{})
+	if err != nil {
+		t.Fatalf("build ping packet: %v", err)
+	}
+	if err := d.Send(pkt); err != nil {
+		t.Fatalf("Send after replace: %v", err)
+	}
+	readAny(t, rightB)
+
+	_ = rightB.Close()
+	d.Disconnect()
+	waitCounter(t, &disconnects, 1)
+	quiesce(t, d)
+}
+
+func TestDevice_SupersededDisconnectSilent(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("sup", "Phone", "phone", logger)
+	var disconnects atomic.Int32
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a, rightA := pipeConn(t)
+	d.Connect(ctx, a, nil, nil, func(*Device) { disconnects.Add(1) })
+	b, rightB := pipeConn(t)
+	d.Connect(ctx, b, nil, nil, func(*Device) { disconnects.Add(1) })
+
+	// The first session was already superseded; its peer closing is silent.
+	_ = rightA.Close()
+	time.Sleep(80 * time.Millisecond)
+	if disconnects.Load() != 0 {
+		t.Fatalf("superseded session death must not fire onDisconnect, got %d", disconnects.Load())
+	}
+	if !d.IsConnected() {
+		t.Fatal("replacement session must remain connected")
+	}
+
+	// Closing the current session fires the single disconnect.
+	_ = rightB.Close()
+	waitCounter(t, &disconnects, 1)
+	waitConnected(t, d, false)
+	quiesce(t, d)
+}
+
+func TestDevice_ReplaceClosesOld(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("rep", "Phone", "phone", logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a, rightA := pipeConn(t)
+	d.Connect(ctx, a, nil, nil, nil)
+	b, rightB := pipeConn(t)
+	defer rightB.Close()
+	d.Connect(ctx, b, nil, nil, nil)
+	c, rightC := pipeConn(t)
+	defer rightC.Close()
+	d.Connect(ctx, c, nil, nil, nil)
+
+	// Each replace closes the previous socket; oldest peer sees EOF.
+	_ = rightA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := rightA.Read(make([]byte, 1)); err == nil {
+		t.Fatal("oldest connection must be closed on replace")
+	}
+	_ = rightA.Close()
+
+	// Writer must serve the newest session.
+	pkt, err := protocol.NewPacket("kdeconnect.ping", map[string]any{})
+	if err != nil {
+		t.Fatalf("build ping packet: %v", err)
+	}
+	if err := d.Send(pkt); err != nil {
+		t.Fatalf("Send after replace: %v", err)
+	}
+	readAny(t, rightC)
+
+	d.Disconnect()
+	waitConnected(t, d, false)
+	quiesce(t, d)
+}
+
+func TestDevice_CooldownWindow(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("cd", "Phone", "phone", logger)
+
+	if d.InCooldown() {
+		t.Fatal("fresh device must not be in cooldown")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, rightA := pipeConn(t)
+	defer rightA.Close()
+	d.Connect(ctx, a, nil, nil, nil)
+
+	if !d.InCooldown() {
+		t.Fatal("device must be in cooldown right after connect")
+	}
+
+	// White-box time travel past the window.
+	d.mu.Lock()
+	d.lastConnect = time.Now().Add(-(reconnectCooldown + time.Second))
+	d.mu.Unlock()
+	if d.InCooldown() {
+		t.Fatal("cooldown must lapse after the window")
+	}
+	d.Disconnect()
+	quiesce(t, d)
+}
+
+func TestDevice_NoteSightingRoamConfirm(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := NewDevice("roam", "Phone", "phone", logger)
+	d.SetLastIP(net.ParseIP("192.168.1.10"))
+
+	other := net.ParseIP("192.168.1.20")
+	if d.NoteSighting(other) {
+		t.Fatal("single sighting must not confirm a roam")
+	}
+	if !d.NoteSighting(other) {
+		t.Fatal("repeated sighting at a new address must confirm a roam")
+	}
+	// Wobble back: home address never confirms.
+	if d.NoteSighting(net.ParseIP("192.168.1.10")) {
+		t.Fatal("sighting at the known address must not confirm a roam")
+	}
+	// Alternation never confirms either.
+	if d.NoteSighting(other) {
+		t.Fatal("wobble must not confirm a roam")
 	}
 }
