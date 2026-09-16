@@ -148,8 +148,13 @@ func (p *ContactsPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pro
 
 // RequestSync asks the phone for all contact UIDs and timestamps, which
 // starts the sync round trips. Responses arrive async via Handle.
+//
+// The body must be an empty object, not null: stock implementations send
+// `"body":{}` for bodyless requests, and at least one phone build aborts
+// the whole link on an explicit null body (observed as an immediate RST
+// after every connect that carried `"body":null`).
 func (p *ContactsPlugin) RequestSync(dev device.Sender) error {
-	pkt, err := protocol.NewPacket(PacketTypeContactsRequestUIDs, nil)
+	pkt, err := protocol.NewPacket(PacketTypeContactsRequestUIDs, map[string]any{})
 	if err != nil {
 		return err
 	}

@@ -82,7 +82,13 @@ func (p *Packet) Reset() {
 }
 
 // NewPacket creates a new Packet with the current timestamp and given type/body.
+// A nil body is normalized to an empty object: stock implementations always
+// send `"body":{}` for bodyless requests, and explicit `"body":null` has
+// been observed to abort phone links.
 func NewPacket(typ string, body interface{}) (*Packet, error) {
+	if body == nil {
+		body = map[string]any{}
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("protocol: marshal body: %w", err)
