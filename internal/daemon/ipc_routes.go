@@ -72,7 +72,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			if err != nil {
 				return
 			}
-			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger)
+			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true)
 		}()
 
 		return ipc.Response{OK: true}

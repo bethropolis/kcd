@@ -214,7 +214,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			port = 1716
 		}
 		go func() {
-			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger)
+			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true)
 			if !dev.IsConnected() {
 				logger.Warn("on-demand pair dial failed", zap.String("device_id", deviceID))
 				return

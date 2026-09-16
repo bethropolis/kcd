@@ -2,11 +2,21 @@ package device
 
 import (
 	"context"
+	"errors"
+	"net"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
+
+// writeTimeout bounds one WritePacket call. LAN writes complete in
+// milliseconds; anything slower is a half-open zombie whose retransmit
+// queue never drains (TCP keepalive can't save it — it only probes idle
+// sockets). Timing out routes the death through disconnectConn so the
+// backoff and discovery repair paths can run.
+const writeTimeout = 10 * time.Second
 
 func (d *Device) Send(p *protocol.Packet) error {
 	d.mu.RLock()
@@ -74,15 +84,15 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 	}
 }
 
-func (d *Device) writerLoop(ctx context.Context, conn *transport.Conn) {
+// writerLoop is the sole writer to device sockets. It resolves the
+// preferred session per packet so promotions need no restart; write
+// timeouts fail the session via disconnectConn, other write errors keep
+// looping while readLoop routes the death.
+func (d *Device) writerLoop(ctx context.Context) {
 	d.mu.RLock()
 	sendChan := d.sendChan
 	done := d.done
 	d.mu.RUnlock()
-
-	if conn == nil {
-		return
-	}
 
 	for {
 		select {
@@ -91,10 +101,32 @@ func (d *Device) writerLoop(ctx context.Context, conn *transport.Conn) {
 		case <-done:
 			return
 		case pkt := <-sendChan:
-			if err := conn.WritePacket(pkt); err != nil {
-				d.logger.Debug("write packet error", zap.Error(err))
-				return // write failed -> drop out, readLoop will detect disconnect soon
+			d.mu.RLock()
+			conn := d.conn
+			d.mu.RUnlock()
+			if conn == nil {
+				// Fully disconnected (done closes right behind this) —
+				// drop rather than block the loop's exit.
+				protocol.ReleasePacket(pkt)
+				continue
 			}
+			d.logger.Debug("sending packet", zap.String("type", pkt.Type))
+			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+			err := conn.WritePacket(pkt)
+			_ = conn.SetWriteDeadline(time.Time{})
+			if err != nil {
+				d.logger.Debug("write packet error", zap.Error(err))
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					// Stuck socket: fail the session now instead of
+					// blocking the writer forever behind Send-Q.
+					d.logger.Info("write timed out, dropping zombie connection")
+					protocol.ReleasePacket(pkt)
+					d.disconnectConn(conn)
+					continue
+				}
+			}
+			protocol.ReleasePacket(pkt)
 		}
 	}
 }

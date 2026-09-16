@@ -31,12 +31,22 @@ func NewMockPeer(t *testing.T, tlsConfig *tls.Config) *MockPeer {
 // TCP initiator acts as TLS server).
 func (p *MockPeer) Dial(serverAddr string) net.Conn {
 	p.t.Helper()
+	conn, err := p.TryDial(serverAddr)
+	if err != nil {
+		p.t.Fatalf("mockpeer: dial: %v", err)
+	}
+	return conn
+}
+
+// TryDial is Dial without the Fatalf: it returns handshake-refusal errors
+// (e.g. cooldown-gated peers closing pre-TLS) for the caller to assert on.
+func (p *MockPeer) TryDial(serverAddr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", serverAddr)
 	if err != nil {
-		p.t.Fatalf("mockpeer: dial %s: %v", serverAddr, err)
+		return nil, fmt.Errorf("mockpeer: dial %s: %w", serverAddr, err)
 	}
 
 	// Send plaintext identity
@@ -48,12 +58,14 @@ func (p *MockPeer) Dial(serverAddr string) net.Conn {
 		TCPPort:         1716,
 	})
 	if err != nil {
-		p.t.Fatalf("mockpeer: build identity: %v", err)
+		conn.Close()
+		return nil, fmt.Errorf("mockpeer: build identity: %w", err)
 	}
 	data, _ := json.Marshal(identPkt)
 	data = append(data, '\n')
 	if _, err := conn.Write(data); err != nil {
-		p.t.Fatalf("mockpeer: write identity: %v", err)
+		conn.Close()
+		return nil, fmt.Errorf("mockpeer: write identity: %w", err)
 	}
 
 	// Upgrade to TLS as server (TCP initiator = TLS server per KDE Connect spec).
@@ -61,9 +73,10 @@ func (p *MockPeer) Dial(serverAddr string) net.Conn {
 	handshakeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
-		p.t.Fatalf("mockpeer: tls handshake: %v", err)
+		tlsConn.Close()
+		return nil, fmt.Errorf("mockpeer: tls handshake: %w", err)
 	}
-	return tlsConn
+	return tlsConn, nil
 }
 
 // DialPipe creates an in-process net.Pipe pair, performs the identity exchange

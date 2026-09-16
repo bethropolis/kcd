@@ -31,8 +31,15 @@ func (l *Listener) Accept() (net.Conn, error) {
 	}
 
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		if err := tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     30 * time.Second,
+			Interval: 10 * time.Second,
+			Count:    3,
+		}); err != nil {
+			_ = tcpConn.SetKeepAlive(true)
+			_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		}
 	}
 
 	return conn, nil
