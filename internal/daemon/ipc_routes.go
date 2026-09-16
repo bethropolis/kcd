@@ -120,7 +120,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		}
 
 		data, _ := json.Marshal(ipc.StatusResponse{
-			Version:        version,
+			Version:        Version,
 			StartedAt:      startedAt.UTC().Format(time.RFC3339),
 			UptimeHuman:    uptimeHuman,
 			SocketPath:     cfg.SocketPath,

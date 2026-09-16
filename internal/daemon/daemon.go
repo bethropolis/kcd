@@ -25,8 +25,9 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// version is set via ldflags at build time.
-var version = "dev"
+// Version is set from main's ldflags-provided version at startup.
+// Defaults to "dev" for local builds without ldflags.
+var Version = "dev"
 
 // syncReconnectBroadcast starts UDP broadcast (reconnect owner) while any
 // paired device is offline, and withdraws it otherwise. Pure state, no
