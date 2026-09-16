@@ -37,7 +37,7 @@ func getClient(c *cli.Context) (*client.Client, error) {
 }
 
 func main() {
-	
+
 	daemon.Version = version
 
 	app := &cli.App{
