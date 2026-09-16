@@ -12,6 +12,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -30,42 +31,16 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger) error {
+func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
 	if size < 0 {
 		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
 	}
 
-	addr := fmt.Sprintf("%s:%d", ip.String(), port)
-
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
-		Config: tlsConfig,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
 	if err != nil {
-		return fmt.Errorf("share: dial side-channel %s: %w", addr, err)
+		return err
 	}
 	defer conn.Close()
-
-	// The phone's TLS cert isn't verified against the paired fingerprint by
-	// default (self-signed), so confirm the peer is the device we expect
-	// before pulling bytes from it.
-	if tlsConn, ok := conn.(*tls.Conn); !ok {
-		return fmt.Errorf("share: side-channel connection is not TLS")
-	} else if expectedFP == "" {
-		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
-			zap.String("remote_addr", addr))
-	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
-		logger.Error("share: side-channel peer verification failed",
-			zap.String("remote_addr", addr),
-			zap.String("expected_fp", expectedFP),
-			zap.Error(err),
-		)
-		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
-	}
 
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {

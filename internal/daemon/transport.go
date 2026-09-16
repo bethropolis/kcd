@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -17,12 +18,6 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
-
-// reconnectFlapThreshold is the minimum connection lifetime for it to count
-// as genuinely stable. A connection that drops sooner is treated as a flap
-// (e.g. a peer that keeps dying), so the auto-reconnect backoff continues
-// escalating instead of resetting to the 2s floor on every drop.
-const reconnectFlapThreshold = 15 * time.Second
 
 // validDialPort reports whether a discovery-advertised TCP port is usable.
 // Port 0 and out-of-range values come from malformed or hostile packets and
@@ -35,7 +30,7 @@ func validDialPort(port int) bool {
 // inside reconnectCooldown are skipped so post-roam bursts can't complete
 // near-simultaneously and churn the peer's duplicate resolution.
 // Explicit user actions (pair intent, manual connect) pass force=true.
-func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, force bool) {
+func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, force bool, opts *config.Config) {
 	if targetIP == nil || !validDialPort(targetPort) {
 		logger.Debug("refusing to dial invalid target",
 			zap.String("device_id", targetID),
@@ -55,7 +50,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
 
 	dialer := &net.Dialer{
-		Timeout: 5 * time.Second,
+		Timeout: config.Duration(opts.Network.DialTimeout),
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -99,7 +94,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 
 	// KDE Connect inverts TLS roles: TCP client acts as TLS server
 	tlsConn := tls.Server(conn, cfg)
-	handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	handshakeCtx, cancel := context.WithTimeout(ctx, config.Duration(opts.Network.HandshakeTimeout))
 	defer cancel()
 	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		tlsConn.Close()
@@ -109,7 +104,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 
 	transConn := transport.NewConn(tlsConn)
 	// Ensure the connection is closed if handleNewConnection fails mid-setup
-	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger); err != nil {
+	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
 		logger.Debug("new connection setup failed", zap.Error(err))
 		transConn.Close()
 	}
@@ -138,9 +133,9 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	return true
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger) {
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, opts *config.Config) {
 	// TCP Listener
-	tcpListener, err := transport.Listen(ctx, ":1716")
+	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
 	if err != nil {
 		logger.Error("failed to start TCP listener", zap.Error(err))
 		return
@@ -256,7 +251,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					if p := dev.LastPort(); validDialPort(p) {
 						port = p
 					}
-					go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
+					go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 				}
 			} else if dev.IsConnected() {
 				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
@@ -267,7 +262,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						if p := dev.LastPort(); validDialPort(p) {
 							port = p
 						}
-						go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
+						go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 					}
 				}
 			}
@@ -287,7 +282,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if pairingMode || dev.ConsumePairDial() {
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, true)
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, true, opts)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 			return
 		}
@@ -299,7 +294,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			}
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false)
+				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 		}
 		// Otherwise the device already had its ephemeral dial for this
@@ -359,7 +354,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				protocol.ReleasePacket(preTlsPkt)
 
 				tlsConn := tls.Client(newConn, cfg)
-				handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				handshakeCtx, cancel := context.WithTimeout(ctx, config.Duration(opts.Network.HandshakeTimeout))
 				defer cancel()
 				if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 					return
@@ -368,7 +363,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				transConn := transport.NewConn(tlsConn)
 				c = nil // Prevent defer from closing the active connection
 
-				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger); err != nil {
+				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
 					logger.Debug("new connection setup failed", zap.Error(err))
 					transConn.Close()
 				}
@@ -380,7 +375,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 }
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger *zap.Logger) error {
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger *zap.Logger, opts *config.Config) error {
 	if err := conn.WritePacket(identity); err != nil {
 		return fmt.Errorf("failed to send identity: %w", err)
 	}
@@ -468,7 +463,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		// shortly after a successful dial, e.g. a dying peer) keeps the
 		// counter so the backoff keeps escalating instead of hammering at the
 		// 2s floor forever.
-		if sender.ConnectionAge() >= reconnectFlapThreshold {
+		if sender.ConnectionAge() >= config.Duration(opts.Reconnect.FlapThreshold) {
 			sender.ResetReconnectAttempt()
 		}
 		// Prevent multiple concurrent reconnect goroutines for the same device.
@@ -477,7 +472,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 				zap.String("device_id", sender.ID()))
 			return
 		}
-		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger)
+		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger, opts)
 	}
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)
@@ -502,8 +497,9 @@ func reconnectWithBackoff(
 	plugins *plugin.Registry,
 	localDeviceID string,
 	logger *zap.Logger,
+	opts *config.Config,
 ) {
-	const maxBackoff = 5 * time.Minute
+	maxBackoff := config.Duration(opts.Reconnect.MaxBackoff)
 	attempt := dev.ReconnectAttempt()
 
 	defer dev.ReconnectDone()
@@ -534,7 +530,7 @@ func reconnectWithBackoff(
 			return
 		}
 
-		backoff := device.ReconnectBackoff(attempt, maxBackoff)
+		backoff := device.ReconnectBackoff(attempt, maxBackoff, config.Duration(opts.Reconnect.InitialBackoff))
 		logger.Debug("auto-reconnect: waiting before next attempt",
 			zap.String("device_id", dev.ID()),
 			zap.Int("attempt", attempt+1),
@@ -561,11 +557,8 @@ func reconnectWithBackoff(
 		// Prefer the peer's last advertised listening port over the
 		// default: the identity may carry a non-standard port (or none
 		// at all, in which case LastPort is 0 and we fall back).
-		port := 1716
-		if p := dev.LastPort(); validDialPort(p) {
-			port = p
-		}
-		DialDevice(ctx, ip, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false)
+		port := reconnectPort(dev, opts.TCPPort)
+		DialDevice(ctx, ip, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 
 		if dev.IsConnected() {
 			logger.Info("auto-reconnect: succeeded",
@@ -582,4 +575,12 @@ func reconnectWithBackoff(
 
 		attempt++
 	}
+}
+
+// reconnectPort prefers the authenticated peer port, falling back to local configuration.
+func reconnectPort(dev *device.Device, fallback int) int {
+	if p := dev.LastPort(); validDialPort(p) {
+		return p
+	}
+	return fallback
 }

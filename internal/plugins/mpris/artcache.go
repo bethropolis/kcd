@@ -31,12 +31,15 @@ type ArtCache struct {
 }
 
 // NewArtCache creates the cache directory and returns an empty cache.
-func NewArtCache(logger *zap.Logger) *ArtCache {
+func NewArtCache(logger *zap.Logger, cacheDirs ...string) *ArtCache {
 	base, err := os.UserCacheDir()
 	if err != nil || base == "" {
 		base = filepath.Join(os.TempDir(), "kcd-cache")
 	}
 	dir := filepath.Join(base, "kcd", "art")
+	if len(cacheDirs) > 0 && cacheDirs[0] != "" {
+		dir = cacheDirs[0]
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		logger.Warn("mpris: failed to create album art cache dir",
 			zap.String("path", dir), zap.Error(err))

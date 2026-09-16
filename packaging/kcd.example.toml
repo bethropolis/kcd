@@ -78,12 +78,6 @@ battery = true
 # X11:     requires xclip.
 clipboard = true
 
-[clipboard]
-# Push the local clipboard to a device every time it connects
-# or reconnects. Off by default to avoid spurious pushes on
-# daemon restart or phone reconnection.
-# push_on_connect = false
-
 # Forward phone notifications to the desktop via notify-send.
 # Requires libnotify / a running notification daemon.
 notification = true
@@ -169,6 +163,37 @@ presenter = true
 #   kcd volume mute <id> <sink> <true|false> — Mute/unmute a sink
 remotesystemvolume = true
 
+# ─── Connection timing and storage ────────────────────────────────────────────
+# Durations use Go syntax (e.g. "750ms", "10s", "5m") and must be positive.
+# Restart the daemon after changing these settings.
+
+[network]
+# dial_timeout = "5s"             # control-channel TCP dial
+# handshake_timeout = "10s"       # identity/TLS handshake
+# sidechannel_timeout = "15s"     # side-channel connection setup
+
+[reconnect]
+# initial_backoff = "2s"
+# max_backoff = "5m"              # must be >= initial_backoff
+# flap_threshold = "15s"          # minimum lifetime for a stable connection
+
+[discovery]
+# broadcast_interval = "30s"
+# broadcast_idle_interval = "60s" # must be >= broadcast_interval
+# These intervals apply only while on-demand UDP broadcast is running;
+# they do not enable permanent broadcast or change mDNS advertisement.
+
+[cache]
+# Empty values preserve existing storage paths; use absolute paths to override.
+# sms_attachments_dir = ""        # default: system temp directory/kcd/sms-attachments
+# album_art_dir = ""              # default: $XDG_CACHE_HOME/kcd/art
+# contacts_dir = ""               # default: $XDG_DATA_HOME/kcd/contacts
+# Changing a path does not migrate existing files.
+
+[clipboard]
+# Push the local clipboard on connection/reconnection. Off by default.
+# push_on_connect = false
+
 # ─── RunCommand: exposed commands ─────────────────────────────────────────────
 # Shell commands that the RunCommand plugin makes available to your phone.
 # Trigger them from the KDE Connect Android app → your device → Run command.
@@ -194,6 +219,7 @@ suspend = "systemctl suspend"
 # The special key "*" sets the default for all unmatched apps.
 #
 # [notifications]
+# app_name = "KDE Connect" # desktop notification branding, not a filter
 # "com.whatsapp"       = "show"
 # "com.google.android.gm" = "silent"
 # "*"                  = "show"
@@ -248,7 +274,8 @@ suspend = "systemctl suspend"
 # ─── Ping: connectivity check ────────────────────────────────────────────────
 
 [ping]
-# app_name = "KDE Connect"
+# app_name = ""                # inherit [notifications].app_name; non-empty overrides
+# A previously explicit "KDE Connect" remains an override of the global name.
 # icon = "smartphone"
 # default_message = ""          # used if the phone sends an empty ping message
 
@@ -256,6 +283,8 @@ suspend = "systemctl suspend"
 
 [pairing]
 # timeout_secs = 30             # how long to wait for a pairing response
+# intent_ttl = "5m"             # lifetime of explicit `kcd pair <id>` intent
+# listen_timeout = "60s"        # maximum wait in `kcd pair` listen mode
 
 # ─── SMS: notification settings ──────────────────────────────────────────────
 

@@ -19,6 +19,45 @@ These flags apply to every command:
 
 ---
 
+## Configuration
+
+Edit `$XDG_CONFIG_HOME/kcd/kcd.toml` (default `~/.config/kcd/kcd.toml`).
+All settings are optional; see the annotated example in the packaging directory.
+Apply changes with `systemctl --user restart kcd` (or restart `kcd daemon`
+when running it directly). Timing, storage and notification branding settings
+require a restart; reloading notification filters alone does not apply them.
+
+| Section | Settings and defaults |
+|---|---|
+| `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"` |
+| `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"` |
+| `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
+| `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |
+| `[cache]` | `sms_attachments_dir = ""`, `album_art_dir = ""`, `contacts_dir = ""` |
+| `[notifications]` | `app_name = "KDE Connect"`; per-app `"show"`/`"silent"` filters and `"*"` fallback remain supported |
+| `[ping]` | `app_name = ""` inherits the notification application name; a non-empty value overrides it |
+
+Durations use Go syntax such as `"750ms"`, `"10s"`, or `"1m30s"` and must be
+strictly positive. Maximum reconnect backoff must be at least the initial
+backoff; idle broadcast interval must be at least the normal interval. Invalid
+values are rejected when loading configuration, including in the CLI. Discovery
+intervals only apply while on-demand broadcast is active, not during connected
+steady state; mDNS advertisement is unchanged.
+
+Empty cache overrides preserve existing paths: SMS attachments use the system
+temporary directory's `kcd/sms-attachments`, album art uses
+`$XDG_CACHE_HOME/kcd/art` (normally `~/.cache/kcd/art`), and contacts use
+`$XDG_DATA_HOME/kcd/contacts` (normally `~/.local/share/kcd/contacts`). Use absolute
+paths for overrides. Changing directories does not migrate existing files.
+
+`notifications.app_name` is reserved branding metadata, never a per-app filter.
+An explicit `ping.app_name = "KDE Connect"` in an older configuration remains an
+override even after changing the global name; remove it or set it to `""` to
+inherit. Protocol version, payload limits, packet buffers, queues and TCP
+keepalive remain fixed implementation settings, not configuration knobs.
+
+---
+
 ## daemon
 
 Start the `kcd` background daemon. This is the only command that does not connect to a running daemon — it *is* the daemon.

@@ -22,7 +22,7 @@ import (
 func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger *zap.Logger, startedAt time.Time) {
 	if cfg.Plugins.Notification {
 		if notifPl, ok := plugins.GetByName("Notification"); ok {
-			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications)
+			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications.Filters())
 		}
 	}
 
@@ -68,11 +68,11 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 
 		go func() {
 			incomingCaps, outgoingCaps := plugins.Capabilities()
-			identityPkt, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", 1716, incomingCaps, outgoingCaps)
+			identityPkt, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", cfg.TCPPort, incomingCaps, outgoingCaps)
 			if err != nil {
 				return
 			}
-			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true)
+			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
 		}()
 
 		return ipc.Response{OK: true}

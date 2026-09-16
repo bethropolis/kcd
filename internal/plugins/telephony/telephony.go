@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -13,14 +14,20 @@ import (
 )
 
 type TelephonyPlugin struct {
-	bus    *events.Bus
-	logger *zap.Logger
+	notifications config.NotificationConfig
+	bus           *events.Bus
+	logger        *zap.Logger
 }
 
-func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger) *TelephonyPlugin {
+func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *TelephonyPlugin {
+	var notificationCfg config.NotificationConfig
+	if len(notifications) > 0 {
+		notificationCfg = notifications[0]
+	}
 	return &TelephonyPlugin{
-		bus:    bus,
-		logger: logger.With(zap.String("plugin", "telephony")),
+		notifications: notificationCfg,
+		bus:           bus,
+		logger:        logger.With(zap.String("plugin", "telephony")),
 	}
 }
 
@@ -76,7 +83,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			return
 		}
 
-		plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-u", urgency, title, message)
+		plugin.RunCommandAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
 	}()
 
 	return nil

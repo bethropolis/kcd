@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -14,13 +15,14 @@ import (
 
 // Handler handles incoming IPC requests.
 type Handler struct {
-	devices        *device.Registry
-	plugins        *plugin.Registry
-	pairPlugin     *pair.PairPlugin
-	statePath      string
-	bus            *events.Bus
-	routes         map[string]func(Request) Response
-	pruneThreshold time.Duration
+	devices           *device.Registry
+	plugins           *plugin.Registry
+	pairPlugin        *pair.PairPlugin
+	statePath         string
+	bus               *events.Bus
+	routes            map[string]func(Request) Response
+	pruneThreshold    time.Duration
+	pairListenTimeout time.Duration
 	// pairDialHook, when set, dials a disconnected device on explicit user
 	// pair request (`kcd pair <id>`). The daemon wires this to DialDevice
 	// using the device's last-seen discovery address, so pairing an unpaired
@@ -213,7 +215,18 @@ func (h *Handler) forgetContacts(deviceID string) {
 	}
 }
 
+// SetPairListenTimeout configures the wait window before the server starts.
+func (h *Handler) SetPairListenTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		h.pairListenTimeout = timeout
+	}
+}
+
 func (h *Handler) handlePairListen() Response {
+	timeout := h.pairListenTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	// Report any device already in StatePairRequestedByPeer WITHOUT
 	// accepting it. The caller (CLI / GUI / script) inspects the candidate
 	// and decides: accept via CmdPair, reject via CmdUnpair. Auto-accepting
@@ -248,8 +261,8 @@ func (h *Handler) handlePairListen() Response {
 			}
 		}
 		return h.pairListenResult(dev, vKey)
-	case <-time.After(60 * time.Second):
-		return Response{OK: false, Error: "timed out waiting for pair request (60s)"}
+	case <-time.After(timeout):
+		return Response{OK: false, Error: fmt.Sprintf("timed out waiting for pair request (%s)", timeout)}
 	}
 }
 

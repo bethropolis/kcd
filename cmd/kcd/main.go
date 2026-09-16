@@ -31,9 +31,19 @@ func getClient(c *cli.Context) (*client.Client, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 	return &client.Client{
-		SocketPath: cfg.SocketPath,
-		Timeout:    5 * time.Second,
+		SocketPath:        cfg.SocketPath,
+		Timeout:           5 * time.Second,
+		PairListenTimeout: pairListenDeadline(config.Duration(cfg.Pairing.ListenTimeout)),
 	}, nil
+}
+
+// pairListenDeadline adds response overhead without overflowing a duration.
+func pairListenDeadline(timeout time.Duration) time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
+	if timeout > maxDuration-10*time.Second {
+		return maxDuration
+	}
+	return timeout + 10*time.Second
 }
 
 func main() {

@@ -27,17 +27,23 @@ const (
 
 // BatteryPlugin handles incoming battery state updates.
 type BatteryPlugin struct {
-	cfg    config.BatteryConfig
-	bus    *events.Bus
-	logger *zap.Logger
+	notifications config.NotificationConfig
+	cfg           config.BatteryConfig
+	bus           *events.Bus
+	logger        *zap.Logger
 }
 
 // NewBatteryPlugin creates a BatteryPlugin.
-func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger) *BatteryPlugin {
+func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *BatteryPlugin {
+	var notificationCfg config.NotificationConfig
+	if len(notifications) > 0 {
+		notificationCfg = notifications[0]
+	}
 	return &BatteryPlugin{
-		cfg:    cfg,
-		bus:    bus,
-		logger: logger.With(zap.String("plugin", "battery")),
+		notifications: notificationCfg,
+		cfg:           cfg,
+		bus:           bus,
+		logger:        logger.With(zap.String("plugin", "battery")),
 	}
 }
 
@@ -115,7 +121,7 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 	if message != "" {
 		// Desktop notification.
 		plugin.RunCommandAsync(p.logger, "notify-send",
-			"-a", "KDE Connect",
+			"-a", p.notifications.AppName(),
 			"-u", urgency,
 			"-i", "battery",
 			dev.Name(), message,

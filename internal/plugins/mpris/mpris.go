@@ -63,7 +63,7 @@ type remotePositionTracker struct {
 	playing        bool
 }
 
-func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger *zap.Logger) *MPRISPlugin {
+func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger *zap.Logger, cacheDirs ...string) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		logger.Warn("mpris: failed to connect to D-Bus session bus", zap.Error(err))
@@ -86,7 +86,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		remoteStateTimes:  make(map[string]time.Time),
 		positionTrackers:  make(map[string]*remotePositionTracker),
 		callPausedPlayers: make([]string, 0),
-		artCache:          NewArtCache(logger),
+		artCache:          NewArtCache(logger, cacheDirs...),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).

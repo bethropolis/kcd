@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +19,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -42,23 +42,41 @@ const (
 // SMSPlugin implements SMS sending, receiving, conversation browsing, and MMS
 // attachment handling for KDE Connect.
 type SMSPlugin struct {
-	cfg       config.SMSConfig
-	bus       *events.Bus
-	tlsConfig *tls.Config
-	logger    *zap.Logger
-	cacheDir  string
+	sidechannel   transport.SidechannelOptions
+	notifications config.NotificationConfig
+	cfg           config.SMSConfig
+	bus           *events.Bus
+	tlsConfig     *tls.Config
+	logger        *zap.Logger
+	cacheDir      string
 }
 
-func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *SMSPlugin {
-	cacheDir := filepath.Join(os.TempDir(), "kcd", "sms-attachments")
+// Options customizes storage, network timeouts, and desktop notification identity.
+type Options struct {
+	CacheDir      string
+	Sidechannel   transport.SidechannelOptions
+	Notifications config.NotificationConfig
+}
+
+func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger, options ...Options) *SMSPlugin {
+	var opts Options
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	cacheDir := opts.CacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(os.TempDir(), "kcd", "sms-attachments")
+	}
 	_ = os.MkdirAll(cacheDir, 0700)
 
 	return &SMSPlugin{
-		cfg:       cfg,
-		bus:       bus,
-		tlsConfig: tlsConfig,
-		logger:    logger.With(zap.String("plugin", "sms")),
-		cacheDir:  cacheDir,
+		sidechannel:   opts.Sidechannel,
+		notifications: opts.Notifications,
+		cfg:           cfg,
+		bus:           bus,
+		tlsConfig:     tlsConfig,
+		logger:        logger.With(zap.String("plugin", "sms")),
+		cacheDir:      cacheDir,
 	}
 }
 
@@ -185,7 +203,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 			}
 			title := fmt.Sprintf("SMS from %s", sender)
 			plugin.RunCommandAsync(p.logger, "notify-send",
-				"-a", "KDE Connect",
+				"-a", p.notifications.AppName(),
 				"-i", "dialog-information",
 				title,
 				msgText,
@@ -257,29 +275,11 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 	if size <= 0 || size > maxSMSAttachmentBytes {
 		return fmt.Errorf("sms: refusing attachment with invalid size %d (limit %d)", size, maxSMSAttachmentBytes)
 	}
-	addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
-
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
-		Config: p.tlsConfig,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := transport.DialSidechannel(ctx, ip, port, p.tlsConfig, expectedFP, p.logger, p.sidechannel)
 	if err != nil {
 		return fmt.Errorf("sms: connect to attachment side-channel: %w", err)
 	}
 	defer conn.Close()
-
-	if tlsConn, ok := conn.(*tls.Conn); !ok {
-		return fmt.Errorf("sms: attachment side-channel is not TLS")
-	} else if expectedFP == "" {
-		p.logger.Warn("sms: no pinned peer fingerprint, skipping side-channel verification",
-			zap.String("remote_addr", addr))
-	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
-		return fmt.Errorf("sms: side-channel peer verification failed: %w", err)
-	}
 
 	f, err := os.Create(destPath)
 	if err != nil {
