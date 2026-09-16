@@ -181,3 +181,42 @@ func TestDialSidechannelSetupTimeout(t *testing.T) {
 	}
 	t.Logf("timed out as expected after %v: %v", elapsed, err)
 }
+
+// TestDialSidechannelSurvivesContextCancel pins the establishment-only
+// semantics: cancelling the caller's ctx after a successful dial must not
+// abort an in-flight payload stream (Handle-scoped contexts die as soon as
+// the packet handler returns, while download goroutines keep streaming).
+func TestDialSidechannelSurvivesContextCancel(t *testing.T) {
+	tlsCert, err := cert.GenerateSelfSigned("sidechannel_cancel_device")
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tlsConfig := cert.TLSConfig(tlsCert)
+
+	payload := make([]byte, 128*1024)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	addr, fp, serverDone := startSidechannelServer(t, tlsConfig, payload, 20*time.Millisecond)
+	host, portStr, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(portStr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	conn, err := DialSidechannel(ctx, net.ParseIP(host), port, tlsConfig, fp, zap.NewNop(), SidechannelOptions{Timeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("DialSidechannel: %v", err)
+	}
+	defer conn.Close()
+	cancel() // die like a Handle-scoped context would
+
+	got, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("stream must survive context cancellation: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("payload mismatch: got %d bytes, want %d", len(got), len(payload))
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("server: %v", err)
+	}
+}
