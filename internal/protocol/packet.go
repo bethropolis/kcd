@@ -108,14 +108,13 @@ func ReadPacket(r *bufio.Reader) (*Packet, error) {
 	if err != nil {
 		switch err {
 		case bufio.ErrBufferFull:
+			firstChunk := make([]byte, len(line))
+			copy(firstChunk, line)
 			rest, readErr := r.ReadBytes('\n')
 			if readErr != nil {
 				return nil, fmt.Errorf("protocol: read full line after buffer full: %w", readErr)
 			}
-			fullLine := make([]byte, len(line)+len(rest))
-			copy(fullLine, line)
-			copy(fullLine[len(line):], rest)
-			line = fullLine
+			line = append(firstChunk, rest...)
 		case io.EOF:
 			if len(line) == 0 {
 				return nil, fmt.Errorf("protocol: read: %w", err)

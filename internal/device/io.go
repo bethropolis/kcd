@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -61,6 +62,10 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 
 		pkt, err := conn.ReadPacket()
 		if err != nil {
+			if strings.Contains(err.Error(), "protocol: unmarshal:") {
+				d.logger.Warn("dropping malformed packet, keeping connection", zap.Error(err))
+				continue
+			}
 			d.logger.Debug("read packet error (disconnecting)", zap.Error(err))
 			return
 		}
