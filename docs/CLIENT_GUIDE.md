@@ -471,6 +471,8 @@ Each event type carries a different payload shape. Here are the common ones:
 
 - `requestReplyId` is present only for notifications that support inline
   replies. Use it with the `notify_reply` command.
+- `id` identifies the notification for `notify_dismiss`, which clears it
+  on the phone and closes the desktop popup.
 
 ### Share Progress
 
@@ -573,6 +575,12 @@ def reply_to_notification(dev_id, notif_id, message):
         "deviceId": dev_id,
         "replyId": notif_id,
         "message": message
+    })
+
+def dismiss_notification(dev_id, notif_id):
+    ipc_request(command_sock, "notify_dismiss", {
+        "deviceId": dev_id,
+        "notificationId": notif_id
     })
 ```
 

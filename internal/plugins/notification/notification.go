@@ -129,7 +129,7 @@ func (p *NotificationPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.notification"}
 }
 func (p *NotificationPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.notification.reply"}
+	return []string{"kdeconnect.notification.reply", "kdeconnect.notification.request"}
 }
 
 // nonAlphaNumeric sanitises app names to be safe for exec / notify-send args.
@@ -435,6 +435,28 @@ func (p *NotificationPlugin) RequestReply(dev device.Sender, replyID, message st
 		return err
 	}
 	return dev.Send(pkt)
+}
+
+// Dismiss asks the phone to clear the notification with the given ID and
+// closes the matching desktop popup, if one is tracked.
+func (p *NotificationPlugin) Dismiss(dev device.Sender, id string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.notification.request", map[string]string{
+		"cancel": id,
+	})
+	if err != nil {
+		return err
+	}
+	if err := dev.Send(pkt); err != nil {
+		return err
+	}
+	if id != "" {
+		if desktopID, ok := p.notifIDs.LoadAndDelete(p.notifKey(dev.ID(), id)); ok {
+			if s, ok := desktopID.(string); ok {
+				p.closeNotification(s)
+			}
+		}
+	}
+	return nil
 }
 
 func (p *NotificationPlugin) OnConnect(_ device.Sender)    {}

@@ -25,6 +25,7 @@ const (
 	CmdSftpInfo             = "sftp_info"
 	CmdSftpVolumes          = "sftp_volumes"
 	CmdNotifyReply          = "notify_reply"
+	CmdNotifyDismiss        = "notify_dismiss"
 	CmdCallMute             = "call_mute"
 	CmdFindMyPhone          = "findmyphone"
 	CmdLock                 = "lock"
@@ -97,6 +98,12 @@ type NotifyReplyPayload struct {
 	DeviceID string `json:"deviceId"`
 	ReplyID  string `json:"replyId"`
 	Message  string `json:"message"`
+}
+
+// NotifyDismissPayload is used for CmdNotifyDismiss.
+type NotifyDismissPayload struct {
+	DeviceID       string `json:"deviceId"`
+	NotificationID string `json:"notificationId"`
 }
 
 // SMSPayload is used for CmdSendSMS.

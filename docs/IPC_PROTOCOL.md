@@ -416,6 +416,21 @@ The `replyId` comes from the `requestReplyId` field of a `notification` event.
 
 **Response data:** none
 
+#### `notify_dismiss`
+
+Clear a notification on the phone (sends `kdeconnect.notification.request`
+with `{"cancel": "<id>"}`) and close the matching desktop popup.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_...", "notificationId": "notif-456"}
+```
+
+The `notificationId` is the `id` field of a `notification` event.
+
+**Response data:** none
+
 #### `findmyphone` (also aliased as `ring`)
 
 Make a paired phone ring loudly.
@@ -1287,6 +1302,7 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.mpris` | MPRIS | Player list, NowPlaying state, seek positions, album art (broadcast + request-reply) |
 | `kdeconnect.mpris.request` | MPRIS | Request player list, now-playing, volume, album art; send control actions |
 | `kdeconnect.notification.reply` | Notification | Reply to a notification with inline reply support |
+| `kdeconnect.notification.request` | Notification | Clear a notification on the phone (`{"cancel": "<id>"}`) |
 | `kdeconnect.notification` | RunCommand | Command output notification pushed to phone |
 | `kdeconnect.runcommand` | RunCommand | Send command list to phone |
 | `kdeconnect.runcommand.request` | RunCommand | Request phone's command list / execute command |
@@ -1315,7 +1331,7 @@ plugin processes it and a link to the body struct definition.
 | Packet Type | Plugin | Body Struct |
 |---|---|---|
 | `kdeconnect.pair` | Pair | `PairBody{Pair bool, Timestamp int64}` |
-| `kdeconnect.battery` | Battery | `BatteryBody{CurrentCharge int, IsCharging bool, ThresholdEvent int}` |
+| `kdeconnect.battery` | Battery | `BatteryBody{CurrentCharge int, IsCharging bool, ThresholdEvent int, Request bool}` — `request:true` asks for state, never stored |
 | `kdeconnect.battery.request` | Battery | (empty, triggers a battery reply) |
 | `kdeconnect.notification` | Notification | `NotificationBody{ID, AppName, Title, Text, IsCancel, IsClearable, Silent, RequestReplyId string}` |
 | `kdeconnect.share.request` | Share | `ShareBody{Filename, NumberOfFiles, TotalPayloadSize, LastModified, CreationTime, Text, Url}` |

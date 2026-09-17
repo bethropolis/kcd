@@ -582,6 +582,22 @@ kcd reply a1b2... abc-123 "On my way!"
 
 ---
 
+## dismiss
+
+Clear a notification on the phone and close its desktop popup.
+
+```
+kcd dismiss <device-id> <notification-id>
+```
+
+The `notification-id` is the `id` field of a `notification` event:
+
+```bash
+kcd dismiss a1b2... notif-456
+```
+
+---
+
 ## call
 
 Manage phone calls.

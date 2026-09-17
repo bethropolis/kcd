@@ -130,6 +130,7 @@ func main() {
 			watchCmd,
 			sftpCmd,
 			replyCmd,
+			dismissCmd,
 			callCmd,
 			findmyphoneCmd,
 			lockCmd,
