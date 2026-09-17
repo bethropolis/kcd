@@ -157,7 +157,7 @@ func (h *Handler) handlePair(payload []byte) Response {
 	}
 
 	// Fallback if no pair plugin (shouldn't happen)
-	pkt, _ := protocol.NewPairPacket(protocol.PairAccept)
+	pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
 	if err := dev.Send(pkt); err != nil {
 		return Response{OK: false, Error: "failed to send pair packet"}
 	}
@@ -190,7 +190,7 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 	}
 
 	// Fallback
-	pkt, _ := protocol.NewPairPacket(protocol.PairReject)
+	pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
 	_ = dev.Send(pkt)
 	dev.Disconnect()
 	h.devices.Remove(p.DeviceID)

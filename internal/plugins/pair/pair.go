@@ -46,6 +46,14 @@ func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg co
 	}
 }
 
+// pairingTimestampFor returns the stored pair-request timestamp for a
+// device, or zero if none was recorded (pre-v8 peer or unknown).
+func (p *PairPlugin) pairingTimestampFor(deviceID string) int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pairingTimestamp[deviceID]
+}
+
 // emit publishes an event to the bus if one is configured.
 func (p *PairPlugin) emit(typ events.EventType, dev *device.Device, vKey string) {
 	if p.bus == nil {
@@ -113,7 +121,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		// The peer sends pair:true as confirmation/keep-alive.
 		// Just acknowledge by sending pair:true back.
 		p.logger.Debug("received pair confirmation from already paired device", zap.String("device_id", dev.ID()))
-		pkt, _ := protocol.NewPairPacket(protocol.PairAccept)
+		pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
 		dev.Send(pkt)
 		return nil
 
@@ -129,7 +137,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 					zap.Int64("timestamp", body.Timestamp),
 					zap.Int64("now", now))
 				// Send rejection
-				pkt, _ := protocol.NewPairPacket(protocol.PairReject)
+				pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
 				dev.Send(pkt)
 				return nil
 			}
@@ -144,10 +152,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		var vKey string
 		peerCert := dev.PeerCert()
 		if peerCert != nil {
-			vKey = cert.VerificationKey(p.localCert, peerCert)
-			if len(vKey) > 16 {
-				vKey = vKey[:16]
-			}
+			vKey = cert.VerificationKey(p.localCert, peerCert, p.pairingTimestampFor(dev.ID()))
 			p.logger.Info("pairing verification code",
 				zap.String("device_id", dev.ID()),
 				zap.String("code", vKey))
@@ -211,7 +216,7 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 
 // AcceptPairing accepts an incoming pair request.
 func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept, 0)
 	if err != nil {
 		return err
 	}
@@ -240,14 +245,16 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 		return p.AcceptPairing(dev)
 	}
 
-	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	// The request timestamp seeds the verification code on both sides,
+	// so generate it once and send exactly what we store.
+	timestamp := time.Now().Unix()
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept, timestamp)
 	if err != nil {
 		return err
 	}
 
-	// Store our timestamp
 	p.mu.Lock()
-	p.pairingTimestamp[dev.ID()] = time.Now().Unix()
+	p.pairingTimestamp[dev.ID()] = timestamp
 	p.mu.Unlock()
 
 	if err := dev.Send(pkt); err != nil {
@@ -257,10 +264,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 
 	peerCert := dev.PeerCert()
 	if peerCert != nil {
-		vKey := cert.VerificationKey(p.localCert, peerCert)
-		if len(vKey) > 16 {
-			vKey = vKey[:16]
-		}
+		vKey := cert.VerificationKey(p.localCert, peerCert, timestamp)
 		p.logger.Info("pairing verification code",
 			zap.String("device_id", dev.ID()),
 			zap.String("code", vKey))
@@ -278,7 +282,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 
 // RejectPairing rejects an incoming pair request.
 func (p *PairPlugin) RejectPairing(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	pkt, err := protocol.NewPairPacket(protocol.PairReject, 0)
 	if err != nil {
 		return err
 	}
@@ -302,7 +306,7 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 
 // Unpair removes pairing with a device.
 func (p *PairPlugin) Unpair(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	pkt, err := protocol.NewPairPacket(protocol.PairReject, 0)
 	if err != nil {
 		return err
 	}
