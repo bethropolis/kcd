@@ -171,6 +171,7 @@ remotesystemvolume = true
 # dial_timeout = "5s"             # control-channel TCP dial
 # handshake_timeout = "10s"       # identity/TLS handshake
 # sidechannel_timeout = "15s"     # side-channel connection setup
+# transfer_idle_timeout = "60s"  # abort transfers silent longer than this
 
 [reconnect]
 # initial_backoff = "2s"

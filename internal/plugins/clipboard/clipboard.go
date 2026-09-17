@@ -393,6 +393,7 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 
 	_, err = io.Copy(f, io.LimitReader(conn, size))
 	if err != nil {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("clipboard: stream to %s: %w", dest, err)
 	}
 	return nil

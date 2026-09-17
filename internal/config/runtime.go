@@ -6,10 +6,13 @@ import (
 )
 
 // NetworkConfig controls connection setup deadlines, not transfer size limits.
+// TransferIdleTimeout bounds streaming silence on side-channel transfers:
+// any read/write gap longer than it aborts the transfer.
 type NetworkConfig struct {
-	DialTimeout        string `toml:"dial_timeout"`
-	HandshakeTimeout   string `toml:"handshake_timeout"`
-	SidechannelTimeout string `toml:"sidechannel_timeout"`
+	DialTimeout         string `toml:"dial_timeout"`
+	HandshakeTimeout    string `toml:"handshake_timeout"`
+	SidechannelTimeout  string `toml:"sidechannel_timeout"`
+	TransferIdleTimeout string `toml:"transfer_idle_timeout"`
 }
 
 // ReconnectConfig controls retry delays and the minimum stable connection age.
@@ -47,6 +50,7 @@ func (c *Config) validateDurations() error {
 		{"network.dial_timeout", c.Network.DialTimeout},
 		{"network.handshake_timeout", c.Network.HandshakeTimeout},
 		{"network.sidechannel_timeout", c.Network.SidechannelTimeout},
+		{"network.transfer_idle_timeout", c.Network.TransferIdleTimeout},
 		{"reconnect.initial_backoff", c.Reconnect.InitialBackoff},
 		{"reconnect.max_backoff", c.Reconnect.MaxBackoff},
 		{"reconnect.flap_threshold", c.Reconnect.FlapThreshold},
