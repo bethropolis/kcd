@@ -72,7 +72,10 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			if err != nil {
 				return
 			}
-			DialDevice(ctx, addr, 1716, "manual", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
+			// No target ID: the peer is whoever answers at this address.
+			// An empty target omits targetDeviceId from the pre-TLS
+			// identity; stock peers drop dials addressed to anyone else.
+			DialDevice(ctx, addr, cfg.TCPPort, "", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
 		}()
 
 		return ipc.Response{OK: true}

@@ -76,6 +76,9 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	if targetProto <= 0 || targetProto > protocol.ProtocolVersion {
 		targetProto = protocol.ProtocolVersion
 	}
+	// TargetDeviceID stays empty (and thus absent on the wire) when the
+	// target is unknown, e.g. an explicit connect-by-IP: stock peers
+	// close pre-TLS identities addressed to any other device ID.
 	preTlsId := protocol.IdentityBody{
 		DeviceID:              myID.DeviceID,
 		DeviceName:            myID.DeviceName,
