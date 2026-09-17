@@ -21,11 +21,13 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
 // NotificationPlugin handles incoming notifications and displays them on the desktop.
 type NotificationPlugin struct {
+	sidechannel    transport.SidechannelOptions
 	bus            *events.Bus
 	tlsConfig      *tls.Config
 	logger         *zap.Logger
@@ -42,13 +44,18 @@ type NotificationPlugin struct {
 // NewNotificationPlugin creates a NotificationPlugin.
 // tlsConfig is used to fetch notification icon payloads over the KDE Connect
 // side-channel; pass nil to disable icon fetching.
-func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin {
+func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
+	var sidechannel transport.SidechannelOptions
+	if len(options) > 0 {
+		sidechannel = options[0]
+	}
 	p := &NotificationPlugin{
-		cfg:       cfg,
-		bus:       bus,
-		tlsConfig: tlsConfig,
-		logger:    logger.With(zap.String("plugin", "notification")),
-		newExec:   exec.CommandContext,
+		sidechannel: sidechannel,
+		cfg:         cfg,
+		bus:         bus,
+		tlsConfig:   tlsConfig,
+		logger:      logger.With(zap.String("plugin", "notification")),
+		newExec:     exec.CommandContext,
 	}
 
 	// Probe --print-id support by checking --help output.
@@ -122,7 +129,7 @@ func (p *NotificationPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.notification"}
 }
 func (p *NotificationPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.notification.reply"}
+	return []string{"kdeconnect.notification.reply", "kdeconnect.notification.request"}
 }
 
 // nonAlphaNumeric sanitises app names to be safe for exec / notify-send args.
@@ -318,27 +325,12 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 
-	addr := fmt.Sprintf("%s:%d", remoteIP, port)
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: 10 * time.Second},
-		Config:    p.tlsConfig,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := transport.DialSidechannel(ctx, remoteIP, port, p.tlsConfig, expectedFP, p.logger, p.sidechannel)
 	if err != nil {
 		p.logger.Debug("notification: icon dial failed", zap.Error(err))
 		return ""
 	}
 	defer conn.Close()
-
-	if tlsConn, ok := conn.(*tls.Conn); !ok {
-		p.logger.Debug("notification: icon connection is not TLS")
-		return ""
-	} else if expectedFP == "" {
-		p.logger.Warn("notification: no pinned peer fingerprint, skipping icon verification")
-	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
-		p.logger.Warn("notification: icon peer verification failed, refusing download", zap.Error(err))
-		return ""
-	}
 
 	f, err := os.Create(iconPath)
 	if err != nil {
@@ -443,6 +435,28 @@ func (p *NotificationPlugin) RequestReply(dev device.Sender, replyID, message st
 		return err
 	}
 	return dev.Send(pkt)
+}
+
+// Dismiss asks the phone to clear the notification with the given ID and
+// closes the matching desktop popup, if one is tracked.
+func (p *NotificationPlugin) Dismiss(dev device.Sender, id string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.notification.request", map[string]string{
+		"cancel": id,
+	})
+	if err != nil {
+		return err
+	}
+	if err := dev.Send(pkt); err != nil {
+		return err
+	}
+	if id != "" {
+		if desktopID, ok := p.notifIDs.LoadAndDelete(p.notifKey(dev.ID(), id)); ok {
+			if s, ok := desktopID.(string); ok {
+				p.closeNotification(s)
+			}
+		}
+	}
+	return nil
 }
 
 func (p *NotificationPlugin) OnConnect(_ device.Sender)    {}

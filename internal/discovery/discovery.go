@@ -27,6 +27,7 @@ const (
 type BroadcasterController struct {
 	identityPacket *protocol.Packet
 	interval       time.Duration
+	idleInterval   time.Duration
 	shouldReduce   func() bool
 	logger         *zap.Logger
 
@@ -37,10 +38,15 @@ type BroadcasterController struct {
 }
 
 // NewBroadcasterController creates a controller that starts in stopped state.
-func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger *zap.Logger, shouldReduce func() bool) *BroadcasterController {
+func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger *zap.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
+	idle := 60 * time.Second
+	if len(idleInterval) > 0 && idleInterval[0] > 0 {
+		idle = idleInterval[0]
+	}
 	return &BroadcasterController{
 		identityPacket: identity,
 		interval:       interval,
+		idleInterval:   idle,
 		shouldReduce:   shouldReduce,
 		logger:         logger.With(zap.String("component", "broadcaster")),
 		owners:         make(map[string]struct{}),
@@ -76,6 +82,7 @@ func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner str
 	b := &Broadcaster{
 		identityPacket: bc.identityPacket,
 		interval:       bc.interval,
+		idleInterval:   bc.idleInterval,
 		logger:         bc.logger,
 	}
 	go func() {
@@ -149,6 +156,7 @@ func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger 
 type Broadcaster struct {
 	identityPacket *protocol.Packet
 	interval       time.Duration
+	idleInterval   time.Duration
 	logger         *zap.Logger
 }
 
@@ -167,7 +175,10 @@ func NewBroadcaster(identity *protocol.Packet, interval time.Duration, logger *z
 // (mDNS advertisement is no longer tied to this loop — see AdvertiseMDNS.)
 func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 	normalInterval := b.interval
-	reducedInterval := 60 * time.Second
+	reducedInterval := b.idleInterval
+	if reducedInterval <= 0 {
+		reducedInterval = 60 * time.Second
+	}
 
 	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {

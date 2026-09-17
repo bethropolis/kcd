@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -31,9 +30,19 @@ func getClient(c *cli.Context) (*client.Client, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 	return &client.Client{
-		SocketPath: cfg.SocketPath,
-		Timeout:    5 * time.Second,
+		SocketPath:        cfg.SocketPath,
+		Timeout:           5 * time.Second,
+		PairListenTimeout: pairListenDeadline(config.Duration(cfg.Pairing.ListenTimeout)),
 	}, nil
+}
+
+// pairListenDeadline adds response overhead without overflowing a duration.
+func pairListenDeadline(timeout time.Duration) time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
+	if timeout > maxDuration-10*time.Second {
+		return maxDuration
+	}
+	return timeout + 10*time.Second
 }
 
 func main() {
@@ -120,6 +129,7 @@ func main() {
 			watchCmd,
 			sftpCmd,
 			replyCmd,
+			dismissCmd,
 			callCmd,
 			findmyphoneCmd,
 			lockCmd,
@@ -184,11 +194,7 @@ func main() {
 						fmt.Println(string(data))
 						return nil
 					}
-					fmt.Printf("kcd %s — up %s\n", st.Version, st.UptimeHuman)
-					fmt.Printf("Socket:    %s\n", st.SocketPath)
-					fmt.Printf("Config:    %s\n", st.ConfigPath)
-					fmt.Printf("Devices:   %d known, %d connected\n", st.DeviceCount, st.ConnectedCount)
-					fmt.Printf("Plugins:   %s\n", strings.Join(st.Plugins, ", "))
+					fmt.Print(formatStatus(st))
 					return nil
 				},
 			},

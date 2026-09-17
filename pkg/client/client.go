@@ -19,6 +19,9 @@ import (
 type Client struct {
 	SocketPath string
 	Timeout    time.Duration
+	// PairListenTimeout is the client's deadline for a pair_listen call.
+	// Set it above the daemon's pairing.listen_timeout; zero defaults to 70s.
+	PairListenTimeout time.Duration
 }
 
 // Call dialed the daemon, sends a request, and returns the response.
@@ -99,12 +102,14 @@ func (c *Client) Devices() ([]device.DeviceInfo, error) {
 // PairListen enters listen mode: waits for an incoming pair request, auto-accepts
 // it, and returns the paired device info. Blocks up to 60 seconds.
 func (c *Client) PairListen() (*ipc.PairListenResult, error) {
-	// Use a longer timeout for the listen operation
-	savedTimeout := c.Timeout
-	c.Timeout = 70 * time.Second
-	defer func() { c.Timeout = savedTimeout }()
+	// Copy the client so a long listen never changes concurrent calls' deadlines.
+	listenClient := *c
+	listenClient.Timeout = c.PairListenTimeout
+	if listenClient.Timeout <= 0 {
+		listenClient.Timeout = 70 * time.Second
+	}
 
-	resp, err := c.Call(ipc.CmdPairListen, nil)
+	resp, err := listenClient.Call(ipc.CmdPairListen, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +294,15 @@ func (c *Client) NotifyReply(deviceID, replyID, message string) error {
 		DeviceID: deviceID,
 		ReplyID:  replyID,
 		Message:  message,
+	})
+	return err
+}
+
+// NotifyDismiss requests the daemon to clear a notification on the remote device.
+func (c *Client) NotifyDismiss(deviceID, notificationID string) error {
+	_, err := c.Call(ipc.CmdNotifyDismiss, ipc.NotifyDismissPayload{
+		DeviceID:       deviceID,
+		NotificationID: notificationID,
 	})
 	return err
 }

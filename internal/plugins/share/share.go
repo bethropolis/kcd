@@ -19,6 +19,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -66,6 +67,7 @@ func (t *progressThrottle) Update(current, _ int64) {
 }
 
 type SharePlugin struct {
+	sidechannel transport.SidechannelOptions
 	DownloadDir string
 	cfg         config.ShareConfig
 	TLSConfig   *tls.Config
@@ -73,8 +75,13 @@ type SharePlugin struct {
 	bus         *events.Bus
 }
 
-func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin {
+func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger, options ...transport.SidechannelOptions) *SharePlugin {
+	var sidechannel transport.SidechannelOptions
+	if len(options) > 0 {
+		sidechannel = options[0]
+	}
 	return &SharePlugin{
+		sidechannel: sidechannel,
 		DownloadDir: downloadDir,
 		cfg:         cfg,
 		TLSConfig:   tlsConfig,
@@ -184,7 +191,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			onProgress = throttle.Update
 		}
 
-		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, expectedFP, onProgress, p.Logger)
+		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, expectedFP, onProgress, p.Logger, p.sidechannel)
 		if err != nil {
 			p.Logger.Error("share receive failed", zap.Error(err))
 			if p.bus != nil {
@@ -269,7 +276,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger)
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.sidechannel)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",

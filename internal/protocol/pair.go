@@ -1,7 +1,5 @@
 package protocol
 
-import "time"
-
 // TypePair is the packet type for pairing requests/responses.
 const TypePair = "kdeconnect.pair"
 
@@ -17,10 +15,13 @@ type PairBody struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 }
 
-// NewPairPacket creates a pairing packet (accept or reject).
-func NewPairPacket(pair bool) (*Packet, error) {
+// NewPairPacket creates a pairing packet. Only the initial pair request
+// carries a timestamp; accept, reject and unpair packets omit it. The
+// verification code on both sides derives from the request's timestamp, so
+// sending a fresh one on accept would desynchronize the displayed codes.
+func NewPairPacket(pair bool, timestamp int64) (*Packet, error) {
 	return NewPacket(TypePair, PairBody{
 		Pair:      pair,
-		Timestamp: time.Now().Unix(),
+		Timestamp: timestamp,
 	})
 }

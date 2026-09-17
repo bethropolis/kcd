@@ -27,6 +27,10 @@ type Config struct {
 	LogLevel string `toml:"log_level"` // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
 	// Old config values are silently ignored by the TOML parser.
+	Network             NetworkConfig                `toml:"network"`
+	Reconnect           ReconnectConfig              `toml:"reconnect"`
+	Discovery           DiscoveryConfig              `toml:"discovery"`
+	Cache               CacheConfig                  `toml:"cache"`
 	Plugins             PluginConfig                 `toml:"plugins"`
 	Commands            map[string]string            `toml:"commands"`
 	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
@@ -65,6 +69,9 @@ func Defaults() *Config {
 	c.TCPPort = 1716
 	c.LogLevel = "info"
 
+	c.Network = NetworkConfig{DialTimeout: "5s", HandshakeTimeout: "10s", SidechannelTimeout: "15s", TransferIdleTimeout: "60s"}
+	c.Reconnect = ReconnectConfig{InitialBackoff: "2s", MaxBackoff: "5m", FlapThreshold: "15s"}
+	c.Discovery = DiscoveryConfig{BroadcastInterval: "30s", BroadcastIdleInterval: "60s"}
 	c.Plugins.Defaults()
 	c.Commands = make(map[string]string)
 	c.CommandsPerDevice = make(map[string]map[string]string)
@@ -100,11 +107,17 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.ConfigPath = path
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
 // Validate checks required fields and returns an error if any are invalid.
 func (c *Config) Validate() error {
+	if err := c.validateDurations(); err != nil {
+		return err
+	}
 	if c.DeviceName == "" {
 		return fmt.Errorf("config: device_name is required")
 	}
@@ -235,8 +248,28 @@ func configPath(filename string, isRuntime bool) string {
 	return filepath.Join(dir, filename)
 }
 
-// NotificationConfig controls per-app notification filtering.
+// NotificationConfig controls notification branding and per-app filtering.
+// The reserved app_name key is not a filter.
 type NotificationConfig map[string]string
+
+// AppName returns the desktop notification application name.
+func (c NotificationConfig) AppName() string {
+	if name := c["app_name"]; name != "" {
+		return name
+	}
+	return "KDE Connect"
+}
+
+// Filters returns an independent copy containing only per-app filter entries.
+func (c NotificationConfig) Filters() NotificationConfig {
+	filters := make(NotificationConfig, len(c))
+	for app, action := range c {
+		if app != "app_name" {
+			filters[app] = action
+		}
+	}
+	return filters
+}
 
 // generateDeviceID produces a UUIDv4 with dashes replaced by underscores.
 func generateDeviceID() (string, error) {

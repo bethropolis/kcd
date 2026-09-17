@@ -18,6 +18,16 @@ func testIdentity(t *testing.T) *protocol.Packet {
 	return pkt
 }
 
+func TestConfiguredBroadcastIntervals(t *testing.T) {
+	bc := NewBroadcasterController(testIdentity(t), 7*time.Second, zap.NewNop(), nil, 19*time.Second)
+	if bc.interval != 7*time.Second || bc.idleInterval != 19*time.Second {
+		t.Fatal("configured intervals not stored")
+	}
+	if bc.IsRunning() {
+		t.Fatal("configuration must not start broadcasts")
+	}
+}
+
 // Pairing and reconnect needs share one loop but must not cancel each
 // other: withdrawing one owner leaves the loop up while the other holds it,
 // and the loop stops only when the last owner withdraws.

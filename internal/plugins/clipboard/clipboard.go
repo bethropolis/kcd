@@ -19,6 +19,7 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +33,7 @@ const (
 
 // ClipboardPlugin handles clipboard sync both directions.
 type ClipboardPlugin struct {
+	sidechannel       transport.SidechannelOptions
 	pushOnConnect     bool
 	lastTimestamp     int64
 	tlsConfig         *tls.Config
@@ -45,11 +47,16 @@ type ClipboardPlugin struct {
 }
 
 // NewClipboardPlugin creates a clipboard plugin.
-func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool) *ClipboardPlugin {
+func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool, options ...transport.SidechannelOptions) *ClipboardPlugin {
+	var sidechannel transport.SidechannelOptions
+	if len(options) > 0 {
+		sidechannel = options[0]
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &ClipboardPlugin{
+		sidechannel:   sidechannel,
 		tlsConfig:     tlsConfig,
 		pushOnConnect: pushOnConnect,
 		logger:        logger.With(zap.String("plugin", "clipboard")),
@@ -336,7 +343,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		tmpFile.Close()
 		defer os.Remove(tmpPath)
 
-		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger); err != nil {
+		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, p.sidechannel); err != nil {
 			p.logger.Error("clipboard file: download failed", zap.Error(err))
 			return
 		}
@@ -371,29 +378,12 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 }
 
 // downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger) error {
-	addr := fmt.Sprintf("%s:%d", ip.String(), port)
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
-		Config: tlsConfig,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger, options ...transport.SidechannelOptions) error {
+	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
 	if err != nil {
-		return fmt.Errorf("clipboard: dial %s: %w", addr, err)
+		return err
 	}
 	defer conn.Close()
-
-	if tlsConn, ok := conn.(*tls.Conn); !ok {
-		return fmt.Errorf("clipboard: side-channel connection is not TLS")
-	} else if expectedFP == "" {
-		logger.Warn("clipboard: no pinned peer fingerprint, skipping side-channel verification",
-			zap.String("remote_addr", addr))
-	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
-		return fmt.Errorf("clipboard: side-channel peer verification failed: %w", err)
-	}
 
 	f, err := os.Create(dest)
 	if err != nil {
@@ -403,6 +393,7 @@ func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest s
 
 	_, err = io.Copy(f, io.LimitReader(conn, size))
 	if err != nil {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("clipboard: stream to %s: %w", dest, err)
 	}
 	return nil

@@ -456,9 +456,13 @@ const pairDialIntentTTL = 5 * time.Minute
 // discovery announcement and arms the keep-alive intent until pairing starts,
 // is rejected, succeeds, or the TTL expires. Used when the user explicitly
 // runs `kcd pair <id>` for a device with no active connection.
-func (d *Device) RequestPairDial() {
+func (d *Device) RequestPairDial(intentTTL ...time.Duration) {
+	ttl := pairDialIntentTTL
+	if len(intentTTL) > 0 && intentTTL[0] > 0 {
+		ttl = intentTTL[0]
+	}
 	d.pairDialRequested.Store(true)
-	d.pairIntentUntil.Store(time.Now().Add(pairDialIntentTTL).UnixNano())
+	d.pairIntentUntil.Store(time.Now().Add(ttl).UnixNano())
 }
 
 // ConsumePairDial reports and clears a pending explicit pair-dial request.

@@ -129,5 +129,23 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 			}
 			return ipc.Response{OK: true}
 		})
+		handler.Register(ipc.CmdNotifyDismiss, func(req ipc.Request) ipc.Response {
+			var p ipc.NotifyDismissPayload
+			if err := json.Unmarshal(req.Payload, &p); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+			pl, ok := plugins.GetByName("Notification")
+			if !ok {
+				return ipc.Response{OK: false, Error: "notification plugin not enabled"}
+			}
+			dev, ok := devices.Get(p.DeviceID)
+			if !ok {
+				return ipc.Response{OK: false, Error: "device not found"}
+			}
+			if err := pl.(*notification.NotificationPlugin).Dismiss(dev, p.NotificationID); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
 	}
 }

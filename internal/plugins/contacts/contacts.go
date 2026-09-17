@@ -87,13 +87,16 @@ type ContactsPlugin struct {
 
 // NewContactsPlugin creates a contacts plugin caching under
 // $XDG_DATA_HOME/kcd/contacts (0600 files, 0700 dirs).
-func NewContactsPlugin(bus *events.Bus, logger *zap.Logger) *ContactsPlugin {
+func NewContactsPlugin(bus *events.Bus, logger *zap.Logger, cacheDirs ...string) *ContactsPlugin {
 	dataHome := os.Getenv("XDG_DATA_HOME")
 	if dataHome == "" {
 		home, _ := os.UserHomeDir()
 		dataHome = filepath.Join(home, ".local", "share")
 	}
 	baseDir := filepath.Join(dataHome, "kcd", "contacts")
+	if len(cacheDirs) > 0 && cacheDirs[0] != "" {
+		baseDir = cacheDirs[0]
+	}
 	_ = os.MkdirAll(baseDir, 0700)
 
 	return &ContactsPlugin{

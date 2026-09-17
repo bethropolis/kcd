@@ -19,7 +19,14 @@ type PingPlugin struct {
 	logger *zap.Logger
 }
 
-func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger) *PingPlugin {
+func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *PingPlugin {
+	if cfg.AppName == "" {
+		var notificationCfg config.NotificationConfig
+		if len(notifications) > 0 {
+			notificationCfg = notifications[0]
+		}
+		cfg.AppName = notificationCfg.AppName()
+	}
 	return &PingPlugin{
 		cfg:    cfg,
 		bus:    bus,
