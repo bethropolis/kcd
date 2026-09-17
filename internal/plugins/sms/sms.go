@@ -104,16 +104,16 @@ type SMSMessagesPacket struct {
 }
 
 type SMSMessage struct {
-	Event       int             `json:"event"`
-	Body        string          `json:"body"`
-	Addresses   []SMSAddress    `json:"addresses"`
-	Date        int64           `json:"date"`
-	Type        int             `json:"type"`
-	ThreadID    int64           `json:"thread_id"`
-	Read        bool            `json:"read"`
-	UID         int64           `json:"u_id,omitempty"`
-	SubID       int             `json:"sub_id,omitempty"`
-	Attachments []SMSAttachment `json:"attachments,omitempty"`
+	Event       int               `json:"event"`
+	Body        string            `json:"body"`
+	Addresses   []SMSAddress      `json:"addresses"`
+	Date        int64             `json:"date"`
+	Type        int               `json:"type"`
+	ThreadID    int64             `json:"thread_id"`
+	Read        protocol.FlexBool `json:"read"`
+	UID         int64             `json:"u_id,omitempty"`
+	SubID       int               `json:"sub_id,omitempty"`
+	Attachments []SMSAttachment   `json:"attachments,omitempty"`
 }
 
 type SMSAddress struct {
@@ -185,7 +185,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 				"date":      msg.Date,
 				"type":      msg.Type,
 				"thread_id": msg.ThreadID,
-				"read":      msg.Read,
+				"read":      bool(msg.Read),
 				"event":     msg.Event,
 				"u_id":      msg.UID,
 				"sub_id":    msg.SubID,
@@ -298,10 +298,14 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 // --- SMS sending -----------------------------------------------------------
 
 func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) error {
+	// v2 schema: the phone reads only messageBody, with addresses as the
+	// primary recipient list (phoneNumber stays as a legacy fallback for
+	// older peers). Without addresses/version the phone sends a blank SMS.
 	body := map[string]any{
-		"sendSms":     true,
-		"phoneNumber": phoneNumber,
+		"version":     2,
+		"addresses":   []map[string]string{{"address": phoneNumber}},
 		"messageBody": message,
+		"phoneNumber": phoneNumber,
 	}
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequest, body)
 	if err != nil {
