@@ -1,0 +1,142 @@
+package pair
+
+import (
+	"time"
+
+	"github.com/bethropolis/kcd/internal/cert"
+	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/protocol"
+	"go.uber.org/zap"
+)
+
+// AcceptPairing accepts an incoming pair request.
+func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	if err != nil {
+		return err
+	}
+
+	if err := dev.Send(pkt); err != nil {
+		p.logger.Error("failed to send pair accept", zap.Error(err))
+		dev.SetState(device.StateUnpaired)
+		dev.ClearEphemeral()
+		dev.ClearPairDial()
+		return err
+	}
+
+	p.pairingDone(dev)
+	return nil
+}
+
+// RequestPairing initiates a pairing request to a device.
+func (p *PairPlugin) RequestPairing(dev *device.Device) error {
+	if dev.State() == device.StatePaired {
+		p.logger.Warn("device already paired", zap.String("device_id", dev.ID()))
+		return nil
+	}
+
+	if dev.State() == device.StatePairRequestedByPeer {
+		// They already requested, just accept
+		return p.AcceptPairing(dev)
+	}
+
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	if err != nil {
+		return err
+	}
+
+	// Store our timestamp
+	p.mu.Lock()
+	p.pairingTimestamp[dev.ID()] = time.Now().Unix()
+	p.mu.Unlock()
+
+	if err := dev.Send(pkt); err != nil {
+		p.logger.Error("failed to send pair request", zap.Error(err))
+		return err
+	}
+
+	peerCert := dev.PeerCert()
+	if peerCert != nil {
+		vKey := cert.VerificationKey(p.localCert, peerCert)
+		if len(vKey) > 16 {
+			vKey = vKey[:16]
+		}
+		p.logger.Info("pairing verification code",
+			zap.String("device_id", dev.ID()),
+			zap.String("code", vKey))
+	}
+
+	dev.SetState(device.StatePairRequested)
+	p.logger.Info("pair request sent", zap.String("device_id", dev.ID()))
+
+	if p.onStateChanged != nil {
+		p.onStateChanged()
+	}
+
+	return nil
+}
+
+// RejectPairing rejects an incoming pair request.
+func (p *PairPlugin) RejectPairing(dev *device.Device) error {
+	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	if err != nil {
+		return err
+	}
+
+	dev.Send(pkt) // best effort
+	dev.SetState(device.StateUnpaired)
+	dev.ClearEphemeral()
+	dev.ClearPairDial()
+
+	p.mu.Lock()
+	delete(p.pairingTimestamp, dev.ID())
+	p.mu.Unlock()
+
+	if p.onStateChanged != nil {
+		p.onStateChanged()
+	}
+
+	p.logger.Info("pair request rejected", zap.String("device_id", dev.ID()))
+	return nil
+}
+
+// Unpair removes pairing with a device.
+func (p *PairPlugin) Unpair(dev *device.Device) error {
+	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	if err != nil {
+		return err
+	}
+
+	dev.Send(pkt) // best effort
+	dev.SetState(device.StateUnpaired)
+	dev.ClearEphemeral()
+	dev.ClearPairDial()
+
+	p.mu.Lock()
+	delete(p.pairingTimestamp, dev.ID())
+	p.mu.Unlock()
+
+	if p.onStateChanged != nil {
+		p.onStateChanged()
+	}
+
+	p.logger.Info("device unpaired", zap.String("device_id", dev.ID()))
+	return nil
+}
+
+func (p *PairPlugin) pairingDone(dev *device.Device) {
+	dev.SetState(device.StatePaired)
+	dev.ClearPairDial()
+
+	p.mu.Lock()
+	delete(p.pairingTimestamp, dev.ID())
+	p.mu.Unlock()
+
+	if p.onStateChanged != nil {
+		p.onStateChanged()
+	}
+
+	p.logger.Info("pairing complete", zap.String("device_id", dev.ID()))
+	p.emit(events.TypePairAccepted, dev, "")
+}
