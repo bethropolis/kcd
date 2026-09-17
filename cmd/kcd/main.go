@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -195,11 +194,7 @@ func main() {
 						fmt.Println(string(data))
 						return nil
 					}
-					fmt.Printf("kcd %s — up %s\n", st.Version, st.UptimeHuman)
-					fmt.Printf("Socket:    %s\n", st.SocketPath)
-					fmt.Printf("Config:    %s\n", st.ConfigPath)
-					fmt.Printf("Devices:   %d known, %d connected\n", st.DeviceCount, st.ConnectedCount)
-					fmt.Printf("Plugins:   %s\n", strings.Join(st.Plugins, ", "))
+					fmt.Print(formatStatus(st))
 					return nil
 				},
 			},

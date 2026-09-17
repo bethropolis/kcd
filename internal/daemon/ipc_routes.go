@@ -115,11 +115,39 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 
 		total := 0
 		connected := 0
+		devInfos := make([]ipc.StatusDevice, 0)
 		for _, d := range devices.List() {
 			total++
-			if d.IsConnected() {
+			isConnected := d.IsConnected()
+			if isConnected {
 				connected++
 			}
+			info := ipc.StatusDevice{
+				ID:        d.ID(),
+				Name:      d.Name(),
+				Type:      d.Type,
+				State:     d.State().String(),
+				Connected: isConnected,
+			}
+			if ip := d.RemoteIP(); ip != nil && isConnected {
+				info.Addr = ip.String()
+				if port := d.LastPort(); port > 0 {
+					info.Addr += fmt.Sprintf(":%d", port)
+				}
+			} else if ip := d.LastIP(); ip != nil {
+				info.Addr = ip.String()
+			}
+			if charge, charging := d.GetBattery(); d.HasBattery() {
+				info.Battery = &ipc.StatusBattery{
+					Charge:   charge,
+					Charging: charging,
+					AgeMs:    d.BatteryAge().Milliseconds(),
+				}
+			}
+			if lastSeen := d.LastSeen(); !lastSeen.IsZero() {
+				info.LastSeen = lastSeen.UTC().Format(time.RFC3339)
+			}
+			devInfos = append(devInfos, info)
 		}
 
 		data, _ := json.Marshal(ipc.StatusResponse{
@@ -128,9 +156,11 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			UptimeHuman:    uptimeHuman,
 			SocketPath:     cfg.SocketPath,
 			ConfigPath:     cfg.ConfigPath,
+			TCPPort:        cfg.TCPPort,
 			Plugins:        pluginNames,
 			DeviceCount:    total,
 			ConnectedCount: connected,
+			Devices:        devInfos,
 		})
 		return ipc.Response{OK: true, Data: data}
 	})

@@ -135,11 +135,18 @@ Show daemon runtime information.
 
 **Example output**
 
-    kcd v1.0.5 — up 3h 12m
-    Socket:    /run/user/1000/kcd/kcd.sock
-    Config:    /home/user/.config/kcd/kcd.toml
-    Devices:   2 known, 1 connected
-    Plugins:   Battery, Clipboard, Notification, Share, ...
+    kcd v1.19.0 (up 2h 14m)
+
+    Socket:   /run/user/1000/kcd/kcd.sock
+    Config:   /home/user/.config/kcd/kcd.toml
+    Listen:   tcp :1716
+
+    Devices:  2 known, 1 connected
+    NAME       ID        TYPE    STATE     ADDR                BATTERY  LAST SEEN
+    BETHRÖ     9a5c23ea  phone   PAIRED    192.168.1.134:1716  78%+     3s ago
+    Old Laptop deadbeef  laptop  UNPAIRED  —                   —        never
+
+    Plugins (20): Pair, Battery, Clipboard, Notification, Share, ...
 
 ---
 
