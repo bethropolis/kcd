@@ -11,6 +11,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -63,7 +64,9 @@ func TestHandleStringIsCancel(t *testing.T) {
 func TestHandleMissedCallEvent(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	bus := events.NewBus(logger)
-	p := NewTelephonyPlugin(bus, logger)
+	// The plugin notifies via a background goroutine that can outlive the
+	// test; a test-bound logger would panic on late writes, so detach it.
+	p := NewTelephonyPlugin(bus, zap.NewNop())
 	sub := bus.Subscribe(0, events.TypeTelephonyMissed)
 	defer sub.Close()
 

@@ -21,7 +21,7 @@ import (
 // It reports the peer certificate so the test can pin the fingerprint.
 func startSidechannelServer(t *testing.T, tlsConfig *tls.Config, payload []byte, delay time.Duration) (addr string, fp string, done <-chan error) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestDialSidechannelPinMismatch(t *testing.T) {
 // handshake must surface an error within roughly the configured budget.
 func TestDialSidechannelSetupTimeout(t *testing.T) {
 	// Plain TCP listener: accepts but never speaks TLS.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
