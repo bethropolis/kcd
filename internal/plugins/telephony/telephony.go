@@ -8,18 +8,18 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 type TelephonyPlugin struct {
 	notifications config.NotificationConfig
 	bus           *events.Bus
-	logger        *zap.Logger
+	logger        log.Logger
 }
 
-func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *TelephonyPlugin {
+func NewTelephonyPlugin(bus *events.Bus, logger log.Logger, notifications ...config.NotificationConfig) *TelephonyPlugin {
 	var notificationCfg config.NotificationConfig
 	if len(notifications) > 0 {
 		notificationCfg = notifications[0]
@@ -27,7 +27,7 @@ func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger, notifications ...co
 	return &TelephonyPlugin{
 		notifications: notificationCfg,
 		bus:           bus,
-		logger:        logger.With(zap.String("plugin", "telephony")),
+		logger:        logger.With(log.String("plugin", "telephony")),
 	}
 }
 

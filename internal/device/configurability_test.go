@@ -1,7 +1,7 @@
 package device
 
 import (
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 	"testing"
 	"time"
 )
@@ -24,7 +24,7 @@ func TestConfiguredReconnectBackoff(t *testing.T) {
 }
 
 func TestConfiguredPairIntentTTL(t *testing.T) {
-	dev := NewDevice("peer", "Peer", "phone", zap.NewNop())
+	dev := NewDevice("peer", "Peer", "phone", log.Nop())
 	before := time.Now()
 	dev.RequestPairDial(time.Hour)
 	deadline := time.Unix(0, dev.pairIntentUntil.Load())

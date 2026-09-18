@@ -10,14 +10,14 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger *zap.Logger, opts *config.Config) error {
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
 	if err := conn.WritePacket(identity); err != nil {
 		return fmt.Errorf("failed to send identity: %w", err)
 	}
@@ -77,9 +77,9 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	dev.OutgoingCaps = peerBody.OutgoingCapabilities
 
 	logger.Debug("device connected",
-		zap.String("device_id", peerBody.DeviceID),
-		zap.String("device_name", safeDeviceName),
-		zap.Int("protocol_version", peerBody.ProtocolVersion))
+		log.String("device_id", peerBody.DeviceID),
+		log.String("device_name", safeDeviceName),
+		log.Int("protocol_version", peerBody.ProtocolVersion))
 
 	dispatch := func(ctx context.Context, sender *device.Device, pkt *protocol.Packet) bool {
 		return plugins.Dispatch(ctx, sender, pkt)
@@ -111,7 +111,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		// Prevent multiple concurrent reconnect goroutines for the same device.
 		if !sender.TryReconnect() {
 			logger.Debug("auto-reconnect: already reconnecting, skipping",
-				zap.String("device_id", sender.ID()))
+				log.String("device_id", sender.ID()))
 			return
 		}
 		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger, opts)

@@ -10,6 +10,7 @@ linters:
     - noctx
     - unparam
     - misspell
+    - depguard
   disable:
     - errcheck
 
@@ -19,6 +20,15 @@ linters:
       disable:
         - shadow
         - fieldalignment
+    depguard:
+      rules:
+        logging-seam:
+          files:
+            - $all
+            - '!**/internal/log/**'
+          deny:
+            - pkg: go.uber.org/zap
+              desc: 'import internal/log instead of go.uber.org/zap directly'
 
   exclusions:
     rules:

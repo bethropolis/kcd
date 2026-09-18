@@ -12,10 +12,10 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // shouldEphemeralClose reports whether an active connection that exists
@@ -41,11 +41,11 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	return true
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, opts *config.Config) {
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
 	// TCP Listener
 	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
 	if err != nil {
-		logger.Error("failed to start TCP listener", zap.Error(err))
+		logger.Error("failed to start TCP listener", log.Error(err))
 		return
 	}
 	defer tcpListener.Close()
@@ -105,8 +105,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		// Never dial garbage ports from unauthenticated announcements.
 		if !validDialPort(tcpPort) {
 			logger.Debug("ignoring discovery with invalid tcpPort",
-				zap.String("device_id", body.DeviceID),
-				zap.Int("port", tcpPort))
+				log.String("device_id", body.DeviceID),
+				log.Int("port", tcpPort))
 			return
 		}
 
@@ -118,7 +118,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// exists only for the discovery handshake.
 			if shouldEphemeralClose(dev, pairingMode) {
 				logger.Debug("closing ephemeral discovery connection",
-					zap.String("device_id", body.DeviceID))
+					log.String("device_id", body.DeviceID))
 				dev.Disconnect()
 				return
 			}
@@ -221,7 +221,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				if ctx.Err() != nil {
 					return
 				}
-				logger.Error("accept error", zap.Error(err))
+				logger.Error("accept error", log.Error(err))
 				continue
 			}
 
@@ -248,13 +248,13 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						// our reinstall minted a new device ID) must not kill
 						// an otherwise legitimate inbound.
 						logger.Debug("inbound addressed to another device",
-							zap.String("device_id", preBody.DeviceID),
-							zap.String("target_device_id", preBody.TargetDeviceID))
+							log.String("device_id", preBody.DeviceID),
+							log.String("target_device_id", preBody.TargetDeviceID))
 					}
 					if dev, ok := devices.Get(preBody.DeviceID); ok && dev.InCooldown() &&
 						(bc == nil || !bc.IsRunning()) {
 						logger.Debug("refusing inbound inside reconnect cooldown",
-							zap.String("device_id", preBody.DeviceID))
+							log.String("device_id", preBody.DeviceID))
 						protocol.ReleasePacket(preTlsPkt)
 						return
 					}
@@ -272,7 +272,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				c = nil // Prevent defer from closing the active connection
 
 				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
-					logger.Debug("new connection setup failed", zap.Error(err))
+					logger.Debug("new connection setup failed", log.Error(err))
 					transConn.Close()
 				}
 			}(conn)

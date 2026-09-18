@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // SendAction sends a media control action to a remote device.
@@ -167,7 +167,7 @@ func (p *MPRISPlugin) ActivePlayers() []string {
 }
 
 func (p *MPRISPlugin) OnConnect(dev device.Sender) {
-	p.logger.Info("mpris: device connected, requesting player list", zap.String("device_id", dev.ID()))
+	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
 	go p.requestPlayerListPeriodic(dev)
 }
 
@@ -237,7 +237,7 @@ func (p *MPRISPlugin) pollRemoteStates() {
 
 	for _, t := range targets {
 		if err := p.requestPlayerStatus(t.dev, t.player); err != nil {
-			p.logger.Debug("mpris: state poll request failed", zap.Error(err))
+			p.logger.Debug("mpris: state poll request failed", log.Error(err))
 		}
 	}
 }

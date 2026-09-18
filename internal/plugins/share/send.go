@@ -11,8 +11,8 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath string) error {
@@ -55,15 +55,15 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 
 		if err != nil {
 			p.Logger.Error("share: send failed",
-				zap.String("device_id", dev.ID()),
-				zap.String("file", filepath.Base(filePath)),
-				zap.Int("port", port),
-				zap.Error(err),
+				log.String("device_id", dev.ID()),
+				log.String("file", filepath.Base(filePath)),
+				log.Int("port", port),
+				log.Error(err),
 			)
 		} else {
 			p.Logger.Info("share: send complete",
-				zap.String("device_id", dev.ID()),
-				zap.String("file", filepath.Base(filePath)),
+				log.String("device_id", dev.ID()),
+				log.String("file", filepath.Base(filePath)),
 			)
 		}
 
@@ -100,10 +100,10 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	}
 
 	p.Logger.Info("share: sending transfer invitation",
-		zap.String("device_id", dev.ID()),
-		zap.String("path", filePath),
-		zap.Int64("size", pkt.PayloadSize),
-		zap.Int("port", port),
+		log.String("device_id", dev.ID()),
+		log.String("path", filePath),
+		log.Int64("size", pkt.PayloadSize),
+		log.Int("port", port),
 	)
 
 	return dev.Send(pkt)

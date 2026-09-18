@@ -5,7 +5,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // ThresholdEvent values from the KDE Connect protocol.
@@ -20,11 +20,11 @@ type BatteryPlugin struct {
 	notifications config.NotificationConfig
 	cfg           config.BatteryConfig
 	bus           *events.Bus
-	logger        *zap.Logger
+	logger        log.Logger
 }
 
 // NewBatteryPlugin creates a BatteryPlugin.
-func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *BatteryPlugin {
+func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logger, notifications ...config.NotificationConfig) *BatteryPlugin {
 	var notificationCfg config.NotificationConfig
 	if len(notifications) > 0 {
 		notificationCfg = notifications[0]
@@ -33,7 +33,7 @@ func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Log
 		notifications: notificationCfg,
 		cfg:           cfg,
 		bus:           bus,
-		logger:        logger.With(zap.String("plugin", "battery")),
+		logger:        logger.With(log.String("plugin", "battery")),
 	}
 }
 

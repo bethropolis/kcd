@@ -14,9 +14,9 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -26,7 +26,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	if body.Text != "" && pkt.PayloadSize <= 0 {
-		p.Logger.Info("share: received text", zap.String("text", body.Text))
+		p.Logger.Info("share: received text", log.String("text", body.Text))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareText, dev.ID(), map[string]string{"text": body.Text})
 		}
@@ -44,7 +44,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	if body.Url != "" && pkt.PayloadSize <= 0 {
-		p.Logger.Info("share: received url", zap.String("url", body.Url))
+		p.Logger.Info("share: received url", log.String("url", body.Url))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
@@ -56,7 +56,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
 		} else {
 			p.Logger.Warn("share: refusing to open non-http(s) URL",
-				zap.String("url", body.Url))
+				log.String("url", body.Url))
 		}
 		return nil
 	}
@@ -99,7 +99,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 
 		err := ReceiveSideChannel(context.Background(), remoteIP, payloadPort, payloadSize, destPath, p.TLSConfig, expectedFP, onProgress, p.Logger, p.sidechannel)
 		if err != nil {
-			p.Logger.Error("share receive failed", zap.Error(err))
+			p.Logger.Error("share receive failed", log.Error(err))
 			if p.bus != nil {
 				p.bus.Publish(events.TypeShareComplete, dev.ID(), map[string]interface{}{
 					"file":    body.Filename,
@@ -111,7 +111,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			if body.LastModified > 0 {
 				modTime := time.UnixMilli(body.LastModified)
 				if err := os.Chtimes(destPath, modTime, modTime); err != nil {
-					p.Logger.Debug("share: failed to restore file timestamps", zap.Error(err))
+					p.Logger.Debug("share: failed to restore file timestamps", log.Error(err))
 				}
 			}
 
@@ -127,7 +127,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				// file itself is still saved and announced — open it manually.
 				if autoOpenBlocked(destPath) {
 					p.Logger.Warn("share: refusing to auto-open executable file",
-						zap.String("file", destPath))
+						log.String("file", destPath))
 				} else {
 					cmd := p.cfg.OpenCommand
 					if cmd == "" {

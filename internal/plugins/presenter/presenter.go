@@ -15,14 +15,14 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // PresenterPlugin handles kdeconnect.presenter packets containing
 // gyroscope-based pointer deltas (dx/dy) from the Android presenter remote.
 type PresenterPlugin struct {
-	logger *zap.Logger
+	logger log.Logger
 
 	mu      sync.Mutex
 	xPos    float64
@@ -42,9 +42,9 @@ type PresenterBody struct {
 }
 
 // NewPresenterPlugin creates a new presenter remote plugin.
-func NewPresenterPlugin(logger *zap.Logger) *PresenterPlugin {
+func NewPresenterPlugin(logger log.Logger) *PresenterPlugin {
 	p := &PresenterPlugin{
-		logger: logger.With(zap.String("plugin", "Presenter")),
+		logger: logger.With(log.String("plugin", "Presenter")),
 		xPos:   0.5,
 		yPos:   0.5,
 		moveCh: make(chan PresenterBody, 1),

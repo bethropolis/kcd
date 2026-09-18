@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // sshUserPattern allows the generated Android SFTP usernames (alphanumerics,
@@ -142,14 +142,14 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		p.mu.Lock()
 		p.mountPIDs[deviceID] = pid
 		p.mu.Unlock()
-		p.logger.Debug("tracking sshfs PID", zap.Int("pid", pid))
+		p.logger.Debug("tracking sshfs PID", log.Int("pid", pid))
 	} else {
-		p.logger.Debug("could not find sshfs PID", zap.Error(err))
+		p.logger.Debug("could not find sshfs PID", log.Error(err))
 	}
 
 	p.logger.Info("SFTP mounted",
-		zap.String("mount_point", mountPoint),
-		zap.String("browse_path", browsePath),
+		log.String("mount_point", mountPoint),
+		log.String("browse_path", browsePath),
 	)
 
 	// Open in the default file manager (best effort, non-blocking).
@@ -160,7 +160,7 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 				cmd = "xdg-open"
 			}
 			if err := exec.CommandContext(context.Background(), cmd, browsePath).Start(); err != nil {
-				p.logger.Debug("auto-open failed", zap.String("command", cmd), zap.Error(err))
+				p.logger.Debug("auto-open failed", log.String("command", cmd), log.Error(err))
 			}
 		}()
 	}
@@ -178,12 +178,12 @@ func (p *SftpPlugin) OnDisconnect(dev device.Sender) {
 
 	if mounted {
 		p.logger.Info("device disconnected, cleaning up SFTP mount",
-			zap.String("device_id", deviceID),
+			log.String("device_id", deviceID),
 		)
 		if err := p.Unmount(deviceID); err != nil {
 			p.logger.Warn("failed to unmount on disconnect",
-				zap.String("device_id", deviceID),
-				zap.Error(err),
+				log.String("device_id", deviceID),
+				log.Error(err),
 			)
 		}
 	}
@@ -214,11 +214,11 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 		return fmt.Errorf("no active SFTP mount for device %s", deviceID)
 	}
 
-	p.logger.Info("unmounting SFTP share", zap.String("mount_point", mountPoint))
+	p.logger.Info("unmounting SFTP share", log.String("mount_point", mountPoint))
 
 	// Graceful shutdown: SIGTERM → wait → SIGKILL.
 	if hasPID {
-		p.logger.Debug("sending SIGTERM to sshfs", zap.Int("pid", pid))
+		p.logger.Debug("sending SIGTERM to sshfs", log.Int("pid", pid))
 		proc, err := os.FindProcess(pid)
 		if err == nil {
 			if err := proc.Signal(syscall.SIGTERM); err == nil {
@@ -246,14 +246,14 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 
 	if out, err := exec.CommandContext(context.Background(), tool, "-u", mountPoint).CombinedOutput(); err != nil {
 		p.logger.Warn("fusermount cleanup failed",
-			zap.String("mount_point", mountPoint),
-			zap.Error(err),
-			zap.String("output", strings.TrimSpace(string(out))),
+			log.String("mount_point", mountPoint),
+			log.Error(err),
+			log.String("output", strings.TrimSpace(string(out))),
 		)
 	}
 
 	_ = os.Remove(mountPoint)
-	p.logger.Info("SFTP unmounted", zap.String("mount_point", mountPoint))
+	p.logger.Info("SFTP unmounted", log.String("mount_point", mountPoint))
 	return nil
 }
 

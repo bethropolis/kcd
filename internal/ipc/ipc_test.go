@@ -8,16 +8,16 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/pkg/client"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestIPCRoundTrip(t *testing.T) {
 	// Setup
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "test.sock")
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 
 	devReg := device.NewRegistry(nil)
 	pluginReg := plugin.NewRegistry(logger)

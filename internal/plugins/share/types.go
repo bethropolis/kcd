@@ -7,8 +7,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 type progressThrottle struct {
@@ -59,11 +59,11 @@ type SharePlugin struct {
 	DownloadDir string
 	cfg         config.ShareConfig
 	TLSConfig   *tls.Config
-	Logger      *zap.Logger
+	Logger      log.Logger
 	bus         *events.Bus
 }
 
-func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger, options ...transport.SidechannelOptions) *SharePlugin {
+func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger log.Logger, options ...transport.SidechannelOptions) *SharePlugin {
 	var sidechannel transport.SidechannelOptions
 	if len(options) > 0 {
 		sidechannel = options[0]
@@ -73,7 +73,7 @@ func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.C
 		DownloadDir: downloadDir,
 		cfg:         cfg,
 		TLSConfig:   tlsConfig,
-		Logger:      logger.With(zap.String("plugin", "share")),
+		Logger:      logger.With(log.String("plugin", "share")),
 		bus:         bus,
 	}
 }

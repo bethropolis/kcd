@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/godbus/dbus/v5"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) startWatcher(ctx context.Context) {
@@ -20,7 +20,7 @@ func (p *MPRISPlugin) startWatcher(ctx context.Context) {
 				return
 			}
 			if err := p.runDBusWatcher(ctx); err != nil && ctx.Err() == nil {
-				p.logger.Warn("mpris: D-Bus watcher exited, restarting in 3s", zap.Error(err))
+				p.logger.Warn("mpris: D-Bus watcher exited, restarting in 3s", log.Error(err))
 				select {
 				case <-time.After(3 * time.Second):
 				case <-ctx.Done():

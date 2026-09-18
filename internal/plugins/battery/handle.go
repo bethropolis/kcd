@@ -7,9 +7,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Handle processes incoming battery packets.
@@ -46,7 +46,7 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
 	charge, charging, err := readLocalBattery()
 	if err != nil {
-		p.logger.Debug("local battery unavailable, skipping response", zap.Error(err))
+		p.logger.Debug("local battery unavailable, skipping response", log.Error(err))
 		return nil
 	}
 	pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
@@ -112,7 +112,7 @@ func (p *BatteryPlugin) OnConnect(dev device.Sender) {
 	// Send our local battery to the phone.
 	charge, charging, err := readLocalBattery()
 	if err != nil {
-		p.logger.Debug("local battery unavailable on connect", zap.Error(err))
+		p.logger.Debug("local battery unavailable on connect", log.Error(err))
 		return
 	}
 	pkt, _ = protocol.NewPacket("kdeconnect.battery", BatteryBody{

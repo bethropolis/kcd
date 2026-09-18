@@ -8,7 +8,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // KDE Connect contacts packet types (see kdeconnect-kde
@@ -59,7 +59,7 @@ type indexEntry struct {
 // device, and deletes stale entries.
 type ContactsPlugin struct {
 	bus     *events.Bus
-	logger  *zap.Logger
+	logger  log.Logger
 	baseDir string
 
 	// mu serializes sync processing across devices. Syncs are rare;
@@ -69,7 +69,7 @@ type ContactsPlugin struct {
 
 // NewContactsPlugin creates a contacts plugin caching under
 // $XDG_DATA_HOME/kcd/contacts (0600 files, 0700 dirs).
-func NewContactsPlugin(bus *events.Bus, logger *zap.Logger, cacheDirs ...string) *ContactsPlugin {
+func NewContactsPlugin(bus *events.Bus, logger log.Logger, cacheDirs ...string) *ContactsPlugin {
 	dataHome := os.Getenv("XDG_DATA_HOME")
 	if dataHome == "" {
 		home, _ := os.UserHomeDir()
@@ -83,7 +83,7 @@ func NewContactsPlugin(bus *events.Bus, logger *zap.Logger, cacheDirs ...string)
 
 	return &ContactsPlugin{
 		bus:     bus,
-		logger:  logger.With(zap.String("plugin", "contacts")),
+		logger:  logger.With(log.String("plugin", "contacts")),
 		baseDir: baseDir,
 	}
 }
@@ -107,7 +107,7 @@ func (p *ContactsPlugin) OnConnect(dev device.Sender) {
 		return
 	}
 	if err := p.RequestSync(dev); err != nil {
-		p.logger.Debug("contacts: initial sync request failed", zap.Error(err))
+		p.logger.Debug("contacts: initial sync request failed", log.Error(err))
 	}
 }
 

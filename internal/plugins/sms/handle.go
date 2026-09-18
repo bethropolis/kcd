@@ -7,9 +7,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // --- Handle ----------------------------------------------------------------
@@ -53,9 +53,9 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 		}
 
 		p.logger.Debug("sms: message received",
-			zap.String("from", sender),
-			zap.String("body", msg.Body),
-			zap.Int64("thread_id", msg.ThreadID),
+			log.String("from", sender),
+			log.String("body", msg.Body),
+			log.Int64("thread_id", msg.ThreadID),
 		)
 
 		if p.bus != nil {

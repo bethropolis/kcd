@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 type clipboardBackend int
@@ -23,7 +23,7 @@ type ClipboardPlugin struct {
 	pushOnConnect     bool
 	lastTimestamp     int64
 	tlsConfig         *tls.Config
-	logger            *zap.Logger
+	logger            log.Logger
 	backend           clipboardBackend
 	wlDisplay         string // WAYLAND_DISPLAY value for spawned subprocesses
 	probe             func() (clipboardBackend, string)
@@ -33,19 +33,16 @@ type ClipboardPlugin struct {
 }
 
 // NewClipboardPlugin creates a clipboard plugin.
-func NewClipboardPlugin(tlsConfig *tls.Config, logger *zap.Logger, pushOnConnect bool, options ...transport.SidechannelOptions) *ClipboardPlugin {
+func NewClipboardPlugin(tlsConfig *tls.Config, logger log.Logger, pushOnConnect bool, options ...transport.SidechannelOptions) *ClipboardPlugin {
 	var sidechannel transport.SidechannelOptions
 	if len(options) > 0 {
 		sidechannel = options[0]
-	}
-	if logger == nil {
-		logger = zap.NewNop()
 	}
 	return &ClipboardPlugin{
 		sidechannel:   sidechannel,
 		tlsConfig:     tlsConfig,
 		pushOnConnect: pushOnConnect,
-		logger:        logger.With(zap.String("plugin", "clipboard")),
+		logger:        logger.With(log.String("plugin", "clipboard")),
 		probe:         probeBackend,
 	}
 }

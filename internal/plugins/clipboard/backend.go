@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // probeBackend determines the usable clipboard backend (wl-paste/xclip) by
@@ -71,7 +71,7 @@ func (p *ClipboardPlugin) getBackend() (clipboardBackend, string) {
 		p.backend = backend
 		p.wlDisplay = disp
 		p.logger.Debug("clipboard: backend detected",
-			zap.Int("backend", int(backend)), zap.String("wl_display", disp))
+			log.Int("backend", int(backend)), log.String("wl_display", disp))
 	}
 	return backend, disp
 }

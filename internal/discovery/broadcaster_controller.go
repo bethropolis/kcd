@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Broadcast ownership: pairing mode (`kcd pair`) and the reconnect
@@ -24,7 +24,7 @@ type BroadcasterController struct {
 	interval       time.Duration
 	idleInterval   time.Duration
 	shouldReduce   func() bool
-	logger         *zap.Logger
+	logger         log.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -33,7 +33,7 @@ type BroadcasterController struct {
 }
 
 // NewBroadcasterController creates a controller that starts in stopped state.
-func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger *zap.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
+func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger log.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
 	idle := 60 * time.Second
 	if len(idleInterval) > 0 && idleInterval[0] > 0 {
 		idle = idleInterval[0]
@@ -43,7 +43,7 @@ func NewBroadcasterController(identity *protocol.Packet, interval time.Duration,
 		interval:       interval,
 		idleInterval:   idle,
 		shouldReduce:   shouldReduce,
-		logger:         logger.With(zap.String("component", "broadcaster")),
+		logger:         logger.With(log.String("component", "broadcaster")),
 		owners:         make(map[string]struct{}),
 	}
 }

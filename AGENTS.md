@@ -24,7 +24,7 @@ Never violate these. If a change would break one, stop and reconsider the approa
 7. **deviceId is permanent.** Generated once via `config.EnsureDeviceID`, stored in `kcd.toml`. Never regenerate. It is the stable identity used for cert fingerprint pairing.
 8. **Self-signed TLS, `InsecureSkipVerify: true`.** Authentication happens via the SHA-256 fingerprint stored in `devices.json` after pairing — not via CA chain.
 9. **`Plugin.Handle()` must return immediately.** Any D-Bus call, subprocess (`exec.Command`), or disk I/O must be spawned in a goroutine *inside* the plugin. Blocking `Handle()` stalls the entire TCP read loop for that device.
-10. **No deprecated packages.** No `ioutil` (use `os`/`io`). No `log` (use `go.uber.org/zap`). No `cobra` (use `urfave/cli/v2`).
+10. **No deprecated packages.** No `ioutil` (use `os`/`io`). No `log` and no direct `go.uber.org/zap` imports (use `internal/log` — enforced by depguard). No `cobra` (use `urfave/cli/v2`).
 11. **Keep `Body` as `json.RawMessage` in the router.** Plugins unmarshal their own body types. The packet router never touches body content.
 12. **One goroutine per connection.** Dispatch is sequential per device — one packet handled at a time. This is intentional; it removes the need for per-plugin locks.
 13. **Cap incoming payload size with `io.LimitReader`.** Never trust the `payloadSize` field from the remote device without a cap.
@@ -67,7 +67,7 @@ These structural constraints must hold at all times:
 
 `daemon.Run()` wires everything in this exact sequence. Preserve the order when modifying startup:
 
-1. Build `zap.Logger` from config log level
+1. Build `log.Logger` via `log.New(cfg.LogLevel)`
 2. Load or generate TLS certificate (`cert.LoadOrGenerate`)
 3. Create event bus (`events.NewBus`)
 4. Create device registry (`device.NewRegistry`) and load persisted state from `devices.json`
@@ -86,7 +86,7 @@ These structural constraints must hold at all times:
 
 ```
 ⚠  CONSTRUCTORS: Every plugin now requires bus *events.Bus and
-logger *zap.Logger. Never use struct literals (&battery.BatteryPlugin{})
+logger log.Logger. Never use struct literals (&battery.BatteryPlugin{})
 — always call the constructor. The compiler will catch this but the
 error message may be confusing.
 ```
@@ -95,16 +95,16 @@ error message may be confusing.
 
 | Plugin | Correct constructor signature |
 |---|---|
-| Battery | `battery.NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger) *BatteryPlugin` |
-| Notification | `notification.NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *NotificationPlugin` |
-| Share | `share.NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger *zap.Logger) *SharePlugin` |
-| SFTP | `sftp.NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin` |
-| Ping | `ping.NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger) *PingPlugin` |
-| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin` |
-| Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin` |
-| SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin` |
-| SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger) *SMSPlugin` |
-| Contacts | `contacts.NewContactsPlugin(bus *events.Bus, logger *zap.Logger) *ContactsPlugin` |
+| Battery | `battery.NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logger) *BatteryPlugin` |
+| Notification | `notification.NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger) *NotificationPlugin` |
+| Share | `share.NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger log.Logger) *SharePlugin` |
+| SFTP | `sftp.NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *SftpPlugin` |
+| Ping | `ping.NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger log.Logger) *PingPlugin` |
+| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger log.Logger) *PairPlugin` |
+| Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger) *MousepadPlugin` |
+| SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger log.Logger) *SystemVolumePlugin` |
+| SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger) *SMSPlugin` |
+| Contacts | `contacts.NewContactsPlugin(bus *events.Bus, logger log.Logger) *ContactsPlugin` |
 
 ### Interface
 
@@ -274,7 +274,7 @@ bus.Publish(events.TypeBatteryUpdate, dev.ID(), map[string]any{
 ```
 
 Rules:
-- Subscriber channels have capacity 64. If a slow subscriber fills its channel, events are **dropped** (with a `zap.Warn`), never blocked.
+- Subscriber channels have capacity 64. If a slow subscriber fills its channel, events are **dropped** (with a `log.Warn`), never blocked.
 - Filters: `bus.Subscribe(events.TypeBatteryUpdate, events.TypeNotification)` — empty filter = all events.
 - Always call `sub.Close()` when done to avoid goroutine leaks.
 

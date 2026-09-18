@@ -8,8 +8,8 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *PairPlugin) Handle(ctx context.Context, sender device.Sender, pkt *protocol.Packet) error {
@@ -20,7 +20,7 @@ func (p *PairPlugin) Handle(ctx context.Context, sender device.Sender, pkt *prot
 
 	dev, ok := p.devices.Get(sender.ID())
 	if !ok {
-		p.logger.Warn("pair packet from unknown device", zap.String("device_id", sender.ID()))
+		p.logger.Warn("pair packet from unknown device", log.String("device_id", sender.ID()))
 		return nil
 	}
 
@@ -36,18 +36,18 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 	switch state {
 	case device.StatePairRequested:
 		// We requested pairing, they accepted
-		p.logger.Info("pairing accepted by peer", zap.String("device_id", dev.ID()))
+		p.logger.Info("pairing accepted by peer", log.String("device_id", dev.ID()))
 		p.pairingDone(dev)
 
 	case device.StatePairRequestedByPeer:
 		// Already have a pending request, ignore duplicate
-		p.logger.Debug("ignoring duplicate pair request", zap.String("device_id", dev.ID()))
+		p.logger.Debug("ignoring duplicate pair request", log.String("device_id", dev.ID()))
 
 	case device.StatePaired:
 		// Already paired - this is normal behavior in KDE Connect.
 		// The peer sends pair:true as confirmation/keep-alive.
 		// Just acknowledge by sending pair:true back.
-		p.logger.Debug("received pair confirmation from already paired device", zap.String("device_id", dev.ID()))
+		p.logger.Debug("received pair confirmation from already paired device", log.String("device_id", dev.ID()))
 		pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
 		dev.Send(pkt)
 		return nil
@@ -60,9 +60,9 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 			diff := now - body.Timestamp
 			if diff < -AllowedTimestampDiff || diff > AllowedTimestampDiff {
 				p.logger.Warn("pair request timestamp out of range",
-					zap.String("device_id", dev.ID()),
-					zap.Int64("timestamp", body.Timestamp),
-					zap.Int64("now", now))
+					log.String("device_id", dev.ID()),
+					log.Int64("timestamp", body.Timestamp),
+					log.Int64("now", now))
 				// Send rejection
 				pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
 				dev.Send(pkt)
@@ -74,15 +74,15 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 			p.mu.Unlock()
 		}
 
-		p.logger.Info("incoming pair request", zap.String("device_id", dev.ID()))
+		p.logger.Info("incoming pair request", log.String("device_id", dev.ID()))
 
 		var vKey string
 		peerCert := dev.PeerCert()
 		if peerCert != nil {
 			vKey = cert.VerificationKey(p.localCert, peerCert, p.pairingTimestampFor(dev.ID()))
 			p.logger.Info("pairing verification code",
-				zap.String("device_id", dev.ID()),
-				zap.String("code", vKey))
+				log.String("device_id", dev.ID()),
+				log.String("code", vKey))
 		}
 
 		// Set state and wait for user to accept via CLI
@@ -103,7 +103,7 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 	switch state {
 	case device.StatePairRequested:
 		// We requested, they rejected
-		p.logger.Info("pair request rejected by peer", zap.String("device_id", dev.ID()))
+		p.logger.Info("pair request rejected by peer", log.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
@@ -111,7 +111,7 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 
 	case device.StatePairRequestedByPeer:
 		// They requested, then cancelled
-		p.logger.Info("pair request cancelled by peer", zap.String("device_id", dev.ID()))
+		p.logger.Info("pair request cancelled by peer", log.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
@@ -119,14 +119,14 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 
 	case device.StatePaired:
 		// Unpair request
-		p.logger.Info("unpair request received", zap.String("device_id", dev.ID()))
+		p.logger.Info("unpair request received", log.String("device_id", dev.ID()))
 		dev.SetState(device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
 
 	case device.StateUnpaired, device.StateUnknown:
 		// Already unpaired, ignore
-		p.logger.Debug("ignoring unpair request for unpaired device", zap.String("device_id", dev.ID()))
+		p.logger.Debug("ignoring unpair request for unpaired device", log.String("device_id", dev.ID()))
 	}
 
 	// Clean up stored timestamp
