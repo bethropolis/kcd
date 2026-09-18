@@ -13,11 +13,11 @@ import (
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
-	"go.uber.org/zap/zaptest"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "source.bin")
 	destPath := filepath.Join(dir, "dest.bin")
@@ -88,7 +88,7 @@ func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
 }
 
 func TestSharePlugin_SideChannelRejectsWrongFingerprint(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "source.bin")
 	destPath := filepath.Join(dir, "dest.bin")

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func testIdentity(t *testing.T) *protocol.Packet {
@@ -19,7 +19,7 @@ func testIdentity(t *testing.T) *protocol.Packet {
 }
 
 func TestConfiguredBroadcastIntervals(t *testing.T) {
-	bc := NewBroadcasterController(testIdentity(t), 7*time.Second, zap.NewNop(), nil, 19*time.Second)
+	bc := NewBroadcasterController(testIdentity(t), 7*time.Second, log.Nop(), nil, 19*time.Second)
 	if bc.interval != 7*time.Second || bc.idleInterval != 19*time.Second {
 		t.Fatal("configured intervals not stored")
 	}
@@ -32,7 +32,7 @@ func TestConfiguredBroadcastIntervals(t *testing.T) {
 // other: withdrawing one owner leaves the loop up while the other holds it,
 // and the loop stops only when the last owner withdraws.
 func TestBroadcasterOwners(t *testing.T) {
-	logger := zap.NewNop()
+	logger := log.Nop()
 	bc := NewBroadcasterController(testIdentity(t), time.Hour, logger, nil)
 	ctx := context.Background()
 

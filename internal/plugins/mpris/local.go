@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
@@ -20,7 +20,7 @@ func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
 		displayNames = []string{}
 	}
 
-	p.logger.Debug("mpris: sending player list", zap.Strings("players", displayNames))
+	p.logger.Debug("mpris: sending player list", log.Strings("players", displayNames))
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
 		"playerList":             displayNames,
@@ -92,7 +92,7 @@ func (p *MPRISPlugin) addPlayer(busName, uniqueName, displayName, shortName stri
 	}
 	p.mu.Unlock()
 
-	p.logger.Debug("mpris: added player", zap.String("displayName", displayName), zap.String("busName", busName))
+	p.logger.Debug("mpris: added player", log.String("displayName", displayName), log.String("busName", busName))
 
 	if state, err := p.playerState(displayName); err == nil {
 		p.mu.Lock()
@@ -111,7 +111,7 @@ func (p *MPRISPlugin) removePlayer(displayName string) {
 	delete(p.lastStates, displayName)
 	p.mu.Unlock()
 
-	p.logger.Debug("mpris: removed player", zap.String("displayName", displayName))
+	p.logger.Debug("mpris: removed player", log.String("displayName", displayName))
 
 	p.sendPlayerListBroadcast()
 }

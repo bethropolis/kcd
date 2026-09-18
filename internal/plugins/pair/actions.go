@@ -6,8 +6,8 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // AcceptPairing accepts an incoming pair request.
@@ -18,7 +18,7 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 	}
 
 	if err := dev.Send(pkt); err != nil {
-		p.logger.Error("failed to send pair accept", zap.Error(err))
+		p.logger.Error("failed to send pair accept", log.Error(err))
 		dev.SetState(device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
@@ -32,7 +32,7 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 // RequestPairing initiates a pairing request to a device.
 func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 	if dev.State() == device.StatePaired {
-		p.logger.Warn("device already paired", zap.String("device_id", dev.ID()))
+		p.logger.Warn("device already paired", log.String("device_id", dev.ID()))
 		return nil
 	}
 
@@ -54,7 +54,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 	p.mu.Unlock()
 
 	if err := dev.Send(pkt); err != nil {
-		p.logger.Error("failed to send pair request", zap.Error(err))
+		p.logger.Error("failed to send pair request", log.Error(err))
 		return err
 	}
 
@@ -62,12 +62,12 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 	if peerCert != nil {
 		vKey := cert.VerificationKey(p.localCert, peerCert, timestamp)
 		p.logger.Info("pairing verification code",
-			zap.String("device_id", dev.ID()),
-			zap.String("code", vKey))
+			log.String("device_id", dev.ID()),
+			log.String("code", vKey))
 	}
 
 	dev.SetState(device.StatePairRequested)
-	p.logger.Info("pair request sent", zap.String("device_id", dev.ID()))
+	p.logger.Info("pair request sent", log.String("device_id", dev.ID()))
 
 	if p.onStateChanged != nil {
 		p.onStateChanged()
@@ -96,7 +96,7 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("pair request rejected", zap.String("device_id", dev.ID()))
+	p.logger.Info("pair request rejected", log.String("device_id", dev.ID()))
 	return nil
 }
 
@@ -120,7 +120,7 @@ func (p *PairPlugin) Unpair(dev *device.Device) error {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("device unpaired", zap.String("device_id", dev.ID()))
+	p.logger.Info("device unpaired", log.String("device_id", dev.ID()))
 	return nil
 }
 
@@ -136,6 +136,6 @@ func (p *PairPlugin) pairingDone(dev *device.Device) {
 		p.onStateChanged()
 	}
 
-	p.logger.Info("pairing complete", zap.String("device_id", dev.ID()))
+	p.logger.Info("pairing complete", log.String("device_id", dev.ID()))
 	p.emit(events.TypePairAccepted, dev, "")
 }

@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // notifIDChars restricts phone-provided notification IDs to filename-safe
@@ -62,7 +62,7 @@ func (p *NotificationPlugin) fetchIcon(
 	// sanitizer above ever regresses.
 	if rel, err := filepath.Rel(p.iconDir, iconPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		p.logger.Warn("notification: icon path escapes cache dir, refusing",
-			zap.String("id", notifID))
+			log.String("id", notifID))
 		return ""
 	}
 
@@ -80,7 +80,7 @@ func (p *NotificationPlugin) fetchIcon(
 
 	conn, err := transport.DialSidechannel(ctx, remoteIP, port, p.tlsConfig, expectedFP, p.logger, p.sidechannel)
 	if err != nil {
-		p.logger.Debug("notification: icon dial failed", zap.Error(err))
+		p.logger.Debug("notification: icon dial failed", log.Error(err))
 		return ""
 	}
 	defer conn.Close()
@@ -92,7 +92,7 @@ func (p *NotificationPlugin) fetchIcon(
 	defer f.Close()
 
 	if _, err := io.Copy(f, io.LimitReader(conn, size)); err != nil {
-		p.logger.Debug("notification: icon download failed", zap.Error(err))
+		p.logger.Debug("notification: icon download failed", log.Error(err))
 		_ = os.Remove(iconPath)
 		return ""
 	}

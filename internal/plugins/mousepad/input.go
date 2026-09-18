@@ -7,8 +7,8 @@ import (
 
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *MousepadPlugin) handleMove(body MousepadBody) {
@@ -181,7 +181,7 @@ func (p *MousepadPlugin) execKeyFallback(keyName string) {
 
 func (p *MousepadPlugin) runCmd(name string, arg ...string) {
 	if out, err := exec.CommandContext(context.Background(), name, arg...).CombinedOutput(); err != nil {
-		p.logger.Debug("command failed", zap.String("cmd", name), zap.Error(err), zap.String("output", string(out)))
+		p.logger.Debug("command failed", log.String("cmd", name), log.Error(err), log.String("output", string(out)))
 	}
 }
 

@@ -14,9 +14,9 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // handleAttachmentFile downloads an MMS attachment file sent by the phone.
@@ -53,12 +53,12 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 
 	go func() {
 		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath, expectedFP); err != nil {
-			p.logger.Error("sms: attachment download failed", zap.Error(err))
+			p.logger.Error("sms: attachment download failed", log.Error(err))
 			return
 		}
 		p.logger.Info("sms: attachment downloaded",
-			zap.String("path", destPath),
-			zap.String("filename", body.Filename),
+			log.String("path", destPath),
+			log.String("filename", body.Filename),
 		)
 		if p.bus != nil {
 			p.bus.Publish(events.TypeSMSAttachment, dev.ID(), map[string]any{

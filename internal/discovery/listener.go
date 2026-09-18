@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Listener listens for UDP identity packets from other devices.
@@ -14,16 +14,16 @@ type Listener struct {
 	port          int
 	localDeviceID string
 	onDeviceFound func(ip net.IP, tcpPort int, identity *protocol.Packet)
-	logger        *zap.Logger
+	logger        log.Logger
 }
 
 // NewListener creates a UDP discovery listener.
-func NewListener(port int, localDeviceID string, callback func(ip net.IP, tcpPort int, identity *protocol.Packet), logger *zap.Logger) *Listener {
+func NewListener(port int, localDeviceID string, callback func(ip net.IP, tcpPort int, identity *protocol.Packet), logger log.Logger) *Listener {
 	return &Listener{
 		port:          port,
 		localDeviceID: localDeviceID,
 		onDeviceFound: callback,
-		logger:        logger.With(zap.String("component", "udp-listener")),
+		logger:        logger.With(log.String("component", "udp-listener")),
 	}
 }
 
@@ -35,7 +35,7 @@ func (l *Listener) Run(ctx context.Context) {
 	addr := &net.UDPAddr{Port: l.port}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		l.logger.Error("failed to listen on udp", zap.Int("port", l.port), zap.Error(err))
+		l.logger.Error("failed to listen on udp", log.Int("port", l.port), log.Error(err))
 		return
 	}
 	defer conn.Close()
@@ -54,7 +54,7 @@ func (l *Listener) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return // clean exit on context cancel
 			}
-			l.logger.Debug("read udp error", zap.Error(err))
+			l.logger.Debug("read udp error", log.Error(err))
 			continue
 		}
 

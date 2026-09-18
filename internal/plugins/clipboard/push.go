@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
@@ -89,7 +89,7 @@ func (p *ClipboardPlugin) readClipboard() string {
 	}
 	out, err := p.runClipboard(context.Background(), cmd)
 	if err != nil {
-		p.logger.Debug("clipboard: read failed", zap.Error(err))
+		p.logger.Debug("clipboard: read failed", log.Error(err))
 		return ""
 	}
 	return string(out)
@@ -111,7 +111,7 @@ func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
 	}
 	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", body)
 	if err != nil {
-		p.logger.Debug("clipboard: OnConnect: failed to build packet", zap.Error(err))
+		p.logger.Debug("clipboard: OnConnect: failed to build packet", log.Error(err))
 		return
 	}
 	// Best-effort — device may still be completing the TLS handshake.

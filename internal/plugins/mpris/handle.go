@@ -8,8 +8,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -45,7 +45,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	// exist (their media session was destroyed) and request fresh status for
 	// the ones still around.
 	if body.PlayerList != nil {
-		p.logger.Debug("mpris: received player list from remote", zap.Strings("players", body.PlayerList))
+		p.logger.Debug("mpris: received player list from remote", log.Strings("players", body.PlayerList))
 		pruned := false
 		p.mu.Lock()
 		if prev := p.remoteStates[dev.ID()]; prev != nil {

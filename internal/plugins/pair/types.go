@@ -8,8 +8,8 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 const (
@@ -22,7 +22,7 @@ type PairPlugin struct {
 	devices        *device.Registry
 	localCert      *x509.Certificate
 	onStateChanged func() // callback to persist state
-	logger         *zap.Logger
+	logger         log.Logger
 	bus            *events.Bus
 	cfg            config.PairingConfig
 
@@ -31,7 +31,7 @@ type PairPlugin struct {
 }
 
 // NewPairPlugin creates a new pairing plugin.
-func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger *zap.Logger) *PairPlugin {
+func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger log.Logger) *PairPlugin {
 	return &PairPlugin{
 		devices:          devices,
 		localCert:        localCert,

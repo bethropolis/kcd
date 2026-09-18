@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestRegistry_Deduplicate(t *testing.T) {
 	reg := NewRegistry(nil)
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 
 	d1 := NewDevice("123", "Phone 1", "phone", logger)
 	d2 := NewDevice("123", "Phone 2", "phone", logger)
@@ -56,7 +56,7 @@ func TestReconnectBackoff(t *testing.T) {
 }
 
 func TestDevice_ReconnectAttempt(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("123", "Phone", "phone", logger)
 
 	if got := d.ReconnectAttempt(); got != 0 {
@@ -75,7 +75,7 @@ func TestDevice_ReconnectAttempt(t *testing.T) {
 }
 
 func TestDevice_ConnectionAge(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("123", "Phone", "phone", logger)
 
 	if got := d.ConnectionAge(); got != 0 {
@@ -110,7 +110,7 @@ func TestDevice_ConnectionAge(t *testing.T) {
 }
 
 func TestDevice_BatterySeen(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("bat-seen", "Phone", "phone", logger)
 
 	if d.HasBattery() {
@@ -260,7 +260,7 @@ func readAny(t *testing.T, peer net.Conn) {
 }
 
 func TestDevice_ReplaceOnNewAuth(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("dup", "Phone", "phone", logger)
 	var connects, disconnects atomic.Int32
 
@@ -312,7 +312,7 @@ func TestDevice_ReplaceOnNewAuth(t *testing.T) {
 }
 
 func TestDevice_SupersededDisconnectSilent(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("sup", "Phone", "phone", logger)
 	var disconnects atomic.Int32
 
@@ -342,7 +342,7 @@ func TestDevice_SupersededDisconnectSilent(t *testing.T) {
 }
 
 func TestDevice_ReplaceClosesOld(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("rep", "Phone", "phone", logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -380,7 +380,7 @@ func TestDevice_ReplaceClosesOld(t *testing.T) {
 }
 
 func TestDevice_CooldownWindow(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("cd", "Phone", "phone", logger)
 
 	if d.InCooldown() {
@@ -409,7 +409,7 @@ func TestDevice_CooldownWindow(t *testing.T) {
 }
 
 func TestDevice_NoteSightingRoamConfirm(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	d := NewDevice("roam", "Phone", "phone", logger)
 	d.SetLastIP(net.ParseIP("192.168.1.10"))
 

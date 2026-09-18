@@ -10,8 +10,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func TestCleanFilename(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCleanFilename(t *testing.T) {
 }
 
 func TestReceiveAttachmentRejectsBadSize(t *testing.T) {
-	p := NewSMSPlugin(config.SMSConfig{}, nil, nil, zap.NewNop())
+	p := NewSMSPlugin(config.SMSConfig{}, nil, nil, log.Nop())
 	for _, size := range []int64{0, -1, -999, maxSMSAttachmentBytes + 1} {
 		err := p.receiveAttachment(context.Background(), nil, 0, size, "/nonexistent/x", "")
 		if err == nil {
@@ -66,7 +66,7 @@ func (s *captureSender) UpdateBattery(int, bool)       {}
 func (s *captureSender) GetBattery() (int, bool)       { return 0, false }
 
 func TestSendSMSUsesV2Schema(t *testing.T) {
-	p := NewSMSPlugin(config.SMSConfig{}, nil, nil, zap.NewNop())
+	p := NewSMSPlugin(config.SMSConfig{}, nil, nil, log.Nop())
 	dev := &captureSender{}
 	if err := p.SendSMS(dev, "+1234567890", "hello"); err != nil {
 		t.Fatalf("SendSMS: %v", err)
@@ -100,7 +100,7 @@ func TestMessagesBatchAcceptsIntReadFlag(t *testing.T) {
 			Type: PacketTypeSMSMessages,
 			Body: json.RawMessage(`{"version":2,"messages":[{"event":1,"body":"hi","addresses":[{"address":"+1"}],"date":1711234567,"type":1,"thread_id":7,"read":` + read + `}]}`),
 		}
-		p := NewSMSPlugin(config.SMSConfig{}, nil, nil, zap.NewNop())
+		p := NewSMSPlugin(config.SMSConfig{}, nil, nil, log.Nop())
 		if err := p.Handle(context.Background(), &captureSender{}, pkt); err != nil {
 			t.Errorf("Handle with read=%s: %v, want nil", read, err)
 		}

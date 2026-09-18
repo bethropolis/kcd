@@ -8,13 +8,13 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap/zaptest"
 )
 
 func newPlugin(t *testing.T) (*BatteryPlugin, *events.Bus) {
 	t.Helper()
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	bus := events.NewBus(logger)
 	cfg := config.BatteryConfig{}
 	cfg.Defaults()
@@ -22,7 +22,7 @@ func newPlugin(t *testing.T) (*BatteryPlugin, *events.Bus) {
 }
 
 func TestBatteryPlugin_Handle_UpdatesDevice(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, _ := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
@@ -44,7 +44,7 @@ func TestBatteryPlugin_Handle_UpdatesDevice(t *testing.T) {
 }
 
 func TestBatteryPlugin_Handle_ThresholdLow_EmitsEvent(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
@@ -79,7 +79,7 @@ func TestBatteryPlugin_Handle_ThresholdLow_EmitsEvent(t *testing.T) {
 }
 
 func TestBatteryPlugin_Handle_ThresholdFull_EmitsEvent(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
@@ -105,7 +105,7 @@ func TestBatteryPlugin_Handle_ThresholdFull_EmitsEvent(t *testing.T) {
 }
 
 func TestBatteryPlugin_Handle_RequestResponds(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, _ := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
@@ -132,7 +132,7 @@ func TestLocalBatteryRead(t *testing.T) {
 }
 
 func TestBatteryPlugin_Handle_NoThreshold_NoEvent(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, bus := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 
@@ -155,7 +155,7 @@ func TestBatteryPlugin_Handle_NoThreshold_NoEvent(t *testing.T) {
 }
 
 func TestBatteryPlugin_Handle_RequestDoesNotClobberCharge(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	p, _ := newPlugin(t)
 	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
 	dev.UpdateBattery(85, true)

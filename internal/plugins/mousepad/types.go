@@ -8,11 +8,11 @@ import (
 
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/config"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 type MousepadPlugin struct {
-	logger     *zap.Logger
+	logger     log.Logger
 	cfg        config.MousepadConfig
 	useYdotool bool
 	useUinput  bool
@@ -29,11 +29,11 @@ type MousepadPlugin struct {
 	cancel context.CancelFunc
 }
 
-func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadPlugin {
+func NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger) *MousepadPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	isWayland := os.Getenv("WAYLAND_DISPLAY") != ""
 	p := &MousepadPlugin{
-		logger:    logger.With(zap.String("plugin", "mousepad")),
+		logger:    logger.With(log.String("plugin", "mousepad")),
 		cfg:       cfg,
 		isWayland: isWayland,
 		moveCh:    make(chan MousepadBody, 1),
@@ -45,7 +45,7 @@ func NewMousepadPlugin(cfg config.MousepadConfig, logger *zap.Logger) *MousepadP
 	// Try uinput first if auto or explicit
 	if cfg.Backend == "auto" || cfg.Backend == "uinput" {
 		if err := p.initUinput(); err != nil {
-			p.logger.Warn("uinput initialization failed, falling back to legacy backends", zap.Error(err))
+			p.logger.Warn("uinput initialization failed, falling back to legacy backends", log.Error(err))
 		} else {
 			p.useUinput = true
 			p.logger.Info("uinput initialized successfully")

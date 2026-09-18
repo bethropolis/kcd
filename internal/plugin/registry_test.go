@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // --- mocks ---
@@ -56,7 +56,7 @@ func (m *mockSender) GetBattery() (int, bool)        { return 0, false }
 // --- tests ---
 
 func TestDispatch_FastPlugin_ReturnsTrue(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
+	logger := log.NewDevelopment()
 	r := NewRegistry(logger)
 
 	r.Register(&mockPlugin{
@@ -78,7 +78,7 @@ func TestDispatch_FastPlugin_ReturnsTrue(t *testing.T) {
 }
 
 func TestDispatch_SlowPluginTimeout_ReturnsFalse(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
+	logger := log.NewDevelopment()
 	r := NewRegistry(logger)
 
 	slowDone := make(chan struct{})
@@ -111,7 +111,7 @@ func TestDispatch_SlowPluginTimeout_ReturnsFalse(t *testing.T) {
 }
 
 func TestDispatch_UnregisteredType_ReturnsTrue(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
+	logger := log.NewDevelopment()
 	r := NewRegistry(logger)
 
 	pkt := protocol.AcquirePacket()

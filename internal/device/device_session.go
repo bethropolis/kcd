@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // reconnectCooldown refuses new handshakes this long after a completed
@@ -58,11 +58,11 @@ func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch fun
 	if oldConn != nil {
 		_ = oldConn.Close()
 		d.logger.Debug("replacing superseded connection",
-			zap.String("old_addr", oldAddr),
-			zap.String("new_addr", newAddr))
+			log.String("old_addr", oldAddr),
+			log.String("new_addr", newAddr))
 	}
 
-	d.logger.Info("device connected", zap.String("remote_addr", conn.RemoteAddr().String()))
+	d.logger.Info("device connected", log.String("remote_addr", conn.RemoteAddr().String()))
 	if bus != nil {
 		bus.Publish(events.TypeDeviceConnected, d.id, map[string]interface{}{
 			"name": d.name,

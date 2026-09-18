@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap/zaptest"
 )
 
 // fakeSender captures outbound packets for round-trip tests.
@@ -36,7 +36,7 @@ func (f *fakeSender) GetBattery() (int, bool)            { return 0, false }
 func testPlugin(t *testing.T) *ContactsPlugin {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	return NewContactsPlugin(nil, zaptest.NewLogger(t))
+	return NewContactsPlugin(nil, log.NewTest(t))
 }
 
 func TestParseVCard(t *testing.T) {

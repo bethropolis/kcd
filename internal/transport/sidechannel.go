@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // SidechannelOptions bounds the connection establishment phase — TCP dial
@@ -26,7 +26,7 @@ type SidechannelOptions struct {
 // before returning any payload bytes. The caller owns and must close the result.
 // Once established, payload streaming carries no absolute deadline — only the
 // optional idle bound from SidechannelOptions applies.
-func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger, options ...SidechannelOptions) (net.Conn, error) {
+func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Config, expectedFP string, logger log.Logger, options ...SidechannelOptions) (net.Conn, error) {
 	if ip == nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("side-channel: invalid peer address")
 	}
@@ -56,9 +56,7 @@ func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Co
 		return nil, fmt.Errorf("side-channel: handshake %s: %w", addr, err)
 	}
 	if expectedFP == "" {
-		if logger != nil {
-			logger.Warn("side-channel: no pinned peer fingerprint, skipping verification", zap.String("remote_addr", addr))
-		}
+		logger.Warn("side-channel: no pinned peer fingerprint, skipping verification", log.String("remote_addr", addr))
 	} else if err := cert.VerifySideChannelPeer(conn.ConnectionState(), expectedFP); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("side-channel: peer verification failed: %w", err)

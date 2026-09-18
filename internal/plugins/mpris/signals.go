@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/godbus/dbus/v5"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) handleNameOwnerChanged(sig *dbus.Signal, conn *dbus.Conn, uniqueToDisplay map[string]string) {
@@ -89,7 +89,7 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 		}
 	}
 	if displayName == "" {
-		p.logger.Debug("mpris: signal dropped, unknown sender", zap.String("sender", string(sig.Sender)), zap.String("signal", sig.Name))
+		p.logger.Debug("mpris: signal dropped, unknown sender", log.String("sender", string(sig.Sender)), log.String("signal", sig.Name))
 		return
 	}
 

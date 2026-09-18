@@ -11,18 +11,18 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // LockDevicePlugin handles incoming lock/unlock requests from the phone.
 type LockDevicePlugin struct {
-	logger *zap.Logger
+	logger log.Logger
 }
 
-func NewLockDevicePlugin(logger *zap.Logger) *LockDevicePlugin {
+func NewLockDevicePlugin(logger log.Logger) *LockDevicePlugin {
 	return &LockDevicePlugin{
-		logger: logger.With(zap.String("plugin", "lockdevice")),
+		logger: logger.With(log.String("plugin", "lockdevice")),
 	}
 }
 
@@ -51,11 +51,11 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 			locked := p.getLocked()
 			pkt, err := protocol.NewPacket("kdeconnect.lock", LockBody{IsLocked: locked})
 			if err != nil {
-				p.logger.Error("lockdevice: failed to create reply packet", zap.Error(err))
+				p.logger.Error("lockdevice: failed to create reply packet", log.Error(err))
 				return
 			}
 			if err := dev.Send(pkt); err != nil {
-				p.logger.Error("lockdevice: failed to send lock state", zap.Error(err))
+				p.logger.Error("lockdevice: failed to send lock state", log.Error(err))
 			}
 		}()
 		return nil
@@ -65,11 +65,11 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 	go func() {
 		if body.SetLocked {
 			if err := exec.CommandContext(context.Background(), "loginctl", "lock-session").Run(); err != nil {
-				p.logger.Warn("lockdevice: lock-session failed", zap.Error(err))
+				p.logger.Warn("lockdevice: lock-session failed", log.Error(err))
 			}
 		} else {
 			if err := exec.CommandContext(context.Background(), "loginctl", "unlock-session").Run(); err != nil {
-				p.logger.Warn("lockdevice: unlock-session failed", zap.Error(err))
+				p.logger.Warn("lockdevice: unlock-session failed", log.Error(err))
 			}
 		}
 	}()

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // writeTimeout bounds one WritePacket call. LAN writes complete in
@@ -38,7 +38,7 @@ func (d *Device) Send(p *protocol.Packet) error {
 	case sendChan <- p:
 		return nil
 	default:
-		d.logger.Warn("send channel full, dropping packet", zap.String("type", p.Type))
+		d.logger.Warn("send channel full, dropping packet", log.String("type", p.Type))
 		protocol.ReleasePacket(p)
 		return nil
 	}
@@ -63,16 +63,16 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 		pkt, err := conn.ReadPacket()
 		if err != nil {
 			if strings.Contains(err.Error(), "protocol: unmarshal:") {
-				d.logger.Warn("dropping malformed packet, keeping connection", zap.Error(err))
+				d.logger.Warn("dropping malformed packet, keeping connection", log.Error(err))
 				continue
 			}
-			d.logger.Debug("read packet error (disconnecting)", zap.Error(err))
+			d.logger.Debug("read packet error (disconnecting)", log.Error(err))
 			return
 		}
 
 		if dispatch != nil {
 			if d.State() != StatePaired && pkt.Type != protocol.TypeIdentity && pkt.Type != protocol.TypePair {
-				d.logger.Debug("dropping packet from unpaired device", zap.String("type", pkt.Type))
+				d.logger.Debug("dropping packet from unpaired device", log.String("type", pkt.Type))
 				protocol.ReleasePacket(pkt)
 			} else if dispatch(ctx, d, pkt) {
 				// Plugin completed within timeout — safe to recycle.
@@ -115,12 +115,12 @@ func (d *Device) writerLoop(ctx context.Context) {
 				protocol.ReleasePacket(pkt)
 				continue
 			}
-			d.logger.Debug("sending packet", zap.String("type", pkt.Type))
+			d.logger.Debug("sending packet", log.String("type", pkt.Type))
 			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			err := conn.WritePacket(pkt)
 			_ = conn.SetWriteDeadline(time.Time{})
 			if err != nil {
-				d.logger.Debug("write packet error", zap.Error(err))
+				d.logger.Debug("write packet error", log.Error(err))
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {
 					// Stuck socket: fail the session now instead of

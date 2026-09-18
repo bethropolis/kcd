@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
@@ -19,18 +19,18 @@ type RunCommandPlugin struct {
 	Mu                sync.RWMutex // exported so daemon.go can lock it during reload
 	Commands          map[string]string
 	CommandsPerDevice map[string]map[string]string // keyed by device ID
-	logger            *zap.Logger
+	logger            log.Logger
 	wg                sync.WaitGroup // exported for tests to synchronize with background goroutines
 }
 
-func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, logger *zap.Logger) *RunCommandPlugin {
+func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, logger log.Logger) *RunCommandPlugin {
 	if commandsPerDevice == nil {
 		commandsPerDevice = make(map[string]map[string]string)
 	}
 	return &RunCommandPlugin{
 		Commands:          commands,
 		CommandsPerDevice: commandsPerDevice,
-		logger:            logger.With(zap.String("plugin", "runcommand")),
+		logger:            logger.With(log.String("plugin", "runcommand")),
 	}
 }
 
@@ -133,7 +133,7 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 
 			// Do not send notifications for massive outputs (e.g. log dumps)
 			if len(text) > 4096 {
-				p.logger.Warn("command output too large for notification, truncating", zap.Int("len", len(text)))
+				p.logger.Warn("command output too large for notification, truncating", log.Int("len", len(text)))
 				text = text[:4000] + "\n...[output truncated]"
 			}
 
@@ -149,14 +149,14 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 			}
 
 			p.logger.Debug("sending command output notification",
-				zap.String("key", body.Key),
-				zap.Int("output_len", len(text)),
+				log.String("key", body.Key),
+				log.Int("output_len", len(text)),
 			)
 			if pkt, err := protocol.NewPacket("kdeconnect.notification", notifBody); err == nil {
 				if err := dev.Send(pkt); err != nil {
 					p.logger.Warn("failed to send command output notification",
-						zap.String("key", body.Key),
-						zap.Error(err),
+						log.String("key", body.Key),
+						log.Error(err),
 					)
 				}
 			}

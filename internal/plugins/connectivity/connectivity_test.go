@@ -9,8 +9,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 type testSender struct {
@@ -31,7 +31,7 @@ func (s testSender) UpdateBattery(charge int, charging bool) {}
 func (s testSender) GetBattery() (int, bool)                 { return 0, false }
 
 func TestHandleDeduplicatesConnectivityReports(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeConnectivityUpdate)
 	defer sub.Close()
 

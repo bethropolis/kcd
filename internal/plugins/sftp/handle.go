@@ -7,8 +7,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -19,8 +19,8 @@ func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.
 
 	if body.ErrorMessage != "" {
 		p.logger.Warn("SFTP server error from device",
-			zap.String("device_id", dev.ID()),
-			zap.String("error", body.ErrorMessage),
+			log.String("device_id", dev.ID()),
+			log.String("error", body.ErrorMessage),
 		)
 		if p.bus != nil {
 			p.bus.Publish(events.TypeSftpMount, dev.ID(), map[string]interface{}{
@@ -35,7 +35,7 @@ func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.
 	p.mu.Unlock()
 
 	safeURI := fmt.Sprintf("sftp://%s@%s:%s%s", body.User, body.IP, body.Port.String(), body.Path)
-	p.logger.Info("SFTP server available", zap.String("uri", safeURI))
+	p.logger.Info("SFTP server available", log.String("uri", safeURI))
 
 	evtPayload := map[string]interface{}{
 		"uri":      fmt.Sprintf("sftp://%s:%s@%s:%s%s", body.User, body.Password, body.IP, body.Port.String(), body.Path),

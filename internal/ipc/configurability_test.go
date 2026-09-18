@@ -4,15 +4,15 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugins/pair"
-	"go.uber.org/zap"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestConfiguredPairListenTimeout(t *testing.T) {
-	logger := zap.NewNop()
+	logger := log.Nop()
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
 	cfg := config.Defaults()

@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestRunCommandPlugin_Handle_GlobalCommand(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 	p := NewRunCommandPlugin(
 		map[string]string{"key1": "echo test"},
@@ -26,7 +26,7 @@ func TestRunCommandPlugin_Handle_GlobalCommand(t *testing.T) {
 }
 
 func TestRunCommandPlugin_Handle_PerDeviceOverrides(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 
 	p := NewRunCommandPlugin(
 		map[string]string{"cmd": "echo global"},
@@ -54,7 +54,7 @@ func TestRunCommandPlugin_Handle_PerDeviceOverrides(t *testing.T) {
 }
 
 func TestRunCommandPlugin_Handle_RequestCommandList(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 	p := NewRunCommandPlugin(
 		map[string]string{"global": "echo global"},
