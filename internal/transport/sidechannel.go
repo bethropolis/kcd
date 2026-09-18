@@ -12,17 +12,20 @@ import (
 	"go.uber.org/zap"
 )
 
-// SidechannelOptions bounds the entire connection establishment phase — TCP
-// dial plus TLS handshake plus pin verification — with a single overall
-// timeout (default 15s). Payload streaming is never time-bounded.
+// SidechannelOptions bounds the connection establishment phase — TCP dial
+// plus TLS handshake plus pin verification — with a single overall timeout
+// (default 15s). IdleTimeout optionally bounds streaming silence: every
+// read or write pushes the deadline forward, so stalled transfers fail
+// while slow-but-alive ones run unbounded in total. Zero disables it.
 type SidechannelOptions struct {
-	Timeout time.Duration
+	Timeout     time.Duration
+	IdleTimeout time.Duration
 }
 
 // DialSidechannel connects as a TLS client and verifies the paired certificate
 // before returning any payload bytes. The caller owns and must close the result.
-// Once established, payload streaming carries no deadline, so large transfers
-// are never truncated mid-stream by the helper.
+// Once established, payload streaming carries no absolute deadline — only the
+// optional idle bound from SidechannelOptions applies.
 func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger, options ...SidechannelOptions) (net.Conn, error) {
 	if ip == nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("side-channel: invalid peer address")
@@ -66,5 +69,5 @@ func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Co
 	// unbounded, and download goroutines may legitimately outlive the
 	// packet-handler context. Callers own the returned conn and close it
 	// when streaming finishes.
-	return conn, nil
+	return WithIdleTimeout(conn, opts.IdleTimeout), nil
 }

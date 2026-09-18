@@ -32,10 +32,10 @@ func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger, notifications ...co
 }
 
 type TelephonyBody struct {
-	Event       string `json:"event"` // "ringing", "talking", "missed"
-	ContactName string `json:"contactName"`
-	PhoneNumber string `json:"phoneNumber"`
-	IsCancel    bool   `json:"isCancel"`
+	Event       string            `json:"event"` // "ringing", "talking", "missedCall"
+	ContactName string            `json:"contactName"`
+	PhoneNumber string            `json:"phoneNumber"`
+	IsCancel    protocol.FlexBool `json:"isCancel"`
 }
 
 func (p *TelephonyPlugin) Name() string            { return "Telephony" }
@@ -51,16 +51,21 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		return err
 	}
 
+	canceled := bool(body.IsCancel)
 	if p.bus != nil {
-		if body.IsCancel {
+		if canceled {
 			p.bus.Publish(events.TypeTelephonyCanceled, dev.ID(), body)
 		} else {
-			p.bus.Publish(events.EventType("telephony."+body.Event), dev.ID(), body)
+			eventType := events.EventType("telephony." + body.Event)
+			if body.Event == "missedCall" {
+				eventType = events.TypeTelephonyMissed
+			}
+			p.bus.Publish(eventType, dev.ID(), body)
 		}
 	}
 
 	go func() {
-		if body.IsCancel {
+		if canceled {
 			return
 		}
 
@@ -76,7 +81,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			title = "📞 Incoming Call"
 			message = "Ringing: " + caller
 			urgency = "critical"
-		case "missed":
+		case "missed", "missedCall":
 			title = "❌ Missed Call"
 			message = "Missed call from " + caller
 		default:

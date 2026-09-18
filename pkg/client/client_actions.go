@@ -63,6 +63,15 @@ func (c *Client) NotifyReply(deviceID, replyID, message string) error {
 	return err
 }
 
+// NotifyDismiss requests the daemon to clear a notification on the remote device.
+func (c *Client) NotifyDismiss(deviceID, notificationID string) error {
+	_, err := c.Call(ipc.CmdNotifyDismiss, ipc.NotifyDismissPayload{
+		DeviceID:       deviceID,
+		NotificationID: notificationID,
+	})
+	return err
+}
+
 // CallMute requests the daemon to mute an incoming call on the remote device.
 func (c *Client) CallMute(deviceID string) error {
 	_, err := c.Call(ipc.CmdCallMute, ipc.DevicePayload{DeviceID: deviceID})

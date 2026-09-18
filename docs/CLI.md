@@ -29,7 +29,7 @@ require a restart; reloading notification filters alone does not apply them.
 
 | Section | Settings and defaults |
 |---|---|
-| `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"` |
+| `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"`, `transfer_idle_timeout = "60s"` |
 | `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"` |
 | `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
 | `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |
@@ -135,11 +135,18 @@ Show daemon runtime information.
 
 **Example output**
 
-    kcd v1.0.5 — up 3h 12m
-    Socket:    /run/user/1000/kcd/kcd.sock
-    Config:    /home/user/.config/kcd/kcd.toml
-    Devices:   2 known, 1 connected
-    Plugins:   Battery, Clipboard, Notification, Share, ...
+    kcd v1.19.0 (up 2h 14m)
+
+    Socket:   /run/user/1000/kcd/kcd.sock
+    Config:   /home/user/.config/kcd/kcd.toml
+    Listen:   tcp :1716
+
+    Devices:  2 known, 1 connected
+    NAME       ID        TYPE    STATE     ADDR                BATTERY  LAST SEEN
+    BETHRÖ     9a5c23ea  phone   PAIRED    192.168.1.134:1716  78%+     3s ago
+    Old Laptop deadbeef  laptop  UNPAIRED  —                   —        never
+
+    Plugins (20): Pair, Battery, Clipboard, Notification, Share, ...
 
 ---
 
@@ -578,6 +585,22 @@ kcd watch --json | jq 'select(.type=="notification") | {id: .payload.id, app: .p
 
 ```bash
 kcd reply a1b2... abc-123 "On my way!"
+```
+
+---
+
+## dismiss
+
+Clear a notification on the phone and close its desktop popup.
+
+```
+kcd dismiss <device-id> <notification-id>
+```
+
+The `notification-id` is the `id` field of a `notification` event:
+
+```bash
+kcd dismiss a1b2... notif-456
 ```
 
 ---

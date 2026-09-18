@@ -16,7 +16,7 @@ func TestDefaults(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"5s", "10s", "15s"}) {
+	if cfg.Network != (NetworkConfig{"5s", "10s", "15s", "60s"}) {
 		t.Errorf("network defaults: %+v", cfg.Network)
 	}
 	if cfg.Reconnect != (ReconnectConfig{"2s", "5m", "15s"}) {
@@ -68,6 +68,7 @@ func TestLoadOverridesAndRoundTrip(t *testing.T) {
 dial_timeout = "750ms"
 handshake_timeout = "12s"
 sidechannel_timeout = "25s"
+transfer_idle_timeout = "90s"
 [reconnect]
 initial_backoff = "3s"
 max_backoff = "6m"
@@ -92,7 +93,7 @@ app_name = "KDE Connect"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
+	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s", "90s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
 		t.Fatal("duration overrides not decoded")
 	}
 	if cfg.Cache != (CacheConfig{"/tmp/sms", "/tmp/art", "/tmp/contacts"}) || cfg.Pairing.IntentTTL != "7m" || cfg.Pairing.ListenTimeout != "2m" {

@@ -3,7 +3,10 @@ package notification
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -447,5 +450,49 @@ func TestNotificationPlugin_CancelGraceDisabled(t *testing.T) {
 	})
 	if got := f.gdbusCalls()[0][len(f.gdbusCalls()[0])-1]; got != "1" {
 		t.Fatalf("expected gdbus close of desktop id 1, got %q", got)
+	}
+}
+
+// captureSender implements device.Sender and records outbound packets.
+type captureSender struct {
+	id   string
+	sent []*protocol.Packet
+}
+
+func (s *captureSender) ID() string                    { return s.id }
+func (s *captureSender) Name() string                  { return "test" }
+func (s *captureSender) SetName(string)                {}
+func (s *captureSender) State() device.PairingState    { return device.StatePaired }
+func (s *captureSender) SetState(device.PairingState)  {}
+func (s *captureSender) Send(p *protocol.Packet) error { s.sent = append(s.sent, p); return nil }
+func (s *captureSender) IsConnected() bool             { return true }
+func (s *captureSender) RemoteIP() net.IP              { return nil }
+func (s *captureSender) PeerCert() *x509.Certificate   { return nil }
+func (s *captureSender) HasCapability(string) bool     { return true }
+func (s *captureSender) UpdateBattery(int, bool)       {}
+func (s *captureSender) GetBattery() (int, bool)       { return 0, false }
+
+func TestNotificationPlugin_Dismiss(t *testing.T) {
+	p := newPlugin(t)
+	dev := &captureSender{id: "dev1"}
+
+	if err := p.Dismiss(dev, "notif-123"); err != nil {
+		t.Fatalf("Dismiss returned error: %v", err)
+	}
+	if len(dev.sent) != 1 {
+		t.Fatalf("sent %d packets, want 1", len(dev.sent))
+	}
+	pkt := dev.sent[0]
+	if pkt.Type != "kdeconnect.notification.request" {
+		t.Errorf("packet type = %q, want kdeconnect.notification.request", pkt.Type)
+	}
+	var body struct {
+		Cancel string `json:"cancel"`
+	}
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		t.Fatalf("unmarshal dismiss body: %v", err)
+	}
+	if body.Cancel != "notif-123" {
+		t.Errorf("cancel = %q, want %q", body.Cancel, "notif-123")
 	}
 }

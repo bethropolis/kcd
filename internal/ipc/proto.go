@@ -25,6 +25,7 @@ const (
 	CmdSftpInfo             = "sftp_info"
 	CmdSftpVolumes          = "sftp_volumes"
 	CmdNotifyReply          = "notify_reply"
+	CmdNotifyDismiss        = "notify_dismiss"
 	CmdCallMute             = "call_mute"
 	CmdFindMyPhone          = "findmyphone"
 	CmdLock                 = "lock"
@@ -99,6 +100,12 @@ type NotifyReplyPayload struct {
 	Message  string `json:"message"`
 }
 
+// NotifyDismissPayload is used for CmdNotifyDismiss.
+type NotifyDismissPayload struct {
+	DeviceID       string `json:"deviceId"`
+	NotificationID string `json:"notificationId"`
+}
+
 // SMSPayload is used for CmdSendSMS.
 type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`
@@ -121,16 +128,37 @@ type SMSAttachmentPayload struct {
 	UniqueIdentifier string `json:"uniqueIdentifier"`
 }
 
+// StatusBattery is a cached device battery reading in CmdStatus output.
+type StatusBattery struct {
+	Charge   int   `json:"charge"`
+	Charging bool  `json:"charging"`
+	AgeMs    int64 `json:"ageMs"`
+}
+
+// StatusDevice describes one known device in CmdStatus output.
+type StatusDevice struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Type      string         `json:"type"`
+	State     string         `json:"state"`
+	Connected bool           `json:"connected"`
+	Addr      string         `json:"addr,omitempty"`
+	Battery   *StatusBattery `json:"battery,omitempty"`
+	LastSeen  string         `json:"lastSeen,omitempty"`
+}
+
 // StatusResponse is returned by CmdStatus.
 type StatusResponse struct {
-	Version        string   `json:"version"`
-	StartedAt      string   `json:"startedAt"`
-	UptimeHuman    string   `json:"uptimeHuman"`
-	SocketPath     string   `json:"socketPath"`
-	ConfigPath     string   `json:"configPath"`
-	Plugins        []string `json:"plugins"`
-	DeviceCount    int      `json:"deviceCount"`
-	ConnectedCount int      `json:"connectedCount"`
+	Version        string         `json:"version"`
+	StartedAt      string         `json:"startedAt"`
+	UptimeHuman    string         `json:"uptimeHuman"`
+	SocketPath     string         `json:"socketPath"`
+	ConfigPath     string         `json:"configPath"`
+	TCPPort        int            `json:"tcpPort,omitempty"`
+	Plugins        []string       `json:"plugins"`
+	DeviceCount    int            `json:"deviceCount"`
+	ConnectedCount int            `json:"connectedCount"`
+	Devices        []StatusDevice `json:"devices,omitempty"`
 }
 
 // SftpInfoResponse carries cached SFTP connection details returned by CmdSftpInfo.

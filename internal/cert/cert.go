@@ -5,6 +5,7 @@
 package cert
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -16,6 +17,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -156,9 +158,13 @@ func VerifySideChannelPeer(state tls.ConnectionState, expectedFP string) error {
 	return nil
 }
 
-// VerificationKey generates a verification fingerprint used for out-of-band pairing verification.
-// It creates a SHA256 hash of the concatenated public keys to display a fingerprint.
-func VerificationKey(localCert, remoteCert *x509.Certificate) string {
+// VerificationKey generates the out-of-band pairing verification code
+// displayed to the user. It matches the reference algorithm: the DER-encoded
+// public keys are concatenated with the lexicographically larger one first,
+// followed by the initial pair request's timestamp as an ASCII decimal
+// string (protocol v8 and later; a non-positive timestamp hashes without it
+// for older peers). The code is the first 8 hex characters, uppercased.
+func VerificationKey(localCert, remoteCert *x509.Certificate, timestampSec int64) string {
 	var localKey, remoteKey []byte
 	if localCert != nil && localCert.PublicKey != nil {
 		localKey, _ = x509.MarshalPKIXPublicKey(localCert.PublicKey)
@@ -168,14 +174,19 @@ func VerificationKey(localCert, remoteCert *x509.Certificate) string {
 	}
 
 	var combined []byte
-	if string(localKey) < string(remoteKey) {
-		combined = append(localKey, remoteKey...)
-	} else {
+	if bytes.Compare(localKey, remoteKey) < 0 {
 		combined = append(remoteKey, localKey...)
+	} else {
+		combined = append(localKey, remoteKey...)
 	}
 
-	hash := sha256.Sum256(combined)
-	return hex.EncodeToString(hash[:])
+	h := sha256.New()
+	h.Write(combined)
+	if timestampSec > 0 {
+		h.Write([]byte(strconv.FormatInt(timestampSec, 10)))
+	}
+	sum := h.Sum(nil)
+	return strings.ToUpper(hex.EncodeToString(sum[:4]))
 }
 
 // TLSConfig returns the standard tls.Config used for KDE Connect.

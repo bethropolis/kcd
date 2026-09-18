@@ -57,10 +57,12 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 
 	n, err := io.Copy(f, r)
 	if err != nil {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("share: stream transfer to %s: %w", dest, err)
 	}
 
 	if n < size {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("share: transfer truncated (%d/%d bytes)", n, size)
 	}
 
@@ -84,7 +86,8 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 }
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger) error {
+// Optional SidechannelOptions bound streaming silence the same way as the dial path.
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
@@ -190,7 +193,12 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 		r = io.TeeReader(f, &progressWriter{total: size, callback: onProgress})
 	}
 
-	n, err := io.Copy(tlsConn, r)
+	var streamConn net.Conn = tlsConn
+	if len(options) > 0 {
+		streamConn = transport.WithIdleTimeout(tlsConn, options[0].IdleTimeout)
+	}
+
+	n, err := io.Copy(streamConn, r)
 	if err != nil {
 		return fmt.Errorf("stream error: %w", err)
 	}
