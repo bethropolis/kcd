@@ -51,7 +51,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger)
+		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.sidechannel)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",

@@ -43,6 +43,14 @@ func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg co
 	}
 }
 
+// pairingTimestampFor returns the stored pair-request timestamp for a
+// device, or zero if none was recorded (pre-v8 peer or unknown).
+func (p *PairPlugin) pairingTimestampFor(deviceID string) int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pairingTimestamp[deviceID]
+}
+
 // emit publishes an event to the bus if one is configured.
 func (p *PairPlugin) emit(typ events.EventType, dev *device.Device, vKey string) {
 	if p.bus == nil {

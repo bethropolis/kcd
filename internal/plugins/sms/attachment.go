@@ -94,6 +94,7 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 
 	_, err = io.Copy(f, io.LimitReader(conn, size))
 	if err != nil {
+		os.Remove(destPath) // don't leave a corrupt partial behind
 		return fmt.Errorf("sms: receive attachment data: %w", err)
 	}
 

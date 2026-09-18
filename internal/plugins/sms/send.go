@@ -8,10 +8,14 @@ import (
 // --- SMS sending -----------------------------------------------------------
 
 func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) error {
+	// v2 schema: the phone reads only messageBody, with addresses as the
+	// primary recipient list (phoneNumber stays as a legacy fallback for
+	// older peers). Without addresses/version the phone sends a blank SMS.
 	body := map[string]any{
-		"sendSms":     true,
-		"phoneNumber": phoneNumber,
+		"version":     2,
+		"addresses":   []map[string]string{{"address": phoneNumber}},
 		"messageBody": message,
+		"phoneNumber": phoneNumber,
 	}
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequest, body)
 	if err != nil {

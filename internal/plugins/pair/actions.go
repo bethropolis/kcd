@@ -12,7 +12,7 @@ import (
 
 // AcceptPairing accepts an incoming pair request.
 func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept, 0)
 	if err != nil {
 		return err
 	}
@@ -41,14 +41,16 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 		return p.AcceptPairing(dev)
 	}
 
-	pkt, err := protocol.NewPairPacket(protocol.PairAccept)
+	// The request timestamp seeds the verification code on both sides,
+	// so generate it once and send exactly what we store.
+	timestamp := time.Now().Unix()
+	pkt, err := protocol.NewPairPacket(protocol.PairAccept, timestamp)
 	if err != nil {
 		return err
 	}
 
-	// Store our timestamp
 	p.mu.Lock()
-	p.pairingTimestamp[dev.ID()] = time.Now().Unix()
+	p.pairingTimestamp[dev.ID()] = timestamp
 	p.mu.Unlock()
 
 	if err := dev.Send(pkt); err != nil {
@@ -58,10 +60,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 
 	peerCert := dev.PeerCert()
 	if peerCert != nil {
-		vKey := cert.VerificationKey(p.localCert, peerCert)
-		if len(vKey) > 16 {
-			vKey = vKey[:16]
-		}
+		vKey := cert.VerificationKey(p.localCert, peerCert, timestamp)
 		p.logger.Info("pairing verification code",
 			zap.String("device_id", dev.ID()),
 			zap.String("code", vKey))
@@ -79,7 +78,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 
 // RejectPairing rejects an incoming pair request.
 func (p *PairPlugin) RejectPairing(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	pkt, err := protocol.NewPairPacket(protocol.PairReject, 0)
 	if err != nil {
 		return err
 	}
@@ -103,7 +102,7 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 
 // Unpair removes pairing with a device.
 func (p *PairPlugin) Unpair(dev *device.Device) error {
-	pkt, err := protocol.NewPairPacket(protocol.PairReject)
+	pkt, err := protocol.NewPairPacket(protocol.PairReject, 0)
 	if err != nil {
 		return err
 	}

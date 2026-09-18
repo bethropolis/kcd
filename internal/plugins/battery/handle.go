@@ -21,6 +21,13 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 			return fmt.Errorf("battery: decode body: %w", err)
 		}
 
+		if body.Request {
+			// Stock peers ask for our state with request:true inside a
+			// regular battery packet. Answer it; an empty body would
+			// otherwise clobber the stored charge to a bogus 0%.
+			return p.sendLocalState(dev)
+		}
+
 		dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
 
 		if body.ThresholdEvent != thresholdNone {
@@ -28,23 +35,28 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 		}
 
 	case "kdeconnect.battery.request":
-		// The phone is asking for our local battery state.
-		charge, charging, err := readLocalBattery()
-		if err != nil {
-			p.logger.Debug("local battery unavailable, skipping response", zap.Error(err))
-			return nil
-		}
-		pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
-			CurrentCharge: charge,
-			IsCharging:    charging,
-		})
-		if err != nil {
-			return fmt.Errorf("battery: create response packet: %w", err)
-		}
-		return dev.Send(pkt)
+		// Legacy request type kept for older peers.
+		return p.sendLocalState(dev)
 	}
 
 	return nil
+}
+
+// sendLocalState reports the local battery to the peer.
+func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
+	charge, charging, err := readLocalBattery()
+	if err != nil {
+		p.logger.Debug("local battery unavailable, skipping response", zap.Error(err))
+		return nil
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
+		CurrentCharge: charge,
+		IsCharging:    charging,
+	})
+	if err != nil {
+		return fmt.Errorf("battery: create response packet: %w", err)
+	}
+	return dev.Send(pkt)
 }
 
 func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
@@ -89,8 +101,10 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 
 // OnConnect requests the phone's battery and sends our local battery state.
 func (p *BatteryPlugin) OnConnect(dev device.Sender) {
-	// Ask phone for its battery.
-	pkt, _ := protocol.NewPacket("kdeconnect.battery.request", map[string]any{
+	// Ask phone for its battery. Stock peers only honor request:true
+	// inside a regular battery packet; the legacy request type is kept
+	// for backward compatibility on the inbound path.
+	pkt, _ := protocol.NewPacket("kdeconnect.battery", map[string]any{
 		"request": true,
 	})
 	dev.Send(pkt)

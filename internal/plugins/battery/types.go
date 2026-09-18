@@ -38,10 +38,13 @@ func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Log
 }
 
 // BatteryBody represents the body of a kdeconnect.battery packet.
+// A body carrying only Request asks the peer to report its state; it is
+// not a state update and must never touch the stored charge.
 type BatteryBody struct {
 	CurrentCharge  int  `json:"currentCharge"`
 	IsCharging     bool `json:"isCharging"`
 	ThresholdEvent int  `json:"thresholdEvent"`
+	Request        bool `json:"request,omitempty"`
 }
 
 func (p *BatteryPlugin) Name() string           { return "Battery" }

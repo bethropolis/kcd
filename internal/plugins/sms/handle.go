@@ -65,7 +65,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 				"date":      msg.Date,
 				"type":      msg.Type,
 				"thread_id": msg.ThreadID,
-				"read":      msg.Read,
+				"read":      bool(msg.Read),
 				"event":     msg.Event,
 				"u_id":      msg.UID,
 				"sub_id":    msg.SubID,

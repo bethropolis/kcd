@@ -120,7 +120,7 @@ func (p *NotificationPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.notification"}
 }
 func (p *NotificationPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.notification.reply"}
+	return []string{"kdeconnect.notification.reply", "kdeconnect.notification.request"}
 }
 
 // nonAlphaNumeric sanitises app names to be safe for exec / notify-send args.

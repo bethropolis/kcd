@@ -8,6 +8,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
@@ -93,16 +94,16 @@ type SMSMessagesPacket struct {
 }
 
 type SMSMessage struct {
-	Event       int             `json:"event"`
-	Body        string          `json:"body"`
-	Addresses   []SMSAddress    `json:"addresses"`
-	Date        int64           `json:"date"`
-	Type        int             `json:"type"`
-	ThreadID    int64           `json:"thread_id"`
-	Read        bool            `json:"read"`
-	UID         int64           `json:"u_id,omitempty"`
-	SubID       int             `json:"sub_id,omitempty"`
-	Attachments []SMSAttachment `json:"attachments,omitempty"`
+	Event       int               `json:"event"`
+	Body        string            `json:"body"`
+	Addresses   []SMSAddress      `json:"addresses"`
+	Date        int64             `json:"date"`
+	Type        int               `json:"type"`
+	ThreadID    int64             `json:"thread_id"`
+	Read        protocol.FlexBool `json:"read"`
+	UID         int64             `json:"u_id,omitempty"`
+	SubID       int               `json:"sub_id,omitempty"`
+	Attachments []SMSAttachment   `json:"attachments,omitempty"`
 }
 
 type SMSAddress struct {

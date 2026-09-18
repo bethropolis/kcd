@@ -48,7 +48,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		// The peer sends pair:true as confirmation/keep-alive.
 		// Just acknowledge by sending pair:true back.
 		p.logger.Debug("received pair confirmation from already paired device", zap.String("device_id", dev.ID()))
-		pkt, _ := protocol.NewPairPacket(protocol.PairAccept)
+		pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
 		dev.Send(pkt)
 		return nil
 
@@ -64,7 +64,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 					zap.Int64("timestamp", body.Timestamp),
 					zap.Int64("now", now))
 				// Send rejection
-				pkt, _ := protocol.NewPairPacket(protocol.PairReject)
+				pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
 				dev.Send(pkt)
 				return nil
 			}
@@ -79,10 +79,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		var vKey string
 		peerCert := dev.PeerCert()
 		if peerCert != nil {
-			vKey = cert.VerificationKey(p.localCert, peerCert)
-			if len(vKey) > 16 {
-				vKey = vKey[:16]
-			}
+			vKey = cert.VerificationKey(p.localCert, peerCert, p.pairingTimestampFor(dev.ID()))
 			p.logger.Info("pairing verification code",
 				zap.String("device_id", dev.ID()),
 				zap.String("code", vKey))
