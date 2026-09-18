@@ -13,7 +13,7 @@ func main() {
 		"test_device_id_with_underscores",
 		"TestDevice",
 		"desktop",
-		1716,
+		protocol.DefaultTCPPort,
 		[]string{"kdeconnect.ping"},
 		[]string{"kdeconnect.ping"},
 	)

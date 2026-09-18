@@ -87,7 +87,8 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
 // Optional SidechannelOptions bound streaming silence the same way as the dial path.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger log.Logger, options ...transport.SidechannelOptions) error {
+// portMin/portMax are the configured side-channel range, used only for firewall hints.
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger log.Logger, portMin, portMax int, options ...transport.SidechannelOptions) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
@@ -110,11 +111,11 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	conn, err := ln.Accept()
 	if err != nil {
 		if acceptCtx.Err() != nil {
-			logger.Warn("share: timed out waiting for device to connect — is TCP 1739-1764 open in your firewall?",
+			logger.Warn(fmt.Sprintf("share: timed out waiting for device to connect — is TCP %d-%d open in your firewall?", portMin, portMax),
 				log.String("listen_addr", addr),
 				log.String("device_id", expectedDeviceID),
 			)
-			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow 1739:1764/tcp)", addr)
+			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow %d:%d/tcp)", addr, portMin, portMax)
 		}
 		return fmt.Errorf("accept failed: %w", err)
 	}

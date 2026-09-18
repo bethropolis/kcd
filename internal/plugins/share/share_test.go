@@ -56,7 +56,7 @@ func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
 	}
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, func(c, t int64) {}, logger)
+		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, func(c, t int64) {}, logger, cfg.PortMin, cfg.PortMax)
 	}()
 
 	// 2. Run Receiver (dial loopback)
@@ -128,7 +128,7 @@ func TestSharePlugin_SideChannelRejectsWrongFingerprint(t *testing.T) {
 	}
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, nil, logger)
+		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, nil, logger, cfg.PortMin, cfg.PortMax)
 	}()
 
 	// Dial with a wrong expected fingerprint: the receiver must refuse

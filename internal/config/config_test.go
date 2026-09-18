@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 func TestDefaults(t *testing.T) {
@@ -27,6 +28,14 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.Pairing.IntentTTL != "5m" || cfg.Pairing.ListenTimeout != "60s" || cfg.Pairing.TimeoutSecs != 30 {
 		t.Errorf("pairing defaults: %+v", cfg.Pairing)
+	}
+	if cfg.TCPPort != protocol.DefaultTCPPort {
+		t.Errorf("tcp_port default = %d, want protocol.DefaultTCPPort (%d)", cfg.TCPPort, protocol.DefaultTCPPort)
+	}
+	if cfg.Share.PortMin != protocol.DefaultSidechannelPortMin || cfg.Share.PortMax != protocol.DefaultSidechannelPortMax {
+		t.Errorf("share port range default = %d-%d, want %d-%d",
+			cfg.Share.PortMin, cfg.Share.PortMax,
+			protocol.DefaultSidechannelPortMin, protocol.DefaultSidechannelPortMax)
 	}
 	if cfg.Cache != (CacheConfig{}) || cfg.Ping.AppName != "" || cfg.Notifications.AppName() != "KDE Connect" {
 		t.Fatal("default cache paths or notification inheritance changed")

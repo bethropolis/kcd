@@ -143,7 +143,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	bc := discovery.NewBroadcasterController(identity, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 
 	// mDNS advertisement is always on: unlike UDP broadcast it is
 	// responder-only (zero idle timers), so phones keep a standing
@@ -192,7 +192,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			return fmt.Errorf("device address unknown yet, wait for discovery and retry")
 		}
 		if port == 0 {
-			port = 1716
+			port = cfg.TCPPort
 		}
 		go func() {
 			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)

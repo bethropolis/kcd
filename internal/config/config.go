@@ -1,5 +1,6 @@
 // Package config handles loading and validating the kcd daemon configuration.
-// It has zero external imports except github.com/BurntSushi/toml.
+// It imports only github.com/BurntSushi/toml and internal/protocol
+// (stdlib-only, so no import cycle is possible).
 package config
 
 import (
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 // Config holds all daemon configuration.
@@ -63,7 +65,7 @@ func Defaults() *Config {
 	c.KeyFile = configPath("key.pem", false)
 	c.SocketPath = DefaultSocketPath()
 	c.DownloadDir = filepath.Join(home, "Downloads", "kcd")
-	c.TCPPort = 1716
+	c.TCPPort = protocol.DefaultTCPPort
 	c.LogLevel = "info"
 
 	c.Network = NetworkConfig{DialTimeout: "5s", HandshakeTimeout: "10s", SidechannelTimeout: "15s", TransferIdleTimeout: "60s"}

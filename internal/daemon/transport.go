@@ -210,7 +210,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		// announcement. Pairing mode and explicit `kcd pair <id>` bypass.
 	}
 
-	udpListener := discovery.NewListener(1716, localDeviceID, onDeviceFound, logger)
+	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
 	go udpListener.Run(ctx)
 
 	// Accept loop

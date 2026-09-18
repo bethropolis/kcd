@@ -39,7 +39,7 @@ These structural constraints must hold at all times:
 | Invariant | Why |
 |---|---|
 | `internal/protocol/` has **zero external imports** (stdlib only) | Protocol types are used everywhere; external deps would create cycles |
-| `internal/config/` only imports `github.com/BurntSushi/toml` | Config must stay lean and cycle-free |
+| `internal/config/` only imports `github.com/BurntSushi/toml` and `internal/protocol` | Config must stay lean and cycle-free (`protocol` is stdlib-only, so no cycle is possible) |
 | `internal/plugin/plugin.go` only imports `internal/protocol` and `internal/device` | Plugins never import each other |
 | Plugins are registered in `daemon.go`, never in their own `init()` | Explicit, ordered, conditional on config |
 | `pkg/client/` only imports `internal/device`, `internal/events`, `internal/ipc`, and `internal/plugins/contacts` from the `internal/` tree | Public client API must not depend on internals beyond the IPC protocol and the types it surfaces |
