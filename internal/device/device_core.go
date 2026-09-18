@@ -30,7 +30,8 @@ type Device struct {
 	// lastPort is the tcpPort the peer last advertised over the authenticated
 	// (post-TLS) identity exchange. Used with lastIP as the dial target for
 	// paired devices so unauthenticated discovery packets can never redirect
-	// a paired auto-dial. Zero means unknown (fall back to 1716).
+	// a paired auto-dial. Zero means unknown (fall back to the configured
+	// tcp_port, protocol.DefaultTCPPort by default).
 	lastPort int
 
 	// discoveryIP/discoveryPort remember where a device was last seen

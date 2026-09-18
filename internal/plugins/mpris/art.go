@@ -56,7 +56,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 
 	go func() {
-		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger)
+		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger, shareCfg.PortMin, shareCfg.PortMax)
 	}()
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{

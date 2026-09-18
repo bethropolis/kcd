@@ -3,12 +3,14 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 // Check is the result of a single diagnostic check.
@@ -47,11 +49,12 @@ func Run() []Check {
 		checks = append(checks, checkBin("wtype", "wtype", "install wtype for Wayland keyboard input"))
 	}
 
-	// port 1716/udp open
-	checks = append(checks, checkUDPPort(daemonCheck.Pass))
+	// port <tcp_port>/udp open (configured tcp_port, 1716 by default)
+	tcpPort := configuredTCPPort()
+	checks = append(checks, checkUDPPort(daemonCheck.Pass, tcpPort))
 
-	// port 1716/tcp open
-	checks = append(checks, checkTCPPort(daemonCheck.Pass))
+	// port <tcp_port>/tcp open
+	checks = append(checks, checkTCPPort(daemonCheck.Pass, tcpPort))
 
 	// config file readable
 	checks = append(checks, checkConfigFile())
@@ -60,6 +63,16 @@ func Run() []Check {
 	checks = append(checks, checkCertFile())
 
 	return checks
+}
+
+// configuredTCPPort returns tcp_port from the on-disk config, falling back
+// to the protocol default when the config is missing or unset.
+func configuredTCPPort() int {
+	cfg, err := config.Load(config.DefaultConfigPath())
+	if err != nil || cfg.TCPPort == 0 {
+		return protocol.DefaultTCPPort
+	}
+	return cfg.TCPPort
 }
 
 func checkDaemon() Check {
@@ -91,30 +104,32 @@ func checkAny(name, hint string, bins ...string) Check {
 	return Check{Name: name, Detail: hint, Pass: false}
 }
 
-func checkUDPPort(daemonRunning bool) Check {
+func checkUDPPort(daemonRunning bool, port int) Check {
+	name := fmt.Sprintf("port %d/udp open", port)
 	if daemonRunning {
-		return Check{Name: "port 1716/udp open", Pass: true}
+		return Check{Name: name, Pass: true}
 	}
 	var lc net.ListenConfig
-	l, err := lc.ListenPacket(context.Background(), "udp", ":1716")
+	l, err := lc.ListenPacket(context.Background(), "udp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		return Check{Name: "port 1716/udp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
+		return Check{Name: name, Detail: "port is blocked or in use: " + err.Error(), Pass: false}
 	}
 	l.Close()
-	return Check{Name: "port 1716/udp open", Pass: true}
+	return Check{Name: name, Pass: true}
 }
 
-func checkTCPPort(daemonRunning bool) Check {
+func checkTCPPort(daemonRunning bool, port int) Check {
+	name := fmt.Sprintf("port %d/tcp open", port)
 	if daemonRunning {
-		return Check{Name: "port 1716/tcp open", Pass: true}
+		return Check{Name: name, Pass: true}
 	}
 	var lc net.ListenConfig
-	l, err := lc.Listen(context.Background(), "tcp", ":1716")
+	l, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		return Check{Name: "port 1716/tcp open", Detail: "port is blocked or in use: " + err.Error(), Pass: false}
+		return Check{Name: name, Detail: "port is blocked or in use: " + err.Error(), Pass: false}
 	}
 	l.Close()
-	return Check{Name: "port 1716/tcp open", Pass: true}
+	return Check{Name: name, Pass: true}
 }
 
 func checkConfigFile() Check {

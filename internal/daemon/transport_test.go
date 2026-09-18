@@ -141,7 +141,7 @@ func TestShouldDiscoveryDialThrottle(t *testing.T) {
 }
 
 func newTestIdentity() (*protocol.Packet, error) {
-	return protocol.NewIdentityPacket("test-id", "Test", "desktop", 1716, nil, nil)
+	return protocol.NewIdentityPacket("test-id", "Test", "desktop", protocol.DefaultTCPPort, nil, nil)
 }
 
 func TestSyncReconnectBroadcast(t *testing.T) {
@@ -152,7 +152,7 @@ func TestSyncReconnectBroadcast(t *testing.T) {
 		t.Fatalf("identity: %v", err)
 	}
 	newBC := func() *discovery.BroadcasterController {
-		return discovery.NewBroadcasterController(identity, time.Hour, logger, nil)
+		return discovery.NewBroadcasterController(identity, protocol.DefaultTCPPort, time.Hour, logger, nil)
 	}
 
 	// Offline paired device starts the reconnect broadcast.
