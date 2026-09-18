@@ -2,12 +2,18 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -189,5 +195,69 @@ func TestSyncReconnectBroadcast(t *testing.T) {
 	bc3.Stop()
 	if bc3.IsRunning() {
 		t.Error("pairing stop must end an unowned loop")
+	}
+}
+
+// A manual connect-by-IP dial must not address the pre-TLS identity to any
+// device: stock peers close identities carrying a foreign targetDeviceId,
+// so the field has to stay absent. Dials with a known target keep it.
+func TestDialPreTLSIdentityTarget(t *testing.T) {
+	cases := []struct {
+		name       string
+		targetID   string
+		wantTarget string // empty means the key must be absent
+	}{
+		{"manual dial omits target", "", ""},
+		{"known target kept", "peer-device-id", "peer-device-id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			got := make(chan []byte, 1)
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer c.Close()
+				pkt, _, err := transport.ReadPlaintextPacket(c)
+				if err != nil {
+					return
+				}
+				defer protocol.ReleasePacket(pkt)
+				got <- append([]byte(nil), pkt.Body...)
+			}()
+			cfg := config.Defaults()
+			pkt, err := protocol.NewIdentityPacket("local", "Local", "desktop", cfg.TCPPort, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logger := zap.NewNop()
+			addr := ln.Addr().(*net.TCPAddr)
+			DialDevice(context.Background(), addr.IP, addr.Port, tc.targetID, protocol.ProtocolVersion, pkt, &tls.Config{}, device.NewRegistry(nil), plugin.NewRegistry(logger), "local", logger, true, cfg)
+			select {
+			case body := <-got:
+				var fields map[string]any
+				if err := json.Unmarshal(body, &fields); err != nil {
+					t.Fatalf("unmarshal pre-TLS body: %v", err)
+				}
+				v, present := fields["targetDeviceId"]
+				if tc.wantTarget == "" {
+					if present {
+						t.Errorf("targetDeviceId present with %v, want absent", v)
+					}
+					return
+				}
+				if !present || v != tc.wantTarget {
+					t.Errorf("targetDeviceId = %v, want %q", v, tc.wantTarget)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timed out waiting for pre-TLS identity")
+			}
+		})
 	}
 }

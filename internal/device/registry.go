@@ -115,20 +115,20 @@ func (r *Registry) Prune(threshold time.Duration) int {
 
 // ReconnectBackoff calculates exponential backoff duration based on attempts.
 // Caps out at maxDuration.
-func ReconnectBackoff(attempt int, maxDuration time.Duration) time.Duration {
-	if attempt <= 0 {
-		return 2 * time.Second
+func ReconnectBackoff(attempt int, maxDuration time.Duration, initial ...time.Duration) time.Duration {
+	base := 2 * time.Second
+	if len(initial) > 0 && initial[0] > 0 {
+		base = initial[0]
 	}
-	// Guard against shift overflow. On 64-bit, 1<<attempt overflows int64
-	// when attempt >= 54 (producing 0 due to modular multiplication), and
-	// on 32-bit, 1<<32 wraps to 0. Cap early — the backoff is already
-	// enormous at attempt=30 (~68 years if uncapped).
-	if attempt >= 31 {
-		return maxDuration
+	if maxDuration <= 0 {
+		return 0
 	}
-	dur := time.Duration(1<<attempt) * 2 * time.Second
-	if dur > maxDuration || dur <= 0 {
-		return maxDuration
+	delay := min(base, maxDuration)
+	for i := 0; i < attempt && delay < maxDuration; i++ {
+		if delay > maxDuration/2 {
+			return maxDuration
+		}
+		delay *= 2
 	}
-	return dur
+	return delay
 }

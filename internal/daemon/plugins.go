@@ -28,38 +28,43 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/sms"
 	"github.com/bethropolis/kcd/internal/plugins/systemvolume"
 	"github.com/bethropolis/kcd/internal/plugins/telephony"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
 func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger *zap.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
+	sidechannel := transport.SidechannelOptions{
+		Timeout:     config.Duration(cfg.Network.SidechannelTimeout),
+		IdleTimeout: config.Duration(cfg.Network.TransferIdleTimeout),
+	}
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
 	if cfg.Plugins.Battery {
-		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger))
+		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger))
+		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger, sidechannel))
 	}
 	if cfg.Plugins.Clipboard {
-		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect))
+		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel))
 	}
 	if cfg.Plugins.Share {
-		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger))
+		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger, sidechannel))
 	}
 	if cfg.Plugins.RunCommand {
 		plugins.Register(runcommand.NewRunCommandPlugin(cfg.Commands, cfg.CommandsPerDevice, logger))
 	}
 	if cfg.Plugins.Ping {
-		plugins.Register(ping.NewPingPlugin(cfg.Ping, bus, logger))
+		plugins.Register(ping.NewPingPlugin(cfg.Ping, bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Telephony {
-		plugins.Register(telephony.NewTelephonyPlugin(bus, logger))
+		plugins.Register(telephony.NewTelephonyPlugin(bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Connectivity {
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, cfg.Plugins.PauseMusic, logger))
+		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, cfg.Plugins.PauseMusic, logger, cfg.Cache.AlbumArtDir))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
@@ -83,10 +88,14 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(systemvolume.NewSystemVolumePlugin(bus, logger))
 	}
 	if cfg.Plugins.SMS {
-		plugins.Register(sms.NewSMSPlugin(cfg.SMS, bus, tlsCfg, logger))
+		plugins.Register(sms.NewSMSPlugin(cfg.SMS, bus, tlsCfg, logger, sms.Options{
+			CacheDir:      cfg.Cache.SMSAttachmentsDir,
+			Sidechannel:   sidechannel,
+			Notifications: cfg.Notifications,
+		}))
 	}
 	if cfg.Plugins.Contacts {
-		plugins.Register(contacts.NewContactsPlugin(bus, logger))
+		plugins.Register(contacts.NewContactsPlugin(bus, logger, cfg.Cache.ContactsDir))
 	}
 	if cfg.Plugins.RemoteSystemVolume {
 		plugins.Register(remotesystemvolume.NewRemoteSystemVolumePlugin(bus, logger))

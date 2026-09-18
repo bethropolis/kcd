@@ -153,3 +153,26 @@ func TestBatteryPlugin_Handle_NoThreshold_NoEvent(t *testing.T) {
 		// correct — no event
 	}
 }
+
+func TestBatteryPlugin_Handle_RequestDoesNotClobberCharge(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	p, _ := newPlugin(t)
+	dev := device.NewDevice("dev1", "Test Phone", "phone", logger)
+	dev.UpdateBattery(85, true)
+
+	// Stock peers ask for our state with request:true inside a regular
+	// battery packet. It must be answered, never stored as a 0% update.
+	pkt, _ := protocol.NewPacket("kdeconnect.battery", map[string]any{"request": true})
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	if charge, charging := dev.GetBattery(); charge != 85 || !charging {
+		t.Errorf("request packet clobbered charge: got (%d, %v), want (85, true)", charge, charging)
+	}
+
+	// The connect-time exchange must not touch stored state either.
+	p.OnConnect(dev)
+	if charge, charging := dev.GetBattery(); charge != 85 || !charging {
+		t.Errorf("OnConnect clobbered charge: got (%d, %v), want (85, true)", charge, charging)
+	}
+}

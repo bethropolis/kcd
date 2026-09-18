@@ -85,7 +85,9 @@ type PingConfig struct {
 }
 
 type PairingConfig struct {
-	TimeoutSecs int `toml:"timeout_secs"`
+	TimeoutSecs   int    `toml:"timeout_secs"`
+	IntentTTL     string `toml:"intent_ttl"`
+	ListenTimeout string `toml:"listen_timeout"`
 }
 
 type MousepadConfig struct {
@@ -165,12 +167,15 @@ func (c *SFTPConfig) Defaults() {
 }
 
 func (c *PingConfig) Defaults() {
-	c.AppName = "KDE Connect"
+	// Empty inherits Notifications.AppName(); a non-empty value overrides it.
+	c.AppName = ""
 	c.Icon = "smartphone"
 }
 
 func (c *PairingConfig) Defaults() {
 	c.TimeoutSecs = 30
+	c.IntentTTL = "5m"
+	c.ListenTimeout = "60s"
 }
 
 func (c *MousepadConfig) Defaults() {

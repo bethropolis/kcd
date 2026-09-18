@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -13,22 +14,28 @@ import (
 )
 
 type TelephonyPlugin struct {
-	bus    *events.Bus
-	logger *zap.Logger
+	notifications config.NotificationConfig
+	bus           *events.Bus
+	logger        *zap.Logger
 }
 
-func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger) *TelephonyPlugin {
+func NewTelephonyPlugin(bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *TelephonyPlugin {
+	var notificationCfg config.NotificationConfig
+	if len(notifications) > 0 {
+		notificationCfg = notifications[0]
+	}
 	return &TelephonyPlugin{
-		bus:    bus,
-		logger: logger.With(zap.String("plugin", "telephony")),
+		notifications: notificationCfg,
+		bus:           bus,
+		logger:        logger.With(zap.String("plugin", "telephony")),
 	}
 }
 
 type TelephonyBody struct {
-	Event       string `json:"event"` // "ringing", "talking", "missed"
-	ContactName string `json:"contactName"`
-	PhoneNumber string `json:"phoneNumber"`
-	IsCancel    bool   `json:"isCancel"`
+	Event       string            `json:"event"` // "ringing", "talking", "missedCall"
+	ContactName string            `json:"contactName"`
+	PhoneNumber string            `json:"phoneNumber"`
+	IsCancel    protocol.FlexBool `json:"isCancel"`
 }
 
 func (p *TelephonyPlugin) Name() string            { return "Telephony" }
@@ -44,16 +51,21 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		return err
 	}
 
+	canceled := bool(body.IsCancel)
 	if p.bus != nil {
-		if body.IsCancel {
+		if canceled {
 			p.bus.Publish(events.TypeTelephonyCanceled, dev.ID(), body)
 		} else {
-			p.bus.Publish(events.EventType("telephony."+body.Event), dev.ID(), body)
+			eventType := events.EventType("telephony." + body.Event)
+			if body.Event == "missedCall" {
+				eventType = events.TypeTelephonyMissed
+			}
+			p.bus.Publish(eventType, dev.ID(), body)
 		}
 	}
 
 	go func() {
-		if body.IsCancel {
+		if canceled {
 			return
 		}
 
@@ -69,14 +81,14 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			title = "📞 Incoming Call"
 			message = "Ringing: " + caller
 			urgency = "critical"
-		case "missed":
+		case "missed", "missedCall":
 			title = "❌ Missed Call"
 			message = "Missed call from " + caller
 		default:
 			return
 		}
 
-		plugin.RunCommandAsync(p.logger, "notify-send", "-a", "KDE Connect", "-u", urgency, title, message)
+		plugin.RunCommandAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
 	}()
 
 	return nil

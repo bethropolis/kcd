@@ -12,6 +12,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/transport"
 	"go.uber.org/zap"
 )
 
@@ -30,42 +31,16 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger) error {
+func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
 	if size < 0 {
 		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
 	}
 
-	addr := fmt.Sprintf("%s:%d", ip.String(), port)
-
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
-		Config: tlsConfig,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
 	if err != nil {
-		return fmt.Errorf("share: dial side-channel %s: %w", addr, err)
+		return err
 	}
 	defer conn.Close()
-
-	// The phone's TLS cert isn't verified against the paired fingerprint by
-	// default (self-signed), so confirm the peer is the device we expect
-	// before pulling bytes from it.
-	if tlsConn, ok := conn.(*tls.Conn); !ok {
-		return fmt.Errorf("share: side-channel connection is not TLS")
-	} else if expectedFP == "" {
-		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
-			zap.String("remote_addr", addr))
-	} else if err := cert.VerifySideChannelPeer(tlsConn.ConnectionState(), expectedFP); err != nil {
-		logger.Error("share: side-channel peer verification failed",
-			zap.String("remote_addr", addr),
-			zap.String("expected_fp", expectedFP),
-			zap.Error(err),
-		)
-		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
-	}
 
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
@@ -82,10 +57,12 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 
 	n, err := io.Copy(f, r)
 	if err != nil {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("share: stream transfer to %s: %w", dest, err)
 	}
 
 	if n < size {
+		os.Remove(dest) // don't leave a corrupt partial behind
 		return fmt.Errorf("share: transfer truncated (%d/%d bytes)", n, size)
 	}
 
@@ -109,7 +86,8 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 }
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger) error {
+// Optional SidechannelOptions bound streaming silence the same way as the dial path.
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
@@ -215,7 +193,12 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 		r = io.TeeReader(f, &progressWriter{total: size, callback: onProgress})
 	}
 
-	n, err := io.Copy(tlsConn, r)
+	var streamConn net.Conn = tlsConn
+	if len(options) > 0 {
+		streamConn = transport.WithIdleTimeout(tlsConn, options[0].IdleTimeout)
+	}
+
+	n, err := io.Copy(streamConn, r)
 	if err != nil {
 		return fmt.Errorf("stream error: %w", err)
 	}

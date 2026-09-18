@@ -159,12 +159,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()
-	identity, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", 1716, incomingCaps, outgoingCaps)
+	identity, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", cfg.TCPPort, incomingCaps, outgoingCaps)
 	if err != nil {
 		return err
 	}
 
-	bc := discovery.NewBroadcasterController(identity, 30*time.Second, logger, devices.AllPairedDevicesConnected)
+	bc := discovery.NewBroadcasterController(identity, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 
 	// mDNS advertisement is always on: unlike UDP broadcast it is
 	// responder-only (zero idle timers), so phones keep a standing
@@ -189,6 +189,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// 5. IPC Server
 	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
+	handler.SetPairListenTimeout(config.Duration(cfg.Pairing.ListenTimeout))
 
 	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
 
@@ -204,7 +205,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		if dev.State() == device.StatePaired {
 			return fmt.Errorf("device already paired")
 		}
-		dev.RequestPairDial()
+		dev.RequestPairDial(config.Duration(cfg.Pairing.IntentTTL))
 		ip, port := dev.DiscoveryAddr()
 		if ip == nil {
 			// No address yet — the flagged dial fires on the next
@@ -215,7 +216,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			port = 1716
 		}
 		go func() {
-			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true)
+			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
 			if !dev.IsConnected() {
 				logger.Warn("on-demand pair dial failed", zap.String("device_id", deviceID))
 				return
@@ -249,7 +250,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	// 6. Transport Layer
-	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger)
+	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg)
 
 	// Wait for context cancellation (SIGTERM)
 	if notifySocket := os.Getenv("NOTIFY_SOCKET"); notifySocket != "" {
@@ -294,7 +295,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 				// Reload notification filters.
 				if pl, ok := plugins.GetByName("Notification"); ok {
-					pl.(*notification.NotificationPlugin).SetFilters(newCfg.Notifications)
+					pl.(*notification.NotificationPlugin).SetFilters(newCfg.Notifications.Filters())
 					logger.Info("reloaded notification filters")
 				}
 
