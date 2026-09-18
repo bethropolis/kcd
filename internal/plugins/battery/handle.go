@@ -4,67 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"go.uber.org/zap"
 )
-
-// ThresholdEvent values from the KDE Connect protocol.
-const (
-	thresholdNone = 0
-	thresholdLow  = 1 // battery is low (typically <= 15%)
-	thresholdFull = 2 // battery reached full charge
-)
-
-// BatteryPlugin handles incoming battery state updates.
-type BatteryPlugin struct {
-	notifications config.NotificationConfig
-	cfg           config.BatteryConfig
-	bus           *events.Bus
-	logger        *zap.Logger
-}
-
-// NewBatteryPlugin creates a BatteryPlugin.
-func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *BatteryPlugin {
-	var notificationCfg config.NotificationConfig
-	if len(notifications) > 0 {
-		notificationCfg = notifications[0]
-	}
-	return &BatteryPlugin{
-		notifications: notificationCfg,
-		cfg:           cfg,
-		bus:           bus,
-		logger:        logger.With(zap.String("plugin", "battery")),
-	}
-}
-
-// BatteryBody represents the body of a kdeconnect.battery packet.
-// A body carrying only Request asks the peer to report its state; it is
-// not a state update and must never touch the stored charge.
-type BatteryBody struct {
-	CurrentCharge  int  `json:"currentCharge"`
-	IsCharging     bool `json:"isCharging"`
-	ThresholdEvent int  `json:"thresholdEvent"`
-	Request        bool `json:"request,omitempty"`
-}
-
-func (p *BatteryPlugin) Name() string           { return "Battery" }
-func (p *BatteryPlugin) Timeout() time.Duration { return 5 * time.Second }
-func (p *BatteryPlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
-}
-func (p *BatteryPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
-}
 
 // Handle processes incoming battery packets.
 func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -177,58 +123,3 @@ func (p *BatteryPlugin) OnConnect(dev device.Sender) {
 }
 
 func (p *BatteryPlugin) OnDisconnect(_ device.Sender) {}
-
-// powerSupplyRoots lists paths to check for battery sysfs entries.
-var powerSupplyRoots = []string{
-	"/sys/class/power_supply",
-	"/sys/devices/platform/subsystem/power_supply",
-}
-
-// readLocalBattery reads the local battery state from sysfs.
-// Returns charge (0-100), charging status, and any error.
-// If no battery is found, returns an error — callers should log and skip.
-func readLocalBattery() (int, bool, error) {
-	for _, root := range powerSupplyRoots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			name := e.Name()
-			if !strings.HasPrefix(name, "BAT") {
-				continue
-			}
-			base := filepath.Join(root, name)
-
-			// Read capacity (0-100)
-			capRaw, err := os.ReadFile(filepath.Join(base, "capacity"))
-			if err != nil {
-				continue
-			}
-			capacity, err := strconv.Atoi(strings.TrimSpace(string(capRaw)))
-			if err != nil {
-				continue
-			}
-
-			// Read status (Charging/Discharging/Full/Unknown)
-			statusRaw, _ := os.ReadFile(filepath.Join(base, "status"))
-			status := strings.TrimSpace(string(statusRaw))
-			charging := status == "Charging"
-
-			return capacity, charging, nil
-		}
-	}
-
-	return 0, false, errNoBattery
-}
-
-// errNoBattery is returned when no battery sysfs entry is found.
-var errNoBattery = &noBatteryError{}
-
-type noBatteryError struct{}
-
-func (e *noBatteryError) Error() string { return "no battery found" }
-func (e *noBatteryError) Is(target error) bool {
-	_, ok := target.(*noBatteryError)
-	return ok
-}
