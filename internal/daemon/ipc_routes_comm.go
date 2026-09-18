@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
-
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
@@ -16,136 +14,73 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 	if cfg.Plugins.SMS {
 		handler.Register(ipc.CmdSendSMS, func(req ipc.Request) ipc.Response {
 			var p ipc.SMSPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SMS")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sms.SMSPlugin).SendSMS(dev, p.PhoneNumber, p.Message); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*sms.SMSPlugin).SendSMS(dev, p.PhoneNumber, p.Message); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 
 		handler.Register(ipc.CmdSmsRequestConvs, func(req ipc.Request) ipc.Response {
 			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SMS")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sms.SMSPlugin).RequestConversations(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*sms.SMSPlugin).RequestConversations(dev); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 
 		handler.Register(ipc.CmdSmsRequestConv, func(req ipc.Request) ipc.Response {
 			var p ipc.SMSConvPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SMS")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sms.SMSPlugin).RequestConversation(dev, p.ThreadID, p.RangeStartTimestamp, p.NumberToRequest); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*sms.SMSPlugin).RequestConversation(dev, p.ThreadID, p.RangeStartTimestamp, p.NumberToRequest); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 
 		handler.Register(ipc.CmdSmsRequestAttachment, func(req ipc.Request) ipc.Response {
 			var p ipc.SMSAttachmentPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("SMS")
-			if !ok {
-				return ipc.Response{OK: false, Error: "sms plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*sms.SMSPlugin).RequestAttachment(dev, p.PartID, p.UniqueIdentifier); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*sms.SMSPlugin).RequestAttachment(dev, p.PartID, p.UniqueIdentifier); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 	}
 	if cfg.Plugins.Telephony {
 		handler.Register(ipc.CmdCallMute, func(req ipc.Request) ipc.Response {
 			var p ipc.DevicePayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("Telephony")
-			if !ok {
-				return ipc.Response{OK: false, Error: "telephony plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*telephony.TelephonyPlugin).Mute(dev); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "Telephony", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*telephony.TelephonyPlugin).Mute(dev); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 	}
 	if cfg.Plugins.Notification {
 		handler.Register(ipc.CmdNotifyReply, func(req ipc.Request) ipc.Response {
 			var p ipc.NotifyReplyPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("Notification")
-			if !ok {
-				return ipc.Response{OK: false, Error: "notification plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*notification.NotificationPlugin).RequestReply(dev, p.ReplyID, p.Message); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "Notification", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*notification.NotificationPlugin).RequestReply(dev, p.ReplyID, p.Message); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 		handler.Register(ipc.CmdNotifyDismiss, func(req ipc.Request) ipc.Response {
 			var p ipc.NotifyDismissPayload
-			if err := json.Unmarshal(req.Payload, &p); err != nil {
-				return ipc.Response{OK: false, Error: "invalid payload"}
-			}
-			pl, ok := plugins.GetByName("Notification")
-			if !ok {
-				return ipc.Response{OK: false, Error: "notification plugin not enabled"}
-			}
-			dev, ok := devices.Get(p.DeviceID)
-			if !ok {
-				return ipc.Response{OK: false, Error: "device not found"}
-			}
-			if err := pl.(*notification.NotificationPlugin).Dismiss(dev, p.NotificationID); err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-			return ipc.Response{OK: true}
+			return deviceRoute(req, &p, devices, plugins, "Notification", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				if err := pl.(*notification.NotificationPlugin).Dismiss(dev, p.NotificationID); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
 		})
 	}
 }

@@ -27,7 +27,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	}
 
 	if cfg.Plugins.Battery {
-		registerBatteryRoutes(handler, devices)
+		registerBatteryRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.Connectivity {
 		registerConnectivityRoutes(handler, devices, plugins)
@@ -39,7 +39,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		registerContactsRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.RunCommand {
-		registerRunCommandRoutes(handler, devices)
+		registerRunCommandRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.Share {
 		registerShareRoutes(handler, devices, plugins)
@@ -171,7 +171,6 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			return ipc.Response{OK: false, Error: "mpris plugin not enabled"}
 		}
 		status := pl.(*mpris.MPRISPlugin).DebugStatus()
-		data, _ := json.Marshal(status)
-		return ipc.Response{OK: true, Data: data}
+		return jsonOK(status)
 	})
 }
