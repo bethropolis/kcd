@@ -69,6 +69,10 @@ func registerMprisRoutes(handler *ipc.Handler, devices *device.Registry, plugins
 		}
 		mprisPl := pl.(*mpris.MPRISPlugin)
 
+		// User-initiated query: heal any signal drift first so the
+		// listing below reflects current bus truth.
+		mprisPl.RequestReconcile()
+
 		// Request fresh state from all connected devices (fires requests asynchronously)
 		for _, d := range devices.List() {
 			if d.IsConnected() {

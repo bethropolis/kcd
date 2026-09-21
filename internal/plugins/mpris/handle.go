@@ -38,6 +38,11 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	if body.RequestPlayerList {
+		// The phone asks for current truth: heal any signal drift first
+		// (async — the answer below goes out from the current map and the
+		// reconcile follow-up broadcasts corrections). Handle stays
+		// non-blocking per the plugin contract.
+		p.requestReconcile()
 		return p.sendPlayerList(dev)
 	}
 

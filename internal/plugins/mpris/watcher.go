@@ -101,24 +101,30 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		var owner string
 		if err := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, e.busName).Store(&owner); err == nil {
 			uniqueToDisplay[owner] = e.identity
-			_ = conn.AddMatchSignal(
+			if err := conn.AddMatchSignal(
 				dbus.WithMatchSender(e.busName),
 				dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 				dbus.WithMatchMember("PropertiesChanged"),
-			)
-			_ = conn.AddMatchSignal(
+			); err != nil {
+				p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
+			}
+			if err := conn.AddMatchSignal(
 				dbus.WithMatchSender(e.busName),
 				dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
 				dbus.WithMatchMember("Seeked"),
-			)
+			); err != nil {
+				p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
+			}
 			p.addPlayer(e.busName, owner, e.identity, e.shortName)
 		}
 	}
 
-	_ = conn.AddMatchSignal(
+	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
-	)
+	); err != nil {
+		return err
+	}
 
 	ch := make(chan *dbus.Signal, 64)
 	conn.Signal(ch)
@@ -127,6 +133,8 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-p.reconcileCh:
+			p.reconcilePlayers(conn, uniqueToDisplay)
 		case sig := <-ch:
 			if sig == nil {
 				continue

@@ -31,6 +31,11 @@ type MPRISPlugin struct {
 	watching        bool
 	telephonyCancel context.CancelFunc
 
+	// reconcileCh nudges the D-Bus watcher loop to re-list player names
+	// and heal drift. Buffered size 1 so bursts of triggers coalesce;
+	// sends are non-blocking. Event-driven only — no timers.
+	reconcileCh chan struct{}
+
 	players          map[string]*trackedPlayer
 	lastTracks       map[string]trackIdentity
 	lastStates       map[string]*NowPlaying
@@ -79,6 +84,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		positionTrackers:  make(map[string]*remotePositionTracker),
 		callPausedPlayers: make([]string, 0),
 		artCache:          NewArtCache(logger, cacheDirs...),
+		reconcileCh:       make(chan struct{}, 1),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
@@ -101,6 +107,19 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 
 func (p *MPRISPlugin) Name() string           { return "MPRIS" }
 func (p *MPRISPlugin) Timeout() time.Duration { return 5 * time.Second }
+
+// requestReconcile asks the D-Bus watcher loop to re-list player names
+// and heal any drift. Non-blocking: a pending request already covers us.
+func (p *MPRISPlugin) requestReconcile() {
+	select {
+	case p.reconcileCh <- struct{}{}:
+	default:
+	}
+}
+
+// RequestReconcile is the exported hook for daemon IPC routes (e.g. the
+// remote-state listing) so user-initiated queries heal drift too.
+func (p *MPRISPlugin) RequestReconcile() { p.requestReconcile() }
 func (p *MPRISPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
 }

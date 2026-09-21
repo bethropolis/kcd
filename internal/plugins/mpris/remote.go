@@ -168,6 +168,7 @@ func (p *MPRISPlugin) ActivePlayers() []string {
 
 func (p *MPRISPlugin) OnConnect(dev device.Sender) {
 	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
+	p.requestReconcile()
 	go p.requestPlayerListPeriodic(dev)
 }
 
