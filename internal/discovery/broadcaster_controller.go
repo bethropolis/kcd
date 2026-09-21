@@ -33,10 +33,15 @@ type BroadcasterController struct {
 	owners  map[string]struct{}
 }
 
+// defaultIdleInterval is the broadcast period while idle (all pairs
+// connected, no pairing owner): quiet enough to sip battery, frequent
+// enough that a roamed phone finds us back within a minute.
+const defaultIdleInterval = 60 * time.Second
+
 // NewBroadcasterController creates a controller that starts in stopped state.
 // port is the UDP discovery port broadcasts target (normally cfg.TCPPort).
 func NewBroadcasterController(identity *protocol.Packet, port int, interval time.Duration, logger log.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
-	idle := 60 * time.Second
+	idle := defaultIdleInterval
 	if len(idleInterval) > 0 && idleInterval[0] > 0 {
 		idle = idleInterval[0]
 	}

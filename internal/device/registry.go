@@ -113,10 +113,14 @@ func (r *Registry) Prune(threshold time.Duration) int {
 	return pruned
 }
 
+// reconnectBackoffBase is the first retry delay for reconnect backoff;
+// callers may override it via the initial parameter (tests do).
+const reconnectBackoffBase = 2 * time.Second
+
 // ReconnectBackoff calculates exponential backoff duration based on attempts.
 // Caps out at maxDuration.
 func ReconnectBackoff(attempt int, maxDuration time.Duration, initial ...time.Duration) time.Duration {
-	base := 2 * time.Second
+	base := reconnectBackoffBase
 	if len(initial) > 0 && initial[0] > 0 {
 		base = initial[0]
 	}

@@ -22,6 +22,10 @@ type SidechannelOptions struct {
 	IdleTimeout time.Duration
 }
 
+// defaultSetupTimeout bounds side-channel establishment (TCP dial + TLS
+// handshake) when the caller passes no explicit timeout.
+const defaultSetupTimeout = 15 * time.Second
+
 // DialSidechannel connects as a TLS client and verifies the paired certificate
 // before returning any payload bytes. The caller owns and must close the result.
 // Once established, payload streaming carries no absolute deadline — only the
@@ -38,14 +42,14 @@ func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Co
 		opts = options[0]
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 15 * time.Second
+		opts.Timeout = defaultSetupTimeout
 	}
 	addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 	// One wall-clock budget covers everything before payload streaming:
 	// the TCP connect and the TLS handshake together.
 	setupCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	dialer := net.Dialer{Timeout: opts.Timeout, KeepAlive: 30 * time.Second}
+	dialer := net.Dialer{Timeout: opts.Timeout, KeepAlive: keepAliveIdle}
 	raw, err := dialer.DialContext(setupCtx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("side-channel: dial %s: %w", addr, err)
