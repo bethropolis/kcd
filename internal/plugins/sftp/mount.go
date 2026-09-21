@@ -15,6 +15,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 )
 
 // sshUserPattern allows the generated Android SFTP usernames (alphanumerics,
@@ -238,13 +239,15 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 		}
 	}
 
-	// Ensure the mount point is released.
+	// Ensure the mount point is released (bounded: a wedged FUSE mount
+	// must not hang Unmount forever).
 	tool := "fusermount3"
 	if _, err := exec.LookPath(tool); err != nil {
 		tool = "fusermount"
 	}
-
-	if out, err := exec.CommandContext(context.Background(), tool, "-u", mountPoint).CombinedOutput(); err != nil {
+	unmountCtx, unmountCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer unmountCancel()
+	if out, err := plugin.RunCommandSync(unmountCtx, tool, "-u", mountPoint); err != nil {
 		p.logger.Warn("fusermount cleanup failed",
 			log.String("mount_point", mountPoint),
 			log.Error(err),

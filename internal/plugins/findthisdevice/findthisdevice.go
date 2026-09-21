@@ -3,13 +3,13 @@ package findthisdevice
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -66,8 +66,7 @@ func (p *FindThisDevicePlugin) playAlarm() {
 	}
 
 	for _, player := range players {
-		cmd := exec.CommandContext(ctx, player.cmd, player.args...)
-		if err := cmd.Run(); err == nil {
+		if _, err := plugin.RunCommandSync(ctx, player.cmd, player.args...); err == nil {
 			return
 		}
 	}
@@ -94,7 +93,7 @@ func (p *FindThisDevicePlugin) unmuteAudio() func() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "pactl", "get-sink-mute", "@DEFAULT_SINK@").Output()
+	out, err := plugin.RunCommandOutput(ctx, "pactl", "get-sink-mute", "@DEFAULT_SINK@")
 	if err != nil {
 		return func() {}
 	}
@@ -102,13 +101,13 @@ func (p *FindThisDevicePlugin) unmuteAudio() func() {
 	if wasMuted {
 		muteCtx, muteCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer muteCancel()
-		_ = exec.CommandContext(muteCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "0").Run()
+		_, _ = plugin.RunCommandSync(muteCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "0")
 	}
 	return func() {
 		if wasMuted {
 			restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer restoreCancel()
-			_ = exec.CommandContext(restoreCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1").Run()
+			_, _ = plugin.RunCommandSync(restoreCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1")
 		}
 	}
 }
