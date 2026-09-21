@@ -11,8 +11,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 type testSender struct {
@@ -33,11 +33,11 @@ func (s testSender) UpdateBattery(charge int, charging bool) {}
 func (s testSender) GetBattery() (int, bool)                 { return 0, false }
 
 func TestHandleDeduplicatesRemoteMPRISUpdates(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -142,7 +142,7 @@ func (s *recordingSender) sent() []*protocol.Packet {
 }
 
 func TestHandleRequestsAlbumArtForKdeconnectURI(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(zap.NewNop()), false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -188,7 +188,7 @@ func TestHandleRequestsAlbumArtForKdeconnectURI(t *testing.T) {
 }
 
 func TestHandleIgnoresEmptyAlbumArtPayload(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(zap.NewNop()), false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -208,11 +208,11 @@ func TestHandleIgnoresEmptyAlbumArtPayload(t *testing.T) {
 }
 
 func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -286,7 +286,7 @@ func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
 }
 
 func TestPollRemoteStatesOnlyTargetsKnownPlayers(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(zap.NewNop()), false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -353,11 +353,11 @@ func newMPRISRawPacket(t *testing.T, body map[string]interface{}) *protocol.Pack
 }
 
 func TestHandlePrunesRemovedPlayer(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -394,11 +394,11 @@ func TestHandlePrunesRemovedPlayer(t *testing.T) {
 }
 
 func TestHandlePrunesPlayerOnEmptyList(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -425,11 +425,11 @@ func TestHandlePrunesPlayerOnEmptyList(t *testing.T) {
 }
 
 func TestHandleKeepsListedPlayer(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -454,11 +454,11 @@ func TestHandleKeepsListedPlayer(t *testing.T) {
 }
 
 func TestPublishedEventHasAnchorAndPendingArt(t *testing.T) {
-	bus := events.NewBus(zap.NewNop())
+	bus := events.NewBus(log.Nop())
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, zap.NewNop())
+	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}

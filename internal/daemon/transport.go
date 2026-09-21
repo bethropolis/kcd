@@ -12,10 +12,10 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // shouldEphemeralClose reports whether an active connection that exists
@@ -41,11 +41,17 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	return true
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, opts *config.Config) {
+// discoveryDialMinInterval rate-limits ephemeral dials triggered by UDP
+// sightings of unknown devices: at most one dial per device per interval.
+// Without it a chatty announcer would spawn a dial storm.
+const discoveryDialMinInterval = 2 * time.Second
+
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
+
 	// TCP Listener
 	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
 	if err != nil {
-		logger.Error("failed to start TCP listener", zap.Error(err))
+		logger.Error("failed to start TCP listener", log.Error(err))
 		return
 	}
 	defer tcpListener.Close()
@@ -105,8 +111,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		// Never dial garbage ports from unauthenticated announcements.
 		if !validDialPort(tcpPort) {
 			logger.Debug("ignoring discovery with invalid tcpPort",
-				zap.String("device_id", body.DeviceID),
-				zap.Int("port", tcpPort))
+				log.String("device_id", body.DeviceID),
+				log.Int("port", tcpPort))
 			return
 		}
 
@@ -118,7 +124,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// exists only for the discovery handshake.
 			if shouldEphemeralClose(dev, pairingMode) {
 				logger.Debug("closing ephemeral discovery connection",
-					zap.String("device_id", body.DeviceID))
+					log.String("device_id", body.DeviceID))
 				dev.Disconnect()
 				return
 			}
@@ -152,7 +158,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// "not reachable"). A sighting at a new address is a genuine
 			// roam the backoff can't reach — dial it now.
 			if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
-				if dev.ShouldDiscoveryDial(2 * time.Second) {
+				if dev.ShouldDiscoveryDial(discoveryDialMinInterval) {
 					// Prefer the peer's last authenticated listening port
 					// over the unauthenticated sighted one.
 					port := tcpPort
@@ -165,7 +171,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
 					// Live socket is bound elsewhere: the peer roamed but
 					// kept its address assertion — replace the zombie.
-					if dev.ShouldDiscoveryDial(2 * time.Second) {
+					if dev.ShouldDiscoveryDial(discoveryDialMinInterval) {
 						port := tcpPort
 						if p := dev.LastPort(); validDialPort(p) {
 							port = p
@@ -210,7 +216,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		// announcement. Pairing mode and explicit `kcd pair <id>` bypass.
 	}
 
-	udpListener := discovery.NewListener(1716, localDeviceID, onDeviceFound, logger)
+	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
 	go udpListener.Run(ctx)
 
 	// Accept loop
@@ -221,7 +227,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				if ctx.Err() != nil {
 					return
 				}
-				logger.Error("accept error", zap.Error(err))
+				logger.Error("accept error", log.Error(err))
 				continue
 			}
 
@@ -248,13 +254,13 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						// our reinstall minted a new device ID) must not kill
 						// an otherwise legitimate inbound.
 						logger.Debug("inbound addressed to another device",
-							zap.String("device_id", preBody.DeviceID),
-							zap.String("target_device_id", preBody.TargetDeviceID))
+							log.String("device_id", preBody.DeviceID),
+							log.String("target_device_id", preBody.TargetDeviceID))
 					}
 					if dev, ok := devices.Get(preBody.DeviceID); ok && dev.InCooldown() &&
 						(bc == nil || !bc.IsRunning()) {
 						logger.Debug("refusing inbound inside reconnect cooldown",
-							zap.String("device_id", preBody.DeviceID))
+							log.String("device_id", preBody.DeviceID))
 						protocol.ReleasePacket(preTlsPkt)
 						return
 					}
@@ -272,7 +278,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				c = nil // Prevent defer from closing the active connection
 
 				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
-					logger.Debug("new connection setup failed", zap.Error(err))
+					logger.Debug("new connection setup failed", log.Error(err))
 					transConn.Close()
 				}
 			}(conn)

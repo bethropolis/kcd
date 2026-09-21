@@ -19,13 +19,13 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap/zaptest"
 )
 
 func newPlugin(t *testing.T) *NotificationPlugin {
 	t.Helper()
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	bus := events.NewBus(logger)
 	cfg := config.NotificationPluginConfig{}
 	cfg.Defaults()
@@ -41,7 +41,7 @@ func newPlugin(t *testing.T) *NotificationPlugin {
 
 func TestNotificationPlugin_Handle_Normal(t *testing.T) {
 	p := newPlugin(t)
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 
 	body := NotificationBody{
@@ -59,7 +59,7 @@ func TestNotificationPlugin_Handle_Cancel(t *testing.T) {
 	p := newPlugin(t)
 	// Immediate close — no grace debounce for this test.
 	p.cfg.CancelGraceMS = 0
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 
 	// Store a fake desktop ID so the cancel path can look it up.
@@ -82,7 +82,7 @@ func TestNotificationPlugin_Handle_Cancel(t *testing.T) {
 
 func TestNotificationPlugin_Handle_Silent(t *testing.T) {
 	p := newPlugin(t)
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 
 	body := NotificationBody{
@@ -142,7 +142,7 @@ func (f *fakeNotifier) lastCall() []string {
 
 func newFakePlugin(t *testing.T, replace bool) (*NotificationPlugin, *fakeNotifier) {
 	t.Helper()
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	bus := events.NewBus(logger)
 	cfg := config.NotificationPluginConfig{}
 	cfg.Defaults()
@@ -159,7 +159,7 @@ func newFakePlugin(t *testing.T, replace bool) (*NotificationPlugin, *fakeNotifi
 
 func TestNotificationPlugin_ReplaceByID(t *testing.T) {
 	p, f := newFakePlugin(t, true)
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 
 	// First post — no replace, stores the printed desktop id.
@@ -182,7 +182,7 @@ func TestNotificationPlugin_ReplaceByID(t *testing.T) {
 	}
 
 	// Same id from a different device must not replace this device's popup.
-	other := device.NewDevice("dev2", "Other", "phone", zaptest.NewLogger(t))
+	other := device.NewDevice("dev2", "Other", "phone", log.NewTest(t))
 	p.sendDesktopNotification(other.ID(), "Pano Scrobbler", id, "Song", "Artist", "")
 	if r := f.argFor(2, "-r"); r != "" {
 		t.Fatalf("expected no replace for a different device, got -r %q", r)
@@ -201,7 +201,7 @@ func TestNotificationPlugin_ReplaceByID(t *testing.T) {
 
 func TestNotificationPlugin_ReplaceByIDDisabled(t *testing.T) {
 	p, f := newFakePlugin(t, false)
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 
 	// Seed a stored id — with replacement disabled it must be ignored.
@@ -285,7 +285,7 @@ func TestFetchIconRefusesTraversal(t *testing.T) {
 
 func TestNotifySendEndsOptions(t *testing.T) {
 	p, f := newFakePlugin(t, true)
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 
 	// A title starting with '-' must be passed after "--" so notify-send
 	// can't misparse it as a flag.
@@ -323,7 +323,7 @@ func TestNotifySendEndsOptions(t *testing.T) {
 }
 
 func TestNotificationPlugin_ShowIconsGating(t *testing.T) {
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 
 	// Default (show_icons = false): an explicit empty icon — popups render
 	// icon-less and daemons won't derive a placeholder from the app name.
@@ -380,7 +380,7 @@ func postAndCancel(t *testing.T, p *NotificationPlugin, dev device.Sender, id st
 func TestNotificationPlugin_CancelGrace_RePostWithinWindow(t *testing.T) {
 	p, f := newFakePlugin(t, true)
 	p.cfg.CancelGraceMS = 200
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 	key := p.notifKey(dev.ID(), id)
 
@@ -412,7 +412,7 @@ func TestNotificationPlugin_CancelGrace_RePostWithinWindow(t *testing.T) {
 func TestNotificationPlugin_CancelGrace_NoRePost(t *testing.T) {
 	p, f := newFakePlugin(t, true)
 	p.cfg.CancelGraceMS = 50
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 	key := p.notifKey(dev.ID(), id)
 
@@ -437,7 +437,7 @@ func TestNotificationPlugin_CancelGrace_NoRePost(t *testing.T) {
 func TestNotificationPlugin_CancelGraceDisabled(t *testing.T) {
 	p, f := newFakePlugin(t, true)
 	p.cfg.CancelGraceMS = 0
-	dev := device.NewDevice("dev1", "Test", "phone", zaptest.NewLogger(t))
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
 	id := "0|com.arn.scrobble|0|com.msob7y.namida|10247"
 	key := p.notifKey(dev.ID(), id)
 

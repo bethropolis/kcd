@@ -7,8 +7,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // RequestMount sends a kdeconnect.sftp.request packet asking the device to
@@ -39,7 +39,7 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender) (st
 		return "", fmt.Errorf("send SFTP request: %w", err)
 	}
 
-	p.logger.Info("SFTP request sent, waiting for phone response", zap.String("device", dev.ID()))
+	p.logger.Info("SFTP request sent, waiting for phone response", log.String("device", dev.ID()))
 
 	timeout := time.Duration(p.cfg.CredentialsTimeoutSecs) * time.Second
 	if timeout == 0 {
@@ -87,7 +87,7 @@ func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Sende
 		return "", nil, fmt.Errorf("send SFTP request: %w", err)
 	}
 
-	p.logger.Info("SFTP request sent, waiting for phone response", zap.String("device", dev.ID()))
+	p.logger.Info("SFTP request sent, waiting for phone response", log.String("device", dev.ID()))
 
 	timeout := time.Duration(p.cfg.CredentialsTimeoutSecs) * time.Second
 	if timeout == 0 {

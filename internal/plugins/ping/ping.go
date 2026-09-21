@@ -8,18 +8,18 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 type PingPlugin struct {
 	cfg    config.PingConfig
 	bus    *events.Bus
-	logger *zap.Logger
+	logger log.Logger
 }
 
-func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger, notifications ...config.NotificationConfig) *PingPlugin {
+func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger log.Logger, notifications ...config.NotificationConfig) *PingPlugin {
 	if cfg.AppName == "" {
 		var notificationCfg config.NotificationConfig
 		if len(notifications) > 0 {
@@ -30,7 +30,7 @@ func NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger *zap.Logger, n
 	return &PingPlugin{
 		cfg:    cfg,
 		bus:    bus,
-		logger: logger.With(zap.String("plugin", "ping")),
+		logger: logger.With(log.String("plugin", "ping")),
 	}
 }
 

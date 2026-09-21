@@ -390,6 +390,19 @@ Empty when never synced — absent means unknown. Example:
 [{"uid": "1", "name": "Ada Lovelace", "phones": ["+1-555-0100"], "timestamp": 973486597}]
 ```
 
+#### `contacts_clear`
+
+Delete a device's cached contacts. Offline-capable (the cache is local
+state); re-sync restores everything from the phone.
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_..."}
+```
+
+**Response data:** none.
+
 #### `call_mute`
 
 Mute an incoming phone call.

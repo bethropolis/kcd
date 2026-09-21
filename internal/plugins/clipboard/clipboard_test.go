@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // setProbe points the plugin's probe at fn for the lifetime of the plugin.
@@ -121,7 +121,7 @@ func TestProbeBackend_None(t *testing.T) {
 }
 
 func TestClipboardPlugin_ReProbesAfterFailure(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 
 	// First probe fails (compositor not up at boot) — nothing cached.
 	setProbe(t, p, func() (clipboardBackend, string) { return backendUnknown, "" })
@@ -143,7 +143,7 @@ func TestClipboardPlugin_ReProbesAfterFailure(t *testing.T) {
 }
 
 func TestClipboardPlugin_CmdInjectsWaylandEnv(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-9" })
 
 	cmd := p.clipboardCmd("wl-copy")
@@ -160,7 +160,7 @@ func TestClipboardPlugin_CmdInjectsWaylandEnv(t *testing.T) {
 }
 
 func TestRunClipboard_Success(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 
 	out, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "printf hello"))
 	if err != nil {
@@ -172,7 +172,7 @@ func TestRunClipboard_Success(t *testing.T) {
 }
 
 func TestRunClipboard_WrapsStderr(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 
 	_, err := p.runClipboard(context.Background(), exec.CommandContext(context.Background(), "/bin/sh", "-c", "echo boom >&2; exit 2"))
 	if err == nil {
@@ -185,7 +185,7 @@ func TestRunClipboard_WrapsStderr(t *testing.T) {
 }
 
 func TestRunClipboard_TimesOutHungSubprocess(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 
 	// A hung subprocess must be killed by the 2s timeout — and not instantly
 	// (that would regress to the old premature-cancel bug).
@@ -262,7 +262,7 @@ func shimWith(t *testing.T, name, script string) {
 }
 
 func TestPush_EmptyClipboardIsSoftFail(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
 	// Empty clipboard with nothing copied: wl-paste exits non-zero with a
@@ -279,7 +279,7 @@ func TestPush_EmptyClipboardIsSoftFail(t *testing.T) {
 }
 
 func TestPush_EmptyOutputSendsNothing(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
 	// Tool reports success but no content — still nothing to push.
@@ -295,7 +295,7 @@ func TestPush_EmptyOutputSendsNothing(t *testing.T) {
 }
 
 func TestPush_SendsContent(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
 	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'hello world'\n")
@@ -321,7 +321,7 @@ func TestPush_SendsContent(t *testing.T) {
 // newline appended by wl-copy). A --watch-triggered Push must NOT send that
 // same content straight back to the phone.
 func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
-	p := NewClipboardPlugin(nil, zap.NewNop(), false)
+	p := NewClipboardPlugin(nil, log.Nop(), false)
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
 	// Phone sent "hello"; wl-copy stored "hello\n" (no -n); wl-paste reads it
@@ -364,7 +364,7 @@ func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
 }
 
 func TestClipboardPlugin_Handle(t *testing.T) {
-	logger := zap.NewNop()
+	logger := log.Nop()
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 	p := NewClipboardPlugin(nil, logger, false)
 	// Force the no-backend path so no real clipboard tool is invoked.

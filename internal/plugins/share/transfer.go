@@ -12,8 +12,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 type progressWriter struct {
@@ -31,7 +31,7 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
+func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger log.Logger, options ...transport.SidechannelOptions) error {
 	if size < 0 {
 		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
 	}
@@ -66,7 +66,7 @@ func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, de
 		return fmt.Errorf("share: transfer truncated (%d/%d bytes)", n, size)
 	}
 
-	logger.Info("share: transfer complete", zap.String("path", dest), zap.Int64("bytes", n))
+	logger.Info("share: transfer complete", log.String("path", dest), log.Int64("bytes", n))
 	return nil
 }
 
@@ -87,7 +87,8 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 
 // AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
 // Optional SidechannelOptions bound streaming silence the same way as the dial path.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger *zap.Logger, options ...transport.SidechannelOptions) error {
+// portMin/portMax are the configured side-channel range, used only for firewall hints.
+func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger log.Logger, portMin, portMax int, options ...transport.SidechannelOptions) error {
 	defer ln.Close()
 
 	addr := ln.Addr().String()
@@ -102,38 +103,38 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	}()
 
 	logger.Info("share: waiting for device to connect",
-		zap.String("listen_addr", addr),
-		zap.String("device_id", expectedDeviceID),
-		zap.String("file", filePath),
+		log.String("listen_addr", addr),
+		log.String("device_id", expectedDeviceID),
+		log.String("file", filePath),
 	)
 
 	conn, err := ln.Accept()
 	if err != nil {
 		if acceptCtx.Err() != nil {
-			logger.Warn("share: timed out waiting for device to connect — is TCP 1739-1764 open in your firewall?",
-				zap.String("listen_addr", addr),
-				zap.String("device_id", expectedDeviceID),
+			logger.Warn(fmt.Sprintf("share: timed out waiting for device to connect — is TCP %d-%d open in your firewall?", portMin, portMax),
+				log.String("listen_addr", addr),
+				log.String("device_id", expectedDeviceID),
 			)
-			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow 1739:1764/tcp)", addr)
+			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow %d:%d/tcp)", addr, portMin, portMax)
 		}
 		return fmt.Errorf("accept failed: %w", err)
 	}
 	defer conn.Close()
 
 	logger.Info("share: device connected to side-channel, starting TLS handshake",
-		zap.String("remote_addr", conn.RemoteAddr().String()),
+		log.String("remote_addr", conn.RemoteAddr().String()),
 	)
 
 	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.HandshakeContext(acceptCtx); err != nil {
 		if err == io.EOF {
 			logger.Debug("share: TLS handshake aborted by remote device (EOF)",
-				zap.String("remote_addr", conn.RemoteAddr().String()),
+				log.String("remote_addr", conn.RemoteAddr().String()),
 			)
 		} else {
 			logger.Error("share: TLS handshake failed on side-channel",
-				zap.String("remote_addr", conn.RemoteAddr().String()),
-				zap.Error(err),
+				log.String("remote_addr", conn.RemoteAddr().String()),
+				log.Error(err),
 			)
 		}
 		return fmt.Errorf("tls handshake failed: %w", err)
@@ -142,8 +143,8 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	state := tlsConn.ConnectionState()
 	if len(state.PeerCertificates) == 0 {
 		logger.Error("share: device presented no client certificate",
-			zap.String("remote_addr", conn.RemoteAddr().String()),
-			zap.String("expected_device", expectedDeviceID),
+			log.String("remote_addr", conn.RemoteAddr().String()),
+			log.String("expected_device", expectedDeviceID),
 		)
 		return fmt.Errorf("share: client presented no certificate (expected device %s)", expectedDeviceID)
 	}
@@ -154,8 +155,8 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	normCN := strings.ReplaceAll(certCN, "-", "_")
 	if normCN != expectedDeviceID {
 		logger.Error("share: cert CN mismatch — unexpected device connected to side-channel",
-			zap.String("expected_device", expectedDeviceID),
-			zap.String("cert_cn", certCN),
+			log.String("expected_device", expectedDeviceID),
+			log.String("cert_cn", certCN),
 		)
 		return fmt.Errorf("share: cert CN mismatch: expected device %s, got %s", expectedDeviceID, certCN)
 	}
@@ -164,19 +165,19 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 	// with the same CN can't pull the file.
 	if expectedFP == "" {
 		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
-			zap.String("expected_device", expectedDeviceID))
+			log.String("expected_device", expectedDeviceID))
 	} else if err := cert.VerifySideChannelPeer(state, expectedFP); err != nil {
 		logger.Error("share: side-channel peer verification failed",
-			zap.String("expected_device", expectedDeviceID),
-			zap.String("expected_fp", expectedFP),
-			zap.Error(err),
+			log.String("expected_device", expectedDeviceID),
+			log.String("expected_fp", expectedFP),
+			log.Error(err),
 		)
 		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
 	}
 
 	logger.Info("share: TLS OK, streaming file",
-		zap.String("file", filePath),
-		zap.String("remote_addr", conn.RemoteAddr().String()),
+		log.String("file", filePath),
+		log.String("remote_addr", conn.RemoteAddr().String()),
 	)
 
 	f, err := os.Open(filePath)
@@ -203,6 +204,6 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 		return fmt.Errorf("stream error: %w", err)
 	}
 
-	logger.Info("share: send complete", zap.String("path", filePath), zap.Int64("bytes", n))
+	logger.Info("share: send complete", log.String("path", filePath), log.Int64("bytes", n))
 	return nil
 }

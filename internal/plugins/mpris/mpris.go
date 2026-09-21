@@ -8,8 +8,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/godbus/dbus/v5"
-	"go.uber.org/zap"
 )
 
 type trackedPlayer struct {
@@ -21,7 +21,7 @@ type trackedPlayer struct {
 
 type MPRISPlugin struct {
 	tlsConfig *tls.Config
-	logger    *zap.Logger
+	logger    log.Logger
 	bus       *events.Bus
 	mu        sync.RWMutex
 	devices   map[string]device.Sender
@@ -30,6 +30,11 @@ type MPRISPlugin struct {
 	watchCancel     context.CancelFunc
 	watching        bool
 	telephonyCancel context.CancelFunc
+
+	// reconcileCh nudges the D-Bus watcher loop to re-list player names
+	// and heal drift. Buffered size 1 so bursts of triggers coalesce;
+	// sends are non-blocking. Event-driven only — no timers.
+	reconcileCh chan struct{}
 
 	players          map[string]*trackedPlayer
 	lastTracks       map[string]trackIdentity
@@ -55,17 +60,17 @@ type remotePositionTracker struct {
 	playing        bool
 }
 
-func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger *zap.Logger, cacheDirs ...string) *MPRISPlugin {
+func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger log.Logger, cacheDirs ...string) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
-		logger.Warn("mpris: failed to connect to D-Bus session bus", zap.Error(err))
+		logger.Warn("mpris: failed to connect to D-Bus session bus", log.Error(err))
 	} else {
 		logger.Info("mpris: connected to D-Bus session bus")
 	}
 
 	p := &MPRISPlugin{
 		tlsConfig:         tlsConfig,
-		logger:            logger.With(zap.String("plugin", "mpris")),
+		logger:            logger.With(log.String("plugin", "mpris")),
 		bus:               bus,
 		dbus:              dbusConn,
 		pauseMusic:        pauseMusic,
@@ -79,6 +84,7 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		positionTrackers:  make(map[string]*remotePositionTracker),
 		callPausedPlayers: make([]string, 0),
 		artCache:          NewArtCache(logger, cacheDirs...),
+		reconcileCh:       make(chan struct{}, 1),
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
@@ -101,6 +107,19 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 
 func (p *MPRISPlugin) Name() string           { return "MPRIS" }
 func (p *MPRISPlugin) Timeout() time.Duration { return 5 * time.Second }
+
+// requestReconcile asks the D-Bus watcher loop to re-list player names
+// and heal any drift. Non-blocking: a pending request already covers us.
+func (p *MPRISPlugin) requestReconcile() {
+	select {
+	case p.reconcileCh <- struct{}{}:
+	default:
+	}
+}
+
+// RequestReconcile is the exported hook for daemon IPC routes (e.g. the
+// remote-state listing) so user-initiated queries heal drift too.
+func (p *MPRISPlugin) RequestReconcile() { p.requestReconcile() }
 func (p *MPRISPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
 }

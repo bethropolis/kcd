@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 import urllib.parse
 
 import gi
@@ -79,9 +80,15 @@ def _connected_devices() -> list[dict]:
 
 def _uri_to_path(uri: str) -> str | None:
     """Convert a file:// URI to a local absolute path, or return None."""
-    if not uri.startswith("file://"):
+    try:
+        parts = urllib.parse.urlparse(uri)
+    except ValueError:
         return None
-    return urllib.parse.unquote(uri[len("file://"):])
+    if parts.scheme != "file":
+        return None
+    if parts.netloc not in ("", "localhost"):
+        return None  # remote host — not a local file
+    return urllib.parse.unquote(parts.path)
 
 
 # ── Nautilus extension ────────────────────────────────────────────────────────
@@ -95,7 +102,6 @@ class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
     _CACHE_SECONDS: float = 3.0
 
     def _get_devices(self) -> list[dict]:
-        import time
         now = time.monotonic()
         with self._cache_lock:
             if now < self._cache_ttl and self._cache:
@@ -112,9 +118,12 @@ class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
         if not files:
             return []
 
-        # Only show the menu for local files.
+        # Only show the menu when the selection holds at least one regular
+        # file. Directories are skipped: `kcd share` rejects them, so
+        # offering the menu for dir-only selections would only produce
+        # failure notifications.
         paths = [_uri_to_path(f.get_uri()) for f in files]
-        paths = [p for p in paths if p and os.path.exists(p)]
+        paths = [p for p in paths if p and os.path.isfile(p)]
         if not paths:
             return []
 
@@ -132,7 +141,7 @@ class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
         if len(devices) == 1:
             # Single device — no submenu, activate directly.
             dev = devices[0]
-            top.set_property("label", f"Send to {dev['name']}")
+            top.set_property("label", f"Send to {dev.get('name', dev['id'])}")
             top.connect("activate", self._on_send, paths, dev)
         else:
             submenu = Nautilus.Menu()
@@ -140,7 +149,7 @@ class KcdSendExtension(GObject.GObject, Nautilus.MenuProvider):
             for dev in devices:
                 item = Nautilus.MenuItem(
                     name=f"Kcd::Device_{dev['id']}",
-                    label=dev["name"],
+                    label=dev.get("name", dev["id"]),
                     icon="phone",
                 )
                 item.connect("activate", self._on_send, paths, dev)

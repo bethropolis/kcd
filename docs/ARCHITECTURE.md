@@ -188,6 +188,32 @@ type Plugin interface {
 
 Plugin execution is wrapped in a context with the plugin's declared `Timeout()` deadline.
 
+### Subprocess policy
+
+All subprocess spawns go through `internal/plugin/exec.go` unless a site
+needs something the seam cannot express:
+
+| Helper | Use when |
+|---|---|
+| `RunCommandAsync(logger, name, args...)` | Fire-and-forget, output only matters on failure (10s bound, warns once). The helper owns the goroutine — do not wrap it in another. |
+| `RunCommandSync(ctx, name, args...)` | Caller needs the exit status or combined output; caller owns the timeout via ctx. |
+| `RunCommandOutput(ctx, name, args...)` | Caller parses stdout; stderr is discarded so it cannot corrupt the parse. |
+
+Hand-rolled `exec.CommandContext` stays only where the seam is
+inexpressive — do not "migrate" these without replacing the missing
+capability:
+
+- **stdin piping**: share clipboard `wl-copy`/`xclip`, sftp `sshfs` (password on stdin).
+- **`Start()`-without-`Wait` detach**: sftp auto-open of the mount (waiting would block on the file manager).
+- **custom `Env` / `WaitDelay`**: clipboard runners (Wayland env injection, anti-`wl-copy`-fork hang, `/dev/null` fds so `Wait()` isn't pinned).
+- **injectable constructor**: notification `newExec` field (tests stub `notify-send`).
+- **stdout purity + stored IDs**: notification send/close (`--print-id` output becomes the next `-r` replace ID).
+- **long-lived streaming child**: `wl-paste --watch` supervisor loop in the CLI.
+
+Every `exec.CommandContext` outside `internal/plugin/exec.go` must carry
+an explicit timeout — `context.Background()` with no deadline is a
+goroutine leak when the child wedges.
+
 ### Implemented plugins
 
 | Package | Types handled | Notes |

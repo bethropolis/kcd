@@ -55,7 +55,7 @@ func (p *MockPeer) TryDial(serverAddr string) (net.Conn, error) {
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,
-		TCPPort:         1716,
+		TCPPort:         protocol.DefaultTCPPort,
 	})
 	if err != nil {
 		conn.Close()

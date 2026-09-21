@@ -6,8 +6,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -26,11 +26,11 @@ func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 			sinks := p.getSinks()
 			pkt, err := protocol.NewPacket("kdeconnect.systemvolume", sinkListBody{SinkList: sinks})
 			if err != nil {
-				p.logger.Error("systemvolume: failed to create sink list packet", zap.Error(err))
+				p.logger.Error("systemvolume: failed to create sink list packet", log.Error(err))
 				return
 			}
 			if err := dev.Send(pkt); err != nil {
-				p.logger.Error("systemvolume: failed to send sink list", zap.Error(err))
+				p.logger.Error("systemvolume: failed to send sink list", log.Error(err))
 			}
 		}()
 		return nil
@@ -42,7 +42,7 @@ func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 			body.Name = "@DEFAULT_AUDIO_SINK@"
 		}
 		if err := p.setVolume(body.Name, body.Volume, body.Muted); err != nil {
-			p.logger.Warn("systemvolume: failed to set volume", zap.Error(err))
+			p.logger.Warn("systemvolume: failed to set volume", log.Error(err))
 			return
 		}
 		if p.bus != nil {

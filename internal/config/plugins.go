@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 type PluginConfig struct {
@@ -150,8 +152,8 @@ func (c *ClipboardConfig) Defaults() {
 }
 
 func (c *ShareConfig) Defaults() {
-	c.PortMin = 1739
-	c.PortMax = 1764
+	c.PortMin = protocol.DefaultSidechannelPortMin
+	c.PortMax = protocol.DefaultSidechannelPortMax
 	c.AcceptTimeoutSecs = 120
 	c.OpenCommand = "xdg-open"
 }

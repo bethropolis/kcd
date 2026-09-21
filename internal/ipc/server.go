@@ -11,22 +11,22 @@ import (
 	"strconv"
 
 	"github.com/bethropolis/kcd/internal/config"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // Server handles listening for JSON IPC requests over a Unix socket.
 type Server struct {
 	path    string
 	handler *Handler
-	logger  *zap.Logger
+	logger  log.Logger
 }
 
 // NewServer creates a new IPC server.
-func NewServer(path string, handler *Handler, logger *zap.Logger) *Server {
+func NewServer(path string, handler *Handler, logger log.Logger) *Server {
 	return &Server{
 		path:    path,
 		handler: handler,
-		logger:  logger.With(zap.String("component", "ipc")),
+		logger:  logger.With(log.String("component", "ipc")),
 	}
 }
 
@@ -99,8 +99,8 @@ func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) erro
 	}()
 
 	s.logger.Info("ipc server started",
-		zap.String("path", s.path),
-		zap.Bool("socket_activated", activated),
+		log.String("path", s.path),
+		log.Bool("socket_activated", activated),
 	)
 
 	for {
@@ -109,7 +109,7 @@ func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) erro
 			if ctx.Err() != nil {
 				return nil
 			}
-			s.logger.Error("ipc socket accept error", zap.Error(err))
+			s.logger.Error("ipc socket accept error", log.Error(err))
 			continue
 		}
 

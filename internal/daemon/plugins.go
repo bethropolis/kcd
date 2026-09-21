@@ -7,6 +7,7 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/battery"
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
@@ -29,10 +30,9 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/systemvolume"
 	"github.com/bethropolis/kcd/internal/plugins/telephony"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
-func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger *zap.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
+func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger log.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
 	sidechannel := transport.SidechannelOptions{
 		Timeout:     config.Duration(cfg.Network.SidechannelTimeout),
 		IdleTimeout: config.Duration(cfg.Network.TransferIdleTimeout),

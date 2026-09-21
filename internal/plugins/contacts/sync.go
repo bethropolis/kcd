@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/bethropolis/kcd/internal/device"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // coerceTimestamp parses Android's string-encoded timestamps as well as
@@ -49,7 +49,7 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(body, &raw); err != nil {
-			p.logger.Debug("contacts: malformed uids response", zap.Error(err))
+			p.logger.Debug("contacts: malformed uids response", log.Error(err))
 			return nil, 0, 0, 0
 		}
 		uidsRaw, ok := raw["uids"]
@@ -59,18 +59,18 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 		}
 		var uids []string
 		if err := json.Unmarshal(uidsRaw, &uids); err != nil {
-			p.logger.Debug("contacts: malformed uids list", zap.Error(err))
+			p.logger.Debug("contacts: malformed uids list", log.Error(err))
 			return nil, 0, 0, 0
 		}
 		if len(uids) > maxContactUIDs {
 			p.logger.Warn("contacts: uids response exceeds cap, refusing",
-				zap.Int("count", len(uids)))
+				log.Int("count", len(uids)))
 			return nil, 0, 0, 0
 		}
 
 		dir, err := p.deviceDir(deviceID)
 		if err != nil {
-			p.logger.Warn("contacts: bad device dir", zap.Error(err))
+			p.logger.Warn("contacts: bad device dir", log.Error(err))
 			return nil, 0, 0, 0
 		}
 		idx := loadIndex(dir)
@@ -114,7 +114,7 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 			}
 		}
 		if err := saveIndex(dir, idx); err != nil {
-			p.logger.Warn("contacts: failed to save index", zap.Error(err))
+			p.logger.Warn("contacts: failed to save index", log.Error(err))
 		}
 		return toFetch, added, updated, deleted
 	}()
@@ -122,8 +122,8 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 	if len(toFetch) > 0 {
 		if err := p.requestVCards(dev, toFetch); err != nil {
 			p.logger.Warn("contacts: failed to request vcards",
-				zap.String("device_id", deviceID),
-				zap.Error(err))
+				log.String("device_id", deviceID),
+				log.Error(err))
 		}
 	}
 	p.emit(deviceID, map[string]any{
@@ -143,7 +143,7 @@ func (p *ContactsPlugin) handleVCardsResponse(deviceID string, body []byte) {
 
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		p.logger.Debug("contacts: malformed vcards response", zap.Error(err))
+		p.logger.Debug("contacts: malformed vcards response", log.Error(err))
 		return
 	}
 	uidsRaw, ok := raw["uids"]
@@ -153,18 +153,18 @@ func (p *ContactsPlugin) handleVCardsResponse(deviceID string, body []byte) {
 	}
 	var uids []string
 	if err := json.Unmarshal(uidsRaw, &uids); err != nil {
-		p.logger.Debug("contacts: malformed vcards uids list", zap.Error(err))
+		p.logger.Debug("contacts: malformed vcards uids list", log.Error(err))
 		return
 	}
 	if len(uids) > maxContactUIDs {
 		p.logger.Warn("contacts: vcards response exceeds cap, refusing",
-			zap.Int("count", len(uids)))
+			log.Int("count", len(uids)))
 		return
 	}
 
 	dir, err := p.deviceDir(deviceID)
 	if err != nil {
-		p.logger.Warn("contacts: bad device dir", zap.Error(err))
+		p.logger.Warn("contacts: bad device dir", log.Error(err))
 		return
 	}
 	idx := loadIndex(dir)
@@ -182,14 +182,14 @@ func (p *ContactsPlugin) handleVCardsResponse(deviceID string, body []byte) {
 		var vcard string
 		if err := json.Unmarshal(vRaw, &vcard); err != nil {
 			p.logger.Debug("contacts: non-string vcard, skipping",
-				zap.String("uid", sanitizeUID(uid)))
+				log.String("uid", sanitizeUID(uid)))
 			skipped++
 			continue
 		}
 		if len(vcard) > maxVCardBytes {
 			p.logger.Warn("contacts: oversized vcard, skipping",
-				zap.String("uid", sanitizeUID(uid)),
-				zap.Int("bytes", len(vcard)))
+				log.String("uid", sanitizeUID(uid)),
+				log.Int("bytes", len(vcard)))
 			skipped++
 			continue
 		}
@@ -204,7 +204,7 @@ func (p *ContactsPlugin) handleVCardsResponse(deviceID string, body []byte) {
 			continue
 		}
 		if err := os.WriteFile(path, []byte(vcard), 0600); err != nil {
-			p.logger.Warn("contacts: failed to store vcard", zap.Error(err))
+			p.logger.Warn("contacts: failed to store vcard", log.Error(err))
 			skipped++
 			continue
 		}
@@ -220,7 +220,7 @@ func (p *ContactsPlugin) handleVCardsResponse(deviceID string, body []byte) {
 		stored++
 	}
 	if err := saveIndex(dir, idx); err != nil {
-		p.logger.Warn("contacts: failed to save index", zap.Error(err))
+		p.logger.Warn("contacts: failed to save index", log.Error(err))
 	}
 
 	p.emit(deviceID, map[string]any{

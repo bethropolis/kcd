@@ -17,12 +17,11 @@ import (
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/notification"
 	"github.com/bethropolis/kcd/internal/plugins/runcommand"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // Version is set from main's ldflags-provided version at startup.
@@ -46,36 +45,16 @@ func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *d
 func Run(ctx context.Context, cfg *config.Config) error {
 	startedAt := time.Now()
 
-	atomicLevel := zap.NewAtomicLevel()
-	switch cfg.LogLevel {
-	case "debug":
-		atomicLevel.SetLevel(zapcore.DebugLevel)
-	case "warn":
-		atomicLevel.SetLevel(zapcore.WarnLevel)
-	case "error", "quiet":
-		atomicLevel.SetLevel(zapcore.ErrorLevel)
-	default:
-		atomicLevel.SetLevel(zapcore.InfoLevel)
-	}
-
-	var zapCfg zap.Config
-	if cfg.LogLevel == "debug" {
-		zapCfg = zap.NewDevelopmentConfig()
-	} else {
-		zapCfg = zap.NewProductionConfig()
-	}
-	zapCfg.Level = atomicLevel
-
-	logger, err := zapCfg.Build()
+	logger, err := log.New(cfg.LogLevel)
 	if err != nil {
 		return err
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	logger.Info("kcd daemon initializing", zap.String("device_id", cfg.DeviceID))
+	logger.Info("kcd daemon initializing", log.String("device_id", cfg.DeviceID))
 
 	if err := cfg.Validate(); err != nil {
-		logger.Fatal("invalid configuration", zap.Error(err))
+		logger.Fatal("invalid configuration", log.Error(err))
 	}
 
 	// 1. TLS Certs (CN must match device ID for KDE Connect verification)
@@ -114,12 +93,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			devices.Add(dev)
 		}
 	} else {
-		logger.Warn("failed to load devices", zap.Error(err))
+		logger.Warn("failed to load devices", log.Error(err))
 	}
 
 	pruneThreshold, _ := time.ParseDuration(cfg.PruneStaleThreshold)
 	if pruned := devices.Prune(pruneThreshold); pruned > 0 {
-		logger.Info("pruned stale devices on startup", zap.Int("count", pruned))
+		logger.Info("pruned stale devices on startup", log.Int("count", pruned))
 	}
 
 	// Helper to save device state
@@ -164,7 +143,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	bc := discovery.NewBroadcasterController(identity, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 
 	// mDNS advertisement is always on: unlike UDP broadcast it is
 	// responder-only (zero idle timers), so phones keep a standing
@@ -213,12 +192,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			return fmt.Errorf("device address unknown yet, wait for discovery and retry")
 		}
 		if port == 0 {
-			port = 1716
+			port = cfg.TCPPort
 		}
 		go func() {
 			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
 			if !dev.IsConnected() {
-				logger.Warn("on-demand pair dial failed", zap.String("device_id", deviceID))
+				logger.Warn("on-demand pair dial failed", log.String("device_id", deviceID))
 				return
 			}
 			// The immediate dial succeeded: consume the one-shot trigger so
@@ -229,11 +208,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			dev.ConsumePairDial()
 			if dev.State() == device.StatePairRequestedByPeer {
 				if err := pairPlugin.AcceptPairing(dev); err != nil {
-					logger.Warn("auto-accept on pair dial failed", zap.Error(err))
+					logger.Warn("auto-accept on pair dial failed", log.Error(err))
 				}
 			} else if dev.State() != device.StatePaired {
 				if err := pairPlugin.RequestPairing(dev); err != nil {
-					logger.Warn("pair request on dial failed", zap.Error(err))
+					logger.Warn("pair request on dial failed", log.Error(err))
 				}
 			}
 		}()
@@ -245,7 +224,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Start IPC in background
 	go func() {
 		if err := ipcServer.Listen(ctx); err != nil {
-			logger.Error("ipc server error", zap.Error(err))
+			logger.Error("ipc server error", log.Error(err))
 		}
 	}()
 
@@ -276,7 +255,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 				logger.Info("SIGHUP received, reloading config")
 				newCfg, err := config.Load(cfg.ConfigPath)
 				if err != nil {
-					logger.Error("config reload failed", zap.Error(err))
+					logger.Error("config reload failed", log.Error(err))
 					continue
 				}
 
@@ -288,8 +267,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 					rc.CommandsPerDevice = newCfg.CommandsPerDevice
 					rc.Mu.Unlock()
 					logger.Info("reloaded commands",
-						zap.Int("global", len(newCfg.Commands)),
-						zap.Int("per_device", len(newCfg.CommandsPerDevice)),
+						log.Int("global", len(newCfg.Commands)),
+						log.Int("per_device", len(newCfg.CommandsPerDevice)),
 					)
 				}
 
@@ -300,7 +279,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 				}
 
 				// Reload log level.
-				setLogLevel(atomicLevel, newCfg.LogLevel)
+				logger.SetLevel(newCfg.LogLevel)
 			}
 		}
 	}()
@@ -312,27 +291,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	acquires, misses := protocol.PoolStats()
 	hits := acquires - misses
 	logger.Debug("packet pool stats",
-		zap.Int64("acquires", acquires),
-		zap.Int64("misses", misses),
-		zap.Int64("hits", hits),
-		zap.String("hit_rate", fmt.Sprintf("%.1f%%",
+		log.Int64("acquires", acquires),
+		log.Int64("misses", misses),
+		log.Int64("hits", hits),
+		log.String("hit_rate", fmt.Sprintf("%.1f%%",
 			float64(hits)/max(float64(acquires), 1)*100,
 		)),
 	)
 
 	return nil
-}
-
-// setLogLevel updates the atomic log level without restarting the daemon.
-func setLogLevel(al zap.AtomicLevel, level string) {
-	switch level {
-	case "debug":
-		al.SetLevel(zapcore.DebugLevel)
-	case "warn":
-		al.SetLevel(zapcore.WarnLevel)
-	case "error", "quiet":
-		al.SetLevel(zapcore.ErrorLevel)
-	default:
-		al.SetLevel(zapcore.InfoLevel)
-	}
 }

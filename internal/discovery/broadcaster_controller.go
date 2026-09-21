@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Broadcast ownership: pairing mode (`kcd pair`) and the reconnect
@@ -21,10 +21,11 @@ const (
 // Starts in stopped state. Broadcast is only active while Start() is in effect.
 type BroadcasterController struct {
 	identityPacket *protocol.Packet
+	port           int
 	interval       time.Duration
 	idleInterval   time.Duration
 	shouldReduce   func() bool
-	logger         *zap.Logger
+	logger         log.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -32,18 +33,25 @@ type BroadcasterController struct {
 	owners  map[string]struct{}
 }
 
+// defaultIdleInterval is the broadcast period while idle (all pairs
+// connected, no pairing owner): quiet enough to sip battery, frequent
+// enough that a roamed phone finds us back within a minute.
+const defaultIdleInterval = 60 * time.Second
+
 // NewBroadcasterController creates a controller that starts in stopped state.
-func NewBroadcasterController(identity *protocol.Packet, interval time.Duration, logger *zap.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
-	idle := 60 * time.Second
+// port is the UDP discovery port broadcasts target (normally cfg.TCPPort).
+func NewBroadcasterController(identity *protocol.Packet, port int, interval time.Duration, logger log.Logger, shouldReduce func() bool, idleInterval ...time.Duration) *BroadcasterController {
+	idle := defaultIdleInterval
 	if len(idleInterval) > 0 && idleInterval[0] > 0 {
 		idle = idleInterval[0]
 	}
 	return &BroadcasterController{
 		identityPacket: identity,
+		port:           port,
 		interval:       interval,
 		idleInterval:   idle,
 		shouldReduce:   shouldReduce,
-		logger:         logger.With(zap.String("component", "broadcaster")),
+		logger:         logger.With(log.String("component", "broadcaster")),
 		owners:         make(map[string]struct{}),
 	}
 }
@@ -76,6 +84,7 @@ func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner str
 
 	b := &Broadcaster{
 		identityPacket: bc.identityPacket,
+		port:           bc.port,
 		interval:       bc.interval,
 		idleInterval:   bc.idleInterval,
 		logger:         bc.logger,

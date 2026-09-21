@@ -6,28 +6,30 @@ import (
 	"net"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // Broadcaster sends identity packets over UDP to advertise the local device.
 type Broadcaster struct {
 	identityPacket *protocol.Packet
+	port           int
 	interval       time.Duration
 	idleInterval   time.Duration
-	logger         *zap.Logger
+	logger         log.Logger
 }
 
-// NewBroadcaster creates a UDP discovery broadcaster.
-func NewBroadcaster(identity *protocol.Packet, interval time.Duration, logger *zap.Logger) *Broadcaster {
+// NewBroadcaster creates a UDP discovery broadcaster targeting port.
+func NewBroadcaster(identity *protocol.Packet, port int, interval time.Duration, logger log.Logger) *Broadcaster {
 	return &Broadcaster{
 		identityPacket: identity,
+		port:           port,
 		interval:       interval,
-		logger:         logger.With(zap.String("component", "broadcaster")),
+		logger:         logger.With(log.String("component", "broadcaster")),
 	}
 }
 
-// Run periodically sends the identity packet to 255.255.255.255:1716.
+// Run periodically sends the identity packet to 255.255.255.255:<port>.
 // If shouldReduce is provided and returns true, the broadcast frequency
 // is reduced to 60 seconds to save CPU and network resources while idle.
 // (mDNS advertisement is no longer tied to this loop — see AdvertiseMDNS.)
@@ -35,19 +37,19 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 	normalInterval := b.interval
 	reducedInterval := b.idleInterval
 	if reducedInterval <= 0 {
-		reducedInterval = 60 * time.Second
+		reducedInterval = defaultIdleInterval
 	}
 
 	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {
-		b.logger.Error("failed to listen for udp broadcast", zap.Error(err))
+		b.logger.Error("failed to listen for udp broadcast", log.Error(err))
 		return
 	}
 	defer conn.Close()
 
 	data, err := json.Marshal(b.identityPacket)
 	if err != nil {
-		b.logger.Error("failed to marshal identity packet", zap.Error(err))
+		b.logger.Error("failed to marshal identity packet", log.Error(err))
 		return
 	}
 	data = append(data, '\n')
@@ -61,7 +63,7 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 			return
 		case <-timer.C:
 			// 1. Attempt global broadcast
-			globalAddr := &net.UDPAddr{IP: net.IPv4bcast, Port: 1716}
+			globalAddr := &net.UDPAddr{IP: net.IPv4bcast, Port: b.port}
 			conn.WriteToUDP(data, globalAddr)
 
 			// 2. Attempt per-interface directed broadcast for multi-homed reliability
@@ -84,7 +86,7 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 								for i := 0; i < 4; i++ {
 									bcast[i] = ip4[i] | ^mask[i]
 								}
-								conn.WriteToUDP(data, &net.UDPAddr{IP: bcast, Port: 1716})
+								conn.WriteToUDP(data, &net.UDPAddr{IP: bcast, Port: b.port})
 							}
 						}
 					}

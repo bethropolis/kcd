@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // Device represents an active KDE Connect remote device.
@@ -30,7 +30,8 @@ type Device struct {
 	// lastPort is the tcpPort the peer last advertised over the authenticated
 	// (post-TLS) identity exchange. Used with lastIP as the dial target for
 	// paired devices so unauthenticated discovery packets can never redirect
-	// a paired auto-dial. Zero means unknown (fall back to 1716).
+	// a paired auto-dial. Zero means unknown (fall back to the configured
+	// tcp_port, protocol.DefaultTCPPort by default).
 	lastPort int
 
 	// discoveryIP/discoveryPort remember where a device was last seen
@@ -112,13 +113,13 @@ type Device struct {
 	onConnect      func(dev *Device)
 	onDisconnect   func(dev *Device)
 
-	logger *zap.Logger
+	logger log.Logger
 	bus    *events.Bus
 }
 
 // NewDevice creates a new disconnected device instance.
 // New devices start as Unpaired (not Unknown) so listings are unambiguous.
-func NewDevice(id, name, dtype string, logger *zap.Logger) *Device {
+func NewDevice(id, name, dtype string, logger log.Logger) *Device {
 	return &Device{
 		id:       id,
 		name:     name,
@@ -126,7 +127,7 @@ func NewDevice(id, name, dtype string, logger *zap.Logger) *Device {
 		state:    StateUnpaired,
 		sendChan: make(chan *protocol.Packet, 32),
 		done:     make(chan struct{}),
-		logger:   logger.With(zap.String("device_id", id)),
+		logger:   logger.With(log.String("device_id", id)),
 	}
 }
 

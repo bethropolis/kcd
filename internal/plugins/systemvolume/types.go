@@ -7,19 +7,19 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // SystemVolumePlugin handles volume control packets from the phone.
 type SystemVolumePlugin struct {
-	logger  *zap.Logger
+	logger  log.Logger
 	bus     *events.Bus
 	backend string // "wpctl" or "pactl"
 }
 
-func NewSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *SystemVolumePlugin {
+func NewSystemVolumePlugin(bus *events.Bus, logger log.Logger) *SystemVolumePlugin {
 	p := &SystemVolumePlugin{
-		logger: logger.With(zap.String("plugin", "systemvolume")),
+		logger: logger.With(log.String("plugin", "systemvolume")),
 		bus:    bus,
 	}
 	// Detect available audio backend at init time.

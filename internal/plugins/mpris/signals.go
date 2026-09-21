@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/godbus/dbus/v5"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) handleNameOwnerChanged(sig *dbus.Signal, conn *dbus.Conn, uniqueToDisplay map[string]string) {
@@ -38,16 +38,20 @@ func (p *MPRISPlugin) handleNameOwnerChanged(sig *dbus.Signal, conn *dbus.Conn, 
 			return
 		}
 
-		_ = conn.AddMatchSignal(
+		if err := conn.AddMatchSignal(
 			dbus.WithMatchSender(name),
 			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 			dbus.WithMatchMember("PropertiesChanged"),
-		)
-		_ = conn.AddMatchSignal(
+		); err != nil {
+			p.logger.Warn("mpris: match rule rejected", log.String("busName", name), log.Error(err))
+		}
+		if err := conn.AddMatchSignal(
 			dbus.WithMatchSender(name),
 			dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
 			dbus.WithMatchMember("Seeked"),
-		)
+		); err != nil {
+			p.logger.Warn("mpris: match rule rejected", log.String("busName", name), log.Error(err))
+		}
 
 		uniqueToDisplay[newOwner] = entry.identity
 		p.addPlayer(entry.busName, newOwner, entry.identity, entry.shortName)
@@ -60,6 +64,9 @@ func (p *MPRISPlugin) handleSeeked(sig *dbus.Signal, uniqueToDisplay map[string]
 	}
 	displayName, ok := uniqueToDisplay[string(sig.Sender)]
 	if !ok {
+		// Seek from an untracked player: drift evidence, heal it. The
+		// position itself is dropped — the re-list follow-up resyncs.
+		p.requestReconcile()
 		return
 	}
 	pos, ok := sig.Body[0].(int64)
@@ -89,7 +96,9 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 		}
 	}
 	if displayName == "" {
-		p.logger.Debug("mpris: signal dropped, unknown sender", zap.String("sender", string(sig.Sender)), zap.String("signal", sig.Name))
+		p.logger.Debug("mpris: signal dropped, unknown sender", log.String("sender", string(sig.Sender)), log.String("signal", sig.Name))
+		// A signal from an untracked player is proof of drift — heal it.
+		p.requestReconcile()
 		return
 	}
 

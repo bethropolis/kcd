@@ -15,9 +15,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // Handle processes incoming clipboard packets.
@@ -64,11 +64,11 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			// inbound lastContent guard and makes --watch echo the phone's own
 			// clipboard straight back to it.
 			if err := p.runCopy(context.Background(), p.clipboardCmd("wl-copy", "-n"), strings.NewReader(body.Content)); err != nil {
-				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
+				p.logger.Warn("clipboard: failed to set clipboard", log.Error(err))
 			}
 		case backendX11:
 			if err := p.runCopy(context.Background(), p.clipboardCmd("xclip", "-selection", "clipboard"), strings.NewReader(body.Content)); err != nil {
-				p.logger.Warn("clipboard: failed to set clipboard", zap.Error(err))
+				p.logger.Warn("clipboard: failed to set clipboard", log.Error(err))
 			}
 		default:
 			p.logger.Debug("clipboard: no backend available, dropping inbound copy")
@@ -92,8 +92,8 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 
 	if pkt.PayloadSize > maxClipboardFileSize {
 		p.logger.Warn("clipboard file: rejected payload exceeding size limit",
-			zap.Int64("size", pkt.PayloadSize),
-			zap.Int("limit_bytes", maxClipboardFileSize),
+			log.Int64("size", pkt.PayloadSize),
+			log.Int("limit_bytes", maxClipboardFileSize),
 		)
 		return nil
 	}
@@ -116,7 +116,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		// Download to a temp file
 		tmpFile, err := os.CreateTemp("", "kcd-clip-*"+filepath.Ext(filename))
 		if err != nil {
-			p.logger.Error("clipboard file: failed to create temp file", zap.Error(err))
+			p.logger.Error("clipboard file: failed to create temp file", log.Error(err))
 			return
 		}
 		tmpPath := tmpFile.Name()
@@ -124,7 +124,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		defer os.Remove(tmpPath)
 
 		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, p.sidechannel); err != nil {
-			p.logger.Error("clipboard file: download failed", zap.Error(err))
+			p.logger.Error("clipboard file: download failed", log.Error(err))
 			return
 		}
 
@@ -150,7 +150,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 			return
 		}
 		if err := p.runCopy(context.Background(), cmd, t); err != nil {
-			p.logger.Warn("clipboard file: failed to set clipboard", zap.Error(err))
+			p.logger.Warn("clipboard file: failed to set clipboard", log.Error(err))
 		}
 	}()
 
@@ -158,7 +158,7 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 }
 
 // downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger *zap.Logger, options ...transport.SidechannelOptions) error {
+func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger log.Logger, options ...transport.SidechannelOptions) error {
 	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
 	if err != nil {
 		return err

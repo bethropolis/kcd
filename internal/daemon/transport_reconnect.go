@@ -8,9 +8,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // reconnectWithBackoff dials a paired device after it disconnects, using
@@ -30,7 +30,7 @@ func reconnectWithBackoff(
 	devices *device.Registry,
 	plugins *plugin.Registry,
 	localDeviceID string,
-	logger *zap.Logger,
+	logger log.Logger,
 	opts *config.Config,
 ) {
 	maxBackoff := config.Duration(opts.Reconnect.MaxBackoff)
@@ -39,9 +39,9 @@ func reconnectWithBackoff(
 	defer dev.ReconnectDone()
 
 	logger.Info("starting auto-reconnect",
-		zap.String("device_id", dev.ID()),
-		zap.String("device_name", dev.Name()),
-		zap.String("ip", ip.String()),
+		log.String("device_id", dev.ID()),
+		log.String("device_name", dev.Name()),
+		log.String("ip", ip.String()),
 	)
 
 	for {
@@ -53,22 +53,22 @@ func reconnectWithBackoff(
 		// Stop if the device was unpaired while we were waiting.
 		if dev.State() != device.StatePaired {
 			logger.Debug("auto-reconnect: device no longer paired, stopping",
-				zap.String("device_id", dev.ID()))
+				log.String("device_id", dev.ID()))
 			return
 		}
 
 		// Stop if the device already reconnected (inbound connection from phone).
 		if dev.IsConnected() {
 			logger.Debug("auto-reconnect: device already connected, stopping",
-				zap.String("device_id", dev.ID()))
+				log.String("device_id", dev.ID()))
 			return
 		}
 
 		backoff := device.ReconnectBackoff(attempt, maxBackoff, config.Duration(opts.Reconnect.InitialBackoff))
 		logger.Debug("auto-reconnect: waiting before next attempt",
-			zap.String("device_id", dev.ID()),
-			zap.Int("attempt", attempt+1),
-			zap.Duration("backoff", backoff),
+			log.String("device_id", dev.ID()),
+			log.Int("attempt", attempt+1),
+			log.Duration("backoff", backoff),
 		)
 
 		select {
@@ -83,9 +83,9 @@ func reconnectWithBackoff(
 		}
 
 		logger.Info("auto-reconnect: dialling",
-			zap.String("device_id", dev.ID()),
-			zap.String("ip", ip.String()),
-			zap.Int("attempt", attempt+1),
+			log.String("device_id", dev.ID()),
+			log.String("ip", ip.String()),
+			log.Int("attempt", attempt+1),
 		)
 
 		// Prefer the peer's last advertised listening port over the
@@ -96,8 +96,8 @@ func reconnectWithBackoff(
 
 		if dev.IsConnected() {
 			logger.Info("auto-reconnect: succeeded",
-				zap.String("device_id", dev.ID()),
-				zap.Int("attempts", attempt+1),
+				log.String("device_id", dev.ID()),
+				log.Int("attempts", attempt+1),
 			)
 			// Persist the counter before returning: if this connection flaps,
 			// the next reconnect cycle continues backing off rather than

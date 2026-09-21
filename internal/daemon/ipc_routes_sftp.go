@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -51,134 +50,87 @@ func resolveVolume(arg string, volumes []ipc.StorageVolumeResponse) string {
 func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins *plugin.Registry) {
 	handler.Register(ipc.CmdSftpInfo, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		info := pl.(*sftp.SftpPlugin).Info(p.DeviceID)
-		if info == nil {
-			return ipc.Response{OK: false, Error: "no SFTP credentials cached for this device — use 'kcd sftp request' first"}
-		}
-		data, _ := json.Marshal(info)
-		return ipc.Response{OK: true, Data: data}
+		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
+			info := pl.(*sftp.SftpPlugin).Info(p.DeviceID)
+			if info == nil {
+				return ipc.Response{OK: false, Error: "no SFTP credentials cached for this device — use 'kcd sftp request' first"}
+			}
+			return jsonOK(info)
+		})
 	})
 	handler.Register(ipc.CmdSftpVolumes, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		volumes := pl.(*sftp.SftpPlugin).Volumes(p.DeviceID)
-		if volumes == nil {
-			return ipc.Response{OK: false, Error: "no volumes available — use 'kcd sftp request' first"}
-		}
-		data, _ := json.Marshal(volumes)
-		return ipc.Response{OK: true, Data: data}
+		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
+			volumes := pl.(*sftp.SftpPlugin).Volumes(p.DeviceID)
+			if volumes == nil {
+				return ipc.Response{OK: false, Error: "no volumes available — use 'kcd sftp request' first"}
+			}
+			return jsonOK(volumes)
+		})
 	})
 	handler.Register(ipc.CmdSftpMount, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		dev, ok := devices.Get(p.DeviceID)
-		if !ok {
-			return ipc.Response{OK: false, Error: "device not found"}
-		}
-		if err := pl.(*sftp.SftpPlugin).RequestMount(dev); err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		return ipc.Response{OK: true}
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+			if err := pl.(*sftp.SftpPlugin).RequestMount(dev); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
 	})
 	handler.Register(ipc.CmdSftpMountLocal, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		dev, ok := devices.Get(p.DeviceID)
-		if !ok {
-			return ipc.Response{OK: false, Error: "device not found"}
-		}
-		browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev)
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		data, _ := json.Marshal(map[string]string{"path": browsePath})
-		return ipc.Response{OK: true, Data: data}
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+			browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return jsonOK(map[string]string{"path": browsePath})
+		})
 	})
 	handler.Register(ipc.CmdSftpUnmount, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		if err := pl.(*sftp.SftpPlugin).Unmount(p.DeviceID); err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		return ipc.Response{OK: true}
+		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
+			if err := pl.(*sftp.SftpPlugin).Unmount(p.DeviceID); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
 	})
 	handler.Register(ipc.CmdSftpBrowse, func(req ipc.Request) ipc.Response {
 		var p ipc.SftpBrowsePayload
-		if err := json.Unmarshal(req.Payload, &p); err != nil {
-			return ipc.Response{OK: false, Error: "invalid payload"}
-		}
-		pl, ok := plugins.GetByName("SFTP")
-		if !ok {
-			return ipc.Response{OK: false, Error: "sftp plugin not enabled"}
-		}
-		dev, ok := devices.Get(p.DeviceID)
-		if !ok {
-			return ipc.Response{OK: false, Error: "device not found"}
-		}
-		sftpPl := pl.(*sftp.SftpPlugin)
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+			sftpPl := pl.(*sftp.SftpPlugin)
 
-		volumePath := p.Volume
+			volumePath := p.Volume
 
-		// If a volume was specified, try to resolve it to a path.
-		if volumePath != "" {
-			vols := sftpPl.Volumes(p.DeviceID)
-			if len(vols) > 0 {
-				sv := make([]ipc.StorageVolumeResponse, len(vols))
-				for i, v := range vols {
-					sv[i] = ipc.StorageVolumeResponse{Name: v.Name, Path: v.Path}
-				}
-				if resolved := resolveVolume(volumePath, sv); resolved != "" {
-					volumePath = resolved
+			// If a volume was specified, try to resolve it to a path.
+			if volumePath != "" {
+				vols := sftpPl.Volumes(p.DeviceID)
+				if len(vols) > 0 {
+					sv := make([]ipc.StorageVolumeResponse, len(vols))
+					for i, v := range vols {
+						sv[i] = ipc.StorageVolumeResponse{Name: v.Name, Path: v.Path}
+					}
+					if resolved := resolveVolume(volumePath, sv); resolved != "" {
+						volumePath = resolved
+					}
 				}
 			}
-		}
 
-		mountPath, volumes, err := sftpPl.RequestAndMountVolume(context.Background(), dev, volumePath)
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
+			mountPath, volumes, err := sftpPl.RequestAndMountVolume(context.Background(), dev, volumePath)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
 
-		vols := make([]ipc.StorageVolumeResponse, len(volumes))
-		for i, v := range volumes {
-			vols[i] = ipc.StorageVolumeResponse{Name: v.Name, Path: v.Path}
-		}
+			vols := make([]ipc.StorageVolumeResponse, len(volumes))
+			for i, v := range volumes {
+				vols[i] = ipc.StorageVolumeResponse{Name: v.Name, Path: v.Path}
+			}
 
-		resp := ipc.SftpBrowseResponse{
-			Path:    mountPath,
-			Volumes: vols,
-		}
-		data, _ := json.Marshal(resp)
-		return ipc.Response{OK: true, Data: data}
+			return jsonOK(ipc.SftpBrowseResponse{
+				Path:    mountPath,
+				Volumes: vols,
+			})
+		})
 	})
 }

@@ -12,8 +12,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // NotificationPlugin handles incoming notifications and displays them on the desktop.
@@ -21,7 +22,7 @@ type NotificationPlugin struct {
 	sidechannel    transport.SidechannelOptions
 	bus            *events.Bus
 	tlsConfig      *tls.Config
-	logger         *zap.Logger
+	logger         log.Logger
 	notifIDs       sync.Map // maps deviceID|body.ID -> desktop notify-send ID (string)
 	pendingCloses  sync.Map // maps deviceID|body.ID -> *time.Timer (deferred close for cancel-grace)
 	iconDir        string   // temp dir for cached notification icons
@@ -35,7 +36,7 @@ type NotificationPlugin struct {
 // NewNotificationPlugin creates a NotificationPlugin.
 // tlsConfig is used to fetch notification icon payloads over the KDE Connect
 // side-channel; pass nil to disable icon fetching.
-func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
+func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
 	var sidechannel transport.SidechannelOptions
 	if len(options) > 0 {
 		sidechannel = options[0]
@@ -45,13 +46,15 @@ func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus,
 		cfg:         cfg,
 		bus:         bus,
 		tlsConfig:   tlsConfig,
-		logger:      logger.With(zap.String("plugin", "notification")),
+		logger:      logger.With(log.String("plugin", "notification")),
 		newExec:     exec.CommandContext,
 	}
 
 	// Probe --print-id support by checking --help output.
 	// This is side-effect-free and immune to version string format changes.
-	if out, err := exec.CommandContext(context.Background(), "notify-send", "--help").CombinedOutput(); err == nil {
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer probeCancel()
+	if out, err := plugin.RunCommandSync(probeCtx, "notify-send", "--help"); err == nil {
 		p.canCloseNotifs = strings.Contains(string(out), "--print-id")
 	}
 

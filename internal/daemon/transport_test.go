@@ -11,14 +11,14 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 func ephemeralDevice(state device.PairingState, markEphemeral, pairIntent bool) *device.Device {
-	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	dev.SetState(state)
 	if markEphemeral {
 		dev.MarkEphemeralDialed()
@@ -54,7 +54,7 @@ func TestShouldEphemeralClose(t *testing.T) {
 }
 
 func TestEphemeralMarkerReset(t *testing.T) {
-	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	if dev.EphemeralDialed() {
 		t.Fatal("new device must not be ephemeral-marked")
 	}
@@ -82,7 +82,7 @@ func TestEphemeralMarkerReset(t *testing.T) {
 }
 
 func TestPairDialIntentLifetime(t *testing.T) {
-	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	dev.MarkEphemeralDialed()
 
 	if dev.PairDialActive() {
@@ -117,7 +117,7 @@ func TestPairDialIntentLifetime(t *testing.T) {
 }
 
 func TestLastPortRoundTrip(t *testing.T) {
-	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	if dev.LastPort() != 0 {
 		t.Fatal("new device must have unknown port")
 	}
@@ -128,7 +128,7 @@ func TestLastPortRoundTrip(t *testing.T) {
 }
 
 func TestShouldDiscoveryDialThrottle(t *testing.T) {
-	dev := device.NewDevice("test-id", "Test", "phone", zap.NewNop())
+	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	if !dev.ShouldDiscoveryDial(10 * time.Second) {
 		t.Fatal("first dial must be allowed")
 	}
@@ -141,18 +141,18 @@ func TestShouldDiscoveryDialThrottle(t *testing.T) {
 }
 
 func newTestIdentity() (*protocol.Packet, error) {
-	return protocol.NewIdentityPacket("test-id", "Test", "desktop", 1716, nil, nil)
+	return protocol.NewIdentityPacket("test-id", "Test", "desktop", protocol.DefaultTCPPort, nil, nil)
 }
 
 func TestSyncReconnectBroadcast(t *testing.T) {
-	logger := zap.NewNop()
+	logger := log.Nop()
 	ctx := context.Background()
 	identity, err := newTestIdentity()
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
 	newBC := func() *discovery.BroadcasterController {
-		return discovery.NewBroadcasterController(identity, time.Hour, logger, nil)
+		return discovery.NewBroadcasterController(identity, protocol.DefaultTCPPort, time.Hour, logger, nil)
 	}
 
 	// Offline paired device starts the reconnect broadcast.
@@ -236,7 +236,7 @@ func TestDialPreTLSIdentityTarget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logger := zap.NewNop()
+			logger := log.Nop()
 			addr := ln.Addr().(*net.TCPAddr)
 			DialDevice(context.Background(), addr.IP, addr.Port, tc.targetID, protocol.ProtocolVersion, pkt, &tls.Config{}, device.NewRegistry(nil), plugin.NewRegistry(logger), "local", logger, true, cfg)
 			select {

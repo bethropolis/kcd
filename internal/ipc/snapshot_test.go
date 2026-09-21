@@ -10,13 +10,13 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestBuildSnapshotCoversOfflineDevices(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	devReg := device.NewRegistry(nil)
 	pluginReg := plugin.NewRegistry(logger)
 
@@ -86,7 +86,7 @@ func TestBuildSnapshotCoversOfflineDevices(t *testing.T) {
 // (unknown, not 0%); one packet makes the key appear with the sent values;
 // a real 0% packet is preserved as a present zero, not collapsed to unknown.
 func TestSummarizeDeviceBatteryOmission(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	pluginReg := plugin.NewRegistry(logger)
 
 	fresh := device.NewDevice("dev-fresh", "Fresh", "phone", logger)
@@ -144,7 +144,7 @@ func TestSummarizeDeviceBatteryOmission(t *testing.T) {
 // stamp goes stale for the whole session. The summary must report now for
 // connected devices and preserve the stored stamp for offline ones.
 func TestSummarizeDeviceConnectedMeansSeenNow(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	stale := time.Now().Add(-53 * time.Minute)
 
 	offline := device.NewDevice("dev-off", "Offline Phone", "phone", logger)

@@ -8,21 +8,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 // PresenterPlugin handles kdeconnect.presenter packets containing
 // gyroscope-based pointer deltas (dx/dy) from the Android presenter remote.
 type PresenterPlugin struct {
-	logger *zap.Logger
+	logger log.Logger
 
 	mu      sync.Mutex
 	xPos    float64
@@ -42,9 +42,9 @@ type PresenterBody struct {
 }
 
 // NewPresenterPlugin creates a new presenter remote plugin.
-func NewPresenterPlugin(logger *zap.Logger) *PresenterPlugin {
+func NewPresenterPlugin(logger log.Logger) *PresenterPlugin {
 	p := &PresenterPlugin{
-		logger: logger.With(zap.String("plugin", "Presenter")),
+		logger: logger.With(log.String("plugin", "Presenter")),
 		xPos:   0.5,
 		yPos:   0.5,
 		moveCh: make(chan PresenterBody, 1),
@@ -138,7 +138,10 @@ func (p *PresenterPlugin) handleBody(body PresenterBody) {
 // getScreenSize attempts to detect the screen resolution via xdpyinfo (X11)
 // or wlr-randr (Wayland). Returns 0x0 if neither is available.
 func getScreenSize() (int, int) {
-	out, err := exec.CommandContext(context.Background(), "xdpyinfo").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := plugin.RunCommandOutput(ctx, "xdpyinfo")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "dimensions:") {
@@ -150,7 +153,7 @@ func getScreenSize() (int, int) {
 		}
 	}
 
-	out, err = exec.CommandContext(context.Background(), "wlr-randr").Output()
+	out, err = plugin.RunCommandOutput(ctx, "wlr-randr")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
@@ -169,10 +172,12 @@ func getScreenSize() (int, int) {
 // moveCursor moves the system cursor to the given absolute screen coordinates.
 // Prefers ydotool (Wayland) with xdotool as fallback (X11).
 func moveCursor(x, y int) {
-	cmd := exec.CommandContext(context.Background(), "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y))
-	if err := cmd.Run(); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := plugin.RunCommandSync(ctx, "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
 		return
 	}
 
-	exec.CommandContext(context.Background(), "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y)).Run()
+	_, _ = plugin.RunCommandSync(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
 }

@@ -8,8 +8,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 type VolumeBody struct {
@@ -30,14 +30,14 @@ type SinkInfo struct {
 }
 
 type RemoteSystemVolumePlugin struct {
-	logger *zap.Logger
+	logger log.Logger
 	bus    *events.Bus
 	sinks  sync.Map // device ID -> []SinkInfo
 }
 
-func NewRemoteSystemVolumePlugin(bus *events.Bus, logger *zap.Logger) *RemoteSystemVolumePlugin {
+func NewRemoteSystemVolumePlugin(bus *events.Bus, logger log.Logger) *RemoteSystemVolumePlugin {
 	return &RemoteSystemVolumePlugin{
-		logger: logger.With(zap.String("plugin", "remotesystemvolume")),
+		logger: logger.With(log.String("plugin", "remotesystemvolume")),
 		bus:    bus,
 	}
 }
@@ -135,8 +135,8 @@ func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Sender) {
 	go func() {
 		if err := p.RequestSinkList(dev); err != nil {
 			p.logger.Warn("failed to request sink list",
-				zap.String("device", dev.ID()),
-				zap.Error(err),
+				log.String("device", dev.ID()),
+				log.Error(err),
 			)
 		}
 	}()

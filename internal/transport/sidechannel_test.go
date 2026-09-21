@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // startSidechannelServer accepts one TLS connection and streams N bytes to it.
@@ -92,7 +92,7 @@ func TestDialSidechannelRoundTrip(t *testing.T) {
 	host, portStr, _ := net.SplitHostPort(addr)
 	port, _ := strconv.Atoi(portStr)
 
-	conn, err := DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, fp, zap.NewNop(), SidechannelOptions{Timeout: 2 * time.Second})
+	conn, err := DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, fp, log.Nop(), SidechannelOptions{Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatalf("DialSidechannel: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDialSidechannelPinMismatch(t *testing.T) {
 	port, _ := strconv.Atoi(portStr)
 
 	wrongFP := "0000000000000000000000000000000000000000000000000000000000000000"
-	_, err = DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, wrongFP, zap.NewNop(), SidechannelOptions{Timeout: 2 * time.Second})
+	_, err = DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, wrongFP, log.Nop(), SidechannelOptions{Timeout: 2 * time.Second})
 	if err == nil {
 		t.Fatal("expected pin verification failure, got nil error")
 	}
@@ -170,7 +170,7 @@ func TestDialSidechannelSetupTimeout(t *testing.T) {
 	port, _ := strconv.Atoi(portStr)
 
 	start := time.Now()
-	_, err = DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, "", zap.NewNop(), SidechannelOptions{Timeout: 500 * time.Millisecond})
+	_, err = DialSidechannel(context.Background(), net.ParseIP(host), port, tlsConfig, "", log.Nop(), SidechannelOptions{Timeout: 500 * time.Millisecond})
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -202,7 +202,7 @@ func TestDialSidechannelSurvivesContextCancel(t *testing.T) {
 	port, _ := strconv.Atoi(portStr)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	conn, err := DialSidechannel(ctx, net.ParseIP(host), port, tlsConfig, fp, zap.NewNop(), SidechannelOptions{Timeout: 2 * time.Second})
+	conn, err := DialSidechannel(ctx, net.ParseIP(host), port, tlsConfig, fp, log.Nop(), SidechannelOptions{Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatalf("DialSidechannel: %v", err)
 	}

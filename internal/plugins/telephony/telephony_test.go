@@ -10,9 +10,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
 )
 
 type stubSender struct{}
@@ -43,7 +42,7 @@ func nextEvent(t *testing.T, ch <-chan events.Event) events.Event {
 
 func TestHandleStringIsCancel(t *testing.T) {
 	// Stock phones end calls with the string "true", not a boolean.
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	bus := events.NewBus(logger)
 	p := NewTelephonyPlugin(bus, logger)
 	sub := bus.Subscribe(0, events.TypeTelephonyCanceled)
@@ -62,11 +61,11 @@ func TestHandleStringIsCancel(t *testing.T) {
 }
 
 func TestHandleMissedCallEvent(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := log.NewTest(t)
 	bus := events.NewBus(logger)
 	// The plugin notifies via a background goroutine that can outlive the
 	// test; a test-bound logger would panic on late writes, so detach it.
-	p := NewTelephonyPlugin(bus, zap.NewNop())
+	p := NewTelephonyPlugin(bus, log.Nop())
 	sub := bus.Subscribe(0, events.TypeTelephonyMissed)
 	defer sub.Close()
 

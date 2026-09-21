@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // maxAlbumArtBytes caps inbound album art payloads (matches the 5 MiB
@@ -31,7 +31,7 @@ type ArtCache struct {
 }
 
 // NewArtCache creates the cache directory and returns an empty cache.
-func NewArtCache(logger *zap.Logger, cacheDirs ...string) *ArtCache {
+func NewArtCache(logger log.Logger, cacheDirs ...string) *ArtCache {
 	base, err := os.UserCacheDir()
 	if err != nil || base == "" {
 		base = filepath.Join(os.TempDir(), "kcd-cache")
@@ -42,7 +42,7 @@ func NewArtCache(logger *zap.Logger, cacheDirs ...string) *ArtCache {
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		logger.Warn("mpris: failed to create album art cache dir",
-			zap.String("path", dir), zap.Error(err))
+			log.String("path", dir), log.Error(err))
 	}
 	purgeArtCacheDir(dir, logger)
 	return &ArtCache{
@@ -52,7 +52,7 @@ func NewArtCache(logger *zap.Logger, cacheDirs ...string) *ArtCache {
 }
 
 // purgeArtCacheDir clears the cache when it grows past maxArtCacheFiles.
-func purgeArtCacheDir(dir string, logger *zap.Logger) {
+func purgeArtCacheDir(dir string, logger log.Logger) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -61,7 +61,7 @@ func purgeArtCacheDir(dir string, logger *zap.Logger) {
 		return
 	}
 	logger.Debug("mpris: clearing oversized album art cache",
-		zap.Int("files", len(entries)))
+		log.Int("files", len(entries)))
 	for _, e := range entries {
 		if !e.IsDir() {
 			_ = os.Remove(filepath.Join(dir, e.Name()))

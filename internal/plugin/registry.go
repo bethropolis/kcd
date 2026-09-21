@@ -6,9 +6,14 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
+
+// defaultDispatchTimeout bounds one plugin Handle call when the plugin
+// reports no Timeout of its own. Every bundled plugin sets Timeout, so
+// this fires only for third-party or misconfigured plugins.
+const defaultDispatchTimeout = 15 * time.Second
 
 // Registry manages the set of active plugins and routes packets to them.
 type Registry struct {
@@ -16,15 +21,15 @@ type Registry struct {
 	byName  map[string]Plugin // keyed by plugin.Name()
 	list    []Plugin          // ordered list for iteration
 	mu      sync.RWMutex
-	logger  *zap.Logger
+	logger  log.Logger
 }
 
 // NewRegistry creates a new plugin registry.
-func NewRegistry(logger *zap.Logger) *Registry {
+func NewRegistry(logger log.Logger) *Registry {
 	return &Registry{
 		plugins: make(map[string]Plugin),
 		byName:  make(map[string]Plugin),
-		logger:  logger.With(zap.String("component", "plugin_registry")),
+		logger:  logger.With(log.String("component", "plugin_registry")),
 	}
 }
 
@@ -39,15 +44,15 @@ func (r *Registry) Register(p Plugin) {
 	for _, typ := range p.IncomingTypes() {
 		if existing, ok := r.plugins[typ]; ok {
 			r.logger.Warn("plugin packet type collision, overwriting",
-				zap.String("type", typ),
-				zap.String("old_plugin", existing.Name()),
-				zap.String("new_plugin", p.Name()),
+				log.String("type", typ),
+				log.String("old_plugin", existing.Name()),
+				log.String("new_plugin", p.Name()),
 			)
 		}
 		r.plugins[typ] = p
 	}
 
-	r.logger.Debug("registered plugin", zap.String("plugin", p.Name()))
+	r.logger.Debug("registered plugin", log.String("plugin", p.Name()))
 }
 
 // Dispatch routes an incoming packet to the appropriate plugin.
@@ -62,13 +67,13 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 
 	if !ok {
 		// No plugin registered for this type — safely ignore
-		r.logger.Debug("unhandled packet type", zap.String("type", pkt.Type))
+		r.logger.Debug("unhandled packet type", log.String("type", pkt.Type))
 		return true
 	}
 
 	timeout := p.Timeout()
 	if timeout == 0 {
-		timeout = 15 * time.Second // Fallback default
+		timeout = defaultDispatchTimeout // Fallback default
 	}
 
 	// Because we must recover from panics, we execute Handle in a separate goroutine.
@@ -84,9 +89,9 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 		defer func() {
 			if err := recover(); err != nil {
 				r.logger.Error("plugin panic recovered",
-					zap.String("plugin", p.Name()),
-					zap.String("packet_type", pkt.Type),
-					zap.Any("error", err),
+					log.String("plugin", p.Name()),
+					log.String("packet_type", pkt.Type),
+					log.Any("error", err),
 				)
 				done <- nil // unblock select
 			}
@@ -98,17 +103,17 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 	case err := <-done:
 		if err != nil {
 			r.logger.Error("plugin handle error",
-				zap.String("plugin", p.Name()),
-				zap.String("packet_type", pkt.Type),
-				zap.Error(err),
+				log.String("plugin", p.Name()),
+				log.String("packet_type", pkt.Type),
+				log.Error(err),
 			)
 		}
 		return true // Completed in time; safe to recycle
 	case <-ctx.Done():
 		r.logger.Warn("plugin handle timeout",
-			zap.String("plugin", p.Name()),
-			zap.String("packet_type", pkt.Type),
-			zap.Duration("timeout", timeout),
+			log.String("plugin", p.Name()),
+			log.String("packet_type", pkt.Type),
+			log.Duration("timeout", timeout),
 		)
 		return false // Timed out; DO NOT recycle — goroutine still holds packet
 	}

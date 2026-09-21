@@ -8,9 +8,9 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 const (
@@ -37,7 +37,7 @@ type SMSPlugin struct {
 	cfg           config.SMSConfig
 	bus           *events.Bus
 	tlsConfig     *tls.Config
-	logger        *zap.Logger
+	logger        log.Logger
 	cacheDir      string
 }
 
@@ -48,7 +48,7 @@ type Options struct {
 	Notifications config.NotificationConfig
 }
 
-func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger *zap.Logger, options ...Options) *SMSPlugin {
+func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...Options) *SMSPlugin {
 	var opts Options
 	if len(options) > 0 {
 		opts = options[0]
@@ -65,7 +65,7 @@ func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, 
 		cfg:           cfg,
 		bus:           bus,
 		tlsConfig:     tlsConfig,
-		logger:        logger.With(zap.String("plugin", "sms")),
+		logger:        logger.With(log.String("plugin", "sms")),
 		cacheDir:      cacheDir,
 	}
 }

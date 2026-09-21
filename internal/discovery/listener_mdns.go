@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/libp2p/zeroconf/v2"
-	"go.uber.org/zap"
 )
 
 // AdvertiseMDNS registers the local identity as _kdeconnect._udp until
@@ -16,10 +16,10 @@ import (
 // incoming queries), so it stays up for the daemon lifetime at negligible
 // idle cost and gives phones a standing discovery path even while UDP
 // broadcast is stopped.
-func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger *zap.Logger) {
+func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger log.Logger) {
 	var idBody protocol.IdentityBody
 	if err := json.Unmarshal(identityPacket.Body, &idBody); err != nil {
-		logger.Warn("failed to parse identity for mDNS", zap.Error(err))
+		logger.Warn("failed to parse identity for mDNS", log.Error(err))
 		return
 	}
 	server, err := zeroconf.Register(
@@ -36,7 +36,7 @@ func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger 
 		nil,
 	)
 	if err != nil {
-		logger.Warn("failed to register mDNS service", zap.Error(err))
+		logger.Warn("failed to register mDNS service", log.Error(err))
 		return
 	}
 	go func() {
@@ -100,6 +100,6 @@ func (l *Listener) runMdnsDiscovery(ctx context.Context) {
 	}(entries)
 
 	if err := zeroconf.Browse(ctx, "_kdeconnect._udp", "local.", entries); err != nil {
-		l.logger.Warn("failed to browse mDNS", zap.Error(err))
+		l.logger.Warn("failed to browse mDNS", log.Error(err))
 	}
 }

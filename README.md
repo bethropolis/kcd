@@ -24,6 +24,7 @@
 | **Find My Phone** | Ring the phone to locate it |
 | **Telephony** | Get call and SMS notifications on the desktop |
 | **SMS** | Send SMS messages via the phone |
+| **Contacts** | Sync and browse the phone address book |
 | **SFTP** | Browse the phone's filesystem |
 | **Lock / Unlock** | Lock and unlock the desktop session |
 | **Ping** | Simple connectivity check |
@@ -47,7 +48,6 @@ Install from the AUR using your preferred helper:
 
 ```bash
 yay -S kcd-bin
-
 systemctl --user enable --now kcd.socket
 ```
 
@@ -60,7 +60,7 @@ cd kcd
 
 ### Binary releases
 
-Download the latest pre-built binary from [GitHub Releases](https://github.com/bethropolis/kcd/releases).
+Every [GitHub Release](https://github.com/bethropolis/kcd/releases) ships pre-built artifacts for Linux (amd64, arm64, armv7): `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL), `.tar.gz` archives, and a Homebrew cask — see the release notes for per-format install commands.
 
 
 ---
@@ -376,8 +376,10 @@ kcd connect 192.168.1.100
 
 | Document | Description |
 |---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, plugin system, event bus, IPC protocol |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, plugin system, event bus |
 | [`docs/CLI.md`](docs/CLI.md) | Full CLI reference and sub-commands |
+| [`docs/IPC_PROTOCOL.md`](docs/IPC_PROTOCOL.md) | Daemon socket protocol: commands, events, packet reference |
+| [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python examples) |
 | [`docs/CONTAINER.md`](docs/CONTAINER.md) | Running kcd in Docker / Podman |
 | [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
 

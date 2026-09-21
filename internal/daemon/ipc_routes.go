@@ -12,14 +12,14 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
 	"github.com/bethropolis/kcd/internal/plugins/notification"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
-func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger *zap.Logger, startedAt time.Time) {
+func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger log.Logger, startedAt time.Time) {
 	if cfg.Plugins.Notification {
 		if notifPl, ok := plugins.GetByName("Notification"); ok {
 			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications.Filters())
@@ -27,7 +27,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	}
 
 	if cfg.Plugins.Battery {
-		registerBatteryRoutes(handler, devices)
+		registerBatteryRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.Connectivity {
 		registerConnectivityRoutes(handler, devices, plugins)
@@ -39,7 +39,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		registerContactsRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.RunCommand {
-		registerRunCommandRoutes(handler, devices)
+		registerRunCommandRoutes(handler, devices, plugins)
 	}
 	if cfg.Plugins.Share {
 		registerShareRoutes(handler, devices, plugins)
@@ -96,7 +96,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 				continue
 			}
 			logger.Debug("broadcast stopped, dropping unpaired discovery connection",
-				zap.String("device_id", dev.ID()))
+				log.String("device_id", dev.ID()))
 			dev.Disconnect()
 		}
 		return ipc.Response{OK: true}
@@ -171,7 +171,6 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			return ipc.Response{OK: false, Error: "mpris plugin not enabled"}
 		}
 		status := pl.(*mpris.MPRISPlugin).DebugStatus()
-		data, _ := json.Marshal(status)
-		return ipc.Response{OK: true, Data: data}
+		return jsonOK(status)
 	})
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
@@ -38,7 +38,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		p.logger.Debug("mpris: album art file not found", zap.String("path", filePath), zap.Error(err))
+		p.logger.Debug("mpris: album art file not found", log.String("path", filePath), log.Error(err))
 		return
 	}
 	stat, err := f.Stat()
@@ -56,7 +56,7 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 
 	go func() {
-		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger)
+		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger, shareCfg.PortMin, shareCfg.PortMax)
 	}()
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
@@ -95,7 +95,7 @@ func (p *MPRISPlugin) requestAlbumArt(dev device.Sender, player, artUrl string) 
 		return
 	}
 	if err := dev.Send(pkt); err != nil {
-		p.logger.Debug("mpris: album art request failed", zap.Error(err))
+		p.logger.Debug("mpris: album art request failed", log.Error(err))
 	}
 }
 
@@ -112,13 +112,13 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	}
 
 	p.logger.Debug("mpris: receiving album art from remote",
-		zap.String("player", player),
-		zap.String("device_id", dev.ID()),
-		zap.Int64("size", size))
+		log.String("player", player),
+		log.String("device_id", dev.ID()),
+		log.Int64("size", size))
 
 	tmp, err := os.CreateTemp(p.artCache.Dir(), ".art-*")
 	if err != nil {
-		p.logger.Warn("mpris: failed to create temp file for album art", zap.Error(err))
+		p.logger.Warn("mpris: failed to create temp file for album art", log.Error(err))
 		return
 	}
 	tmpPath := tmp.Name()
@@ -130,13 +130,13 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	dlCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, cert.PinnedFingerprint(dev.PeerCert()), nil, p.logger); err != nil {
-		p.logger.Warn("mpris: album art transfer failed", zap.Error(err))
+		p.logger.Warn("mpris: album art transfer failed", log.Error(err))
 		return
 	}
 
 	fileURL, err := p.artCache.Commit(artUrl, tmpPath)
 	if err != nil {
-		p.logger.Warn("mpris: failed to cache album art", zap.Error(err))
+		p.logger.Warn("mpris: failed to cache album art", log.Error(err))
 		return
 	}
 

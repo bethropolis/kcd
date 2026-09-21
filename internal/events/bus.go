@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // EventType defines the kind of event being broadcast.
@@ -92,14 +92,14 @@ type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[uint64]*Subscriber
 	nextID      uint64
-	logger      *zap.Logger
+	logger      log.Logger
 }
 
 // NewBus creates a new event bus.
-func NewBus(logger *zap.Logger) *Bus {
+func NewBus(logger log.Logger) *Bus {
 	return &Bus{
 		subscribers: make(map[uint64]*Subscriber),
-		logger:      logger.With(zap.String("component", "events")),
+		logger:      logger.With(log.String("component", "events")),
 	}
 }
 
@@ -126,7 +126,7 @@ func (b *Bus) Subscribe(capacity int, filters ...EventType) *Subscriber {
 	}
 
 	b.subscribers[id] = sub
-	b.logger.Debug("new subscriber", zap.Uint64("id", id), zap.Int("filters", len(filters)))
+	b.logger.Debug("new subscriber", log.Uint64("id", id), log.Int("filters", len(filters)))
 	return sub
 }
 
@@ -138,7 +138,7 @@ func (b *Bus) unsubscribe(id uint64) {
 	if sub, ok := b.subscribers[id]; ok {
 		close(sub.ch)
 		delete(b.subscribers, id)
-		b.logger.Debug("subscriber removed", zap.Uint64("id", id))
+		b.logger.Debug("subscriber removed", log.Uint64("id", id))
 	}
 }
 
@@ -161,9 +161,9 @@ func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
 			default:
 				// Drop event if channel is full
 				b.logger.Warn("subscriber channel full, dropping event",
-					zap.Uint64("id", sub.id),
-					zap.String("type", string(typ)),
-					zap.String("device_id", deviceID))
+					log.Uint64("id", sub.id),
+					log.String("type", string(typ)),
+					log.String("device_id", deviceID))
 			}
 		}
 	}

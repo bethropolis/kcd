@@ -7,25 +7,25 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
-	"go.uber.org/zap"
+	"github.com/bethropolis/kcd/internal/log"
 )
 
 // SftpPlugin handles KDE Connect SFTP negotiation and optional sshfs mounting.
 type SftpPlugin struct {
 	cfg         config.SFTPConfig
 	bus         *events.Bus
-	logger      *zap.Logger
+	logger      log.Logger
 	mu          sync.RWMutex
 	lastBody    map[string]SftpBody
 	mountPoints map[string]string // deviceID -> local mountPoint path
 	mountPIDs   map[string]int    // deviceID -> sshfs PID for graceful shutdown
 }
 
-func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger *zap.Logger) *SftpPlugin {
+func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *SftpPlugin {
 	return &SftpPlugin{
 		cfg:         cfg,
 		bus:         bus,
-		logger:      logger.With(zap.String("plugin", "sftp")),
+		logger:      logger.With(log.String("plugin", "sftp")),
 		lastBody:    make(map[string]SftpBody),
 		mountPoints: make(map[string]string),
 		mountPIDs:   make(map[string]int),

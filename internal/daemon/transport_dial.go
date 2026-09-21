@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
-	"go.uber.org/zap"
 )
 
 // validDialPort reports whether a discovery-advertised TCP port is usable.
@@ -27,44 +26,34 @@ func validDialPort(port int) bool {
 // inside reconnectCooldown are skipped so post-roam bursts can't complete
 // near-simultaneously and churn the peer's duplicate resolution.
 // Explicit user actions (pair intent, manual connect) pass force=true.
-func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger *zap.Logger, force bool, opts *config.Config) {
+func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, force bool, opts *config.Config) {
 	if targetIP == nil || !validDialPort(targetPort) {
 		logger.Debug("refusing to dial invalid target",
-			zap.String("device_id", targetID),
-			zap.String("ip", targetIP.String()),
-			zap.Int("port", targetPort))
+			log.String("device_id", targetID),
+			log.String("ip", targetIP.String()),
+			log.Int("port", targetPort))
 		return
 	}
 	if !force {
 		if dev, ok := devices.Get(targetID); ok && dev.InCooldown() {
 			logger.Debug("skipping dial inside reconnect cooldown",
-				zap.String("device_id", targetID),
-				zap.String("ip", targetIP.String()))
+				log.String("device_id", targetID),
+				log.String("ip", targetIP.String()))
 			return
 		}
 	}
 	addr := fmt.Sprintf("%s:%d", targetIP, targetPort)
-	logger.Debug("dialing discovered device", zap.String("device_id", targetID), zap.String("addr", addr))
+	logger.Debug("dialing discovered device", log.String("device_id", targetID), log.String("addr", addr))
 
 	dialer := &net.Dialer{
 		Timeout: config.Duration(opts.Network.DialTimeout),
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		logger.Debug("failed to dial peer", zap.Error(err))
+		logger.Debug("failed to dial peer", log.Error(err))
 		return
 	}
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		if err := tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{
-			Enable:   true,
-			Idle:     30 * time.Second,
-			Interval: 10 * time.Second,
-			Count:    3,
-		}); err != nil {
-			_ = tcpConn.SetKeepAlive(true)
-			_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		}
-	}
+	transport.SetTCPKeepAlive(conn)
 
 	var myID protocol.IdentityBody
 	json.Unmarshal(identity.Body, &myID)
@@ -98,14 +87,14 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	defer cancel()
 	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		tlsConn.Close()
-		logger.Debug("tls handshake failed", zap.Error(err))
+		logger.Debug("tls handshake failed", log.Error(err))
 		return
 	}
 
 	transConn := transport.NewConn(tlsConn)
 	// Ensure the connection is closed if handleNewConnection fails mid-setup
 	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
-		logger.Debug("new connection setup failed", zap.Error(err))
+		logger.Debug("new connection setup failed", log.Error(err))
 		transConn.Close()
 	}
 }
