@@ -31,4 +31,14 @@ func registerContactsRoutes(handler *ipc.Handler, devices *device.Registry, plug
 			return jsonOK(list)
 		})
 	})
+
+	handler.Register(ipc.CmdContactsClear, func(req ipc.Request) ipc.Response {
+		var p ipc.DevicePayload
+		return pluginRoute(req, &p, plugins, "Contacts", func(pl plugin.Plugin) ipc.Response {
+			if err := pl.(*contacts.ContactsPlugin).ForgetDevice(p.DeviceID); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			return ipc.Response{OK: true}
+		})
+	})
 }

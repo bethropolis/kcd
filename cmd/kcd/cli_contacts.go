@@ -69,5 +69,29 @@ var contactsCmd = &cli.Command{
 				return nil
 			},
 		},
+		{
+			Name:      "clear",
+			Usage:     "Delete cached contacts for a device (re-sync restores them)",
+			ArgsUsage: "<device-id>",
+			Action: func(c *cli.Context) error {
+				if c.NArg() < 1 {
+					return fmt.Errorf("missing device ID")
+				}
+				cl, err := getClient(c)
+				if err != nil {
+					return err
+				}
+				id := c.Args().Get(0)
+				list, err := cl.ContactsList(id)
+				if err != nil {
+					return err
+				}
+				if err := cl.ContactsClear(id); err != nil {
+					return err
+				}
+				fmt.Printf("Cleared %d cached contact(s) for %s.\n", len(list), id)
+				return nil
+			},
+		},
 	},
 }

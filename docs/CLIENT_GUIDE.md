@@ -384,6 +384,9 @@ if resp["ok"]:
     for c in resp["data"]:
         print(c["name"], c.get("phones", []))
 # empty list = never synced (unknown, not zero contacts)
+
+# delete the cached address book (offline-capable; re-sync restores it)
+ipc_request(sock, "contacts_clear", {"deviceId": dev_id})
 ```
 
 ### 5.7 Lock/Unlock
