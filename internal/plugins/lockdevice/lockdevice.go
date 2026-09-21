@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -61,18 +61,13 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return nil
 	}
 
-	// Phone is requesting a lock/unlock action.
-	go func() {
-		if body.SetLocked {
-			if err := exec.CommandContext(context.Background(), "loginctl", "lock-session").Run(); err != nil {
-				p.logger.Warn("lockdevice: lock-session failed", log.Error(err))
-			}
-		} else {
-			if err := exec.CommandContext(context.Background(), "loginctl", "unlock-session").Run(); err != nil {
-				p.logger.Warn("lockdevice: unlock-session failed", log.Error(err))
-			}
-		}
-	}()
+	// Phone is requesting a lock/unlock action. Fire and forget so Handle
+	// returns immediately; failures are logged by the seam.
+	if body.SetLocked {
+		plugin.RunCommandAsync(p.logger, "loginctl", "lock-session")
+	} else {
+		plugin.RunCommandAsync(p.logger, "loginctl", "unlock-session")
+	}
 
 	return nil
 }
@@ -83,7 +78,10 @@ func (p *LockDevicePlugin) getLocked() bool {
 	if sessionID == "" {
 		sessionID = "auto" // loginctl will guess the current session
 	}
-	out, err := exec.CommandContext(context.Background(), "loginctl", "show-session", sessionID, "-p", "LockedHint").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := plugin.RunCommandOutput(ctx, "loginctl", "show-session", sessionID, "-p", "LockedHint")
 	if err != nil {
 		return false
 	}
@@ -92,12 +90,20 @@ func (p *LockDevicePlugin) getLocked() bool {
 
 // Lock triggers an immediate session lock from the daemon/IPC side.
 func (p *LockDevicePlugin) Lock(dev device.Sender) error {
-	return exec.CommandContext(context.Background(), "loginctl", "lock-session").Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := plugin.RunCommandSync(ctx, "loginctl", "lock-session")
+	return err
 }
 
 // Unlock triggers an immediate session unlock from the daemon/IPC side.
 func (p *LockDevicePlugin) Unlock(dev device.Sender) error {
-	return exec.CommandContext(context.Background(), "loginctl", "unlock-session").Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := plugin.RunCommandSync(ctx, "loginctl", "unlock-session")
+	return err
 }
 
 func (p *LockDevicePlugin) OnConnect(dev device.Sender)    {}

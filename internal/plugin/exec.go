@@ -32,3 +32,11 @@ func RunCommandSync(ctx context.Context, name string, args ...string) ([]byte, e
 	cmd := exec.CommandContext(ctx, name, args...)
 	return cmd.CombinedOutput()
 }
+
+// RunCommandOutput executes a system command synchronously and returns its
+// standard output only (stderr is discarded). Use it where stdout is parsed:
+// combined output would let stderr corrupt the parse. Timeouts via ctx.
+func RunCommandOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.Output()
+}

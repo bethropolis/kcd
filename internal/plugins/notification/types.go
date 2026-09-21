@@ -13,6 +13,7 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
@@ -51,7 +52,9 @@ func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus,
 
 	// Probe --print-id support by checking --help output.
 	// This is side-effect-free and immune to version string format changes.
-	if out, err := exec.CommandContext(context.Background(), "notify-send", "--help").CombinedOutput(); err == nil {
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer probeCancel()
+	if out, err := plugin.RunCommandSync(probeCtx, "notify-send", "--help"); err == nil {
 		p.canCloseNotifs = strings.Contains(string(out), "--print-id")
 	}
 
