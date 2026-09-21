@@ -123,10 +123,15 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 	ch := make(chan *dbus.Signal, 64)
 	conn.Signal(ch)
 
+	reconcile := time.NewTicker(reconcileInterval)
+	defer reconcile.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-reconcile.C:
+			p.reconcilePlayers(conn, uniqueToDisplay)
 		case sig := <-ch:
 			if sig == nil {
 				continue
