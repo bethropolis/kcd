@@ -253,7 +253,7 @@ release:
     ## kcd v{{ .Version }}
 
     Headless KDE Connect daemon for Linux.
-
+  footer: |
     ### Installation
 
     **Arch Linux:**
@@ -289,5 +289,5 @@ release:
     curl -sSL https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.tar.gz | tar -xz
     sudo mv kcd /usr/local/bin/
     ```
-  footer: |
+
     **Full Changelog:** https://github.com/bethropolis/kcd/compare/{{ .PreviousTag }}...v{{ .Version }}
