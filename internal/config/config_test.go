@@ -134,6 +134,7 @@ func TestDurationValidation(t *testing.T) {
 		{"reconnect", "initial_backoff"}, {"reconnect", "max_backoff"}, {"reconnect", "flap_threshold"},
 		{"discovery", "broadcast_interval"}, {"discovery", "broadcast_idle_interval"},
 		{"pairing", "intent_ttl"}, {"pairing", "listen_timeout"},
+		{"mpris", "position_interval"},
 	}
 	for _, field := range fields {
 		for _, value := range []string{"", "nonsense", "10", "0", "0s", "-1s", "9999999999999999999h"} {

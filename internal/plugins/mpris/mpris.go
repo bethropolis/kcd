@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
@@ -28,8 +29,15 @@ type MPRISPlugin struct {
 	dbus      *dbus.Conn
 
 	watchCancel     context.CancelFunc
+	watchCtx        context.Context
 	watching        bool
 	telephonyCancel context.CancelFunc
+
+	// mprisCfg gates the position poller: with PollWhilePlaying the
+	// ticker exists only while at least one local player IsPlaying.
+	// pollCancel stops it; nil means no poller is running.
+	mprisCfg   config.MPRISConfig
+	pollCancel context.CancelFunc
 
 	// reconcileCh nudges the D-Bus watcher loop to re-list player names
 	// and heal drift. Buffered size 1 so bursts of triggers coalesce;
@@ -60,7 +68,7 @@ type remotePositionTracker struct {
 	playing        bool
 }
 
-func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, logger log.Logger, cacheDirs ...string) *MPRISPlugin {
+func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mprisCfg config.MPRISConfig, logger log.Logger, cacheDirs ...string) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		logger.Warn("mpris: failed to connect to D-Bus session bus", log.Error(err))
@@ -85,11 +93,13 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, log
 		callPausedPlayers: make([]string, 0),
 		artCache:          NewArtCache(logger, cacheDirs...),
 		reconcileCh:       make(chan struct{}, 1),
+		mprisCfg:          mprisCfg,
 	}
 
 	// Start the watcher immediately (like C++ does in constructor).
 	// Devices are registered lazily as packets arrive.
 	watchCtx, cancel := context.WithCancel(context.Background())
+	p.watchCtx = watchCtx
 	p.watchCancel = cancel
 	p.watching = true
 	p.startWatcher(watchCtx)

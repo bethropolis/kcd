@@ -167,9 +167,7 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 	state.Pos = pos
 	state.CanSeek = canSeek
 
-	p.mu.Lock()
-	p.lastStates[displayName] = state
-	p.mu.Unlock()
+	p.storeLocalState(displayName, state)
 
 	p.broadcast(state)
 }

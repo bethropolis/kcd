@@ -29,62 +29,6 @@ func (p *MPRISPlugin) startWatcher(ctx context.Context) {
 			}
 		}
 	}()
-
-	go p.runPollingLoop(ctx)
-}
-
-func (p *MPRISPlugin) runPollingLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	var lastHash string
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.mu.RLock()
-			players := make([]*trackedPlayer, 0, len(p.players))
-			for _, pl := range p.players {
-				players = append(players, pl)
-			}
-			p.mu.RUnlock()
-
-			if len(players) == 0 {
-				continue
-			}
-
-			var hash string
-			for _, pl := range players {
-				if state, err := p.playerState(pl.displayName); err == nil {
-					p.mu.RLock()
-					last := p.lastStates[pl.displayName]
-					p.mu.RUnlock()
-
-					changed := state.PlaybackStatus != last.PlaybackStatus ||
-						state.Title != last.Title ||
-						state.Artist != last.Artist ||
-						state.Album != last.Album ||
-						state.AlbumArtUrl != last.AlbumArtUrl ||
-						state.Volume != last.Volume ||
-						state.IsPlaying != last.IsPlaying
-
-					if changed {
-						p.mu.Lock()
-						p.lastStates[pl.displayName] = state
-						p.mu.Unlock()
-						p.broadcast(state)
-					}
-
-					hash += pl.displayName + state.PlaybackStatus + state.Title
-				}
-			}
-
-			if hash != lastHash {
-				lastHash = hash
-			}
-		}
-	}
 }
 
 func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {

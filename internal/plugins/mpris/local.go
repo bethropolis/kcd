@@ -2,6 +2,7 @@ package mpris
 
 import (
 	"strings"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
@@ -68,6 +69,12 @@ func (p *MPRISPlugin) sendPlayerListBroadcast() {
 }
 
 func (p *MPRISPlugin) broadcast(state *NowPlaying) {
+	// Stamp the position anchor at send time: Pos was sampled by the
+	// caller (signal-time query or poller GetAll) immediately before
+	// this broadcast, so receivers can extrapolate the live position as
+	// Pos + (nowMs - PosAnchorMs) while IsPlaying.
+	state.PosAnchorMs = time.Now().UnixMilli()
+
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", state)
 	if err != nil {
 		return
@@ -95,9 +102,7 @@ func (p *MPRISPlugin) addPlayer(busName, uniqueName, displayName, shortName stri
 	p.logger.Debug("mpris: added player", log.String("displayName", displayName), log.String("busName", busName))
 
 	if state, err := p.playerState(displayName); err == nil {
-		p.mu.Lock()
-		p.lastStates[displayName] = state
-		p.mu.Unlock()
+		p.storeLocalState(displayName, state)
 		p.broadcast(state)
 	}
 
@@ -109,6 +114,9 @@ func (p *MPRISPlugin) removePlayer(displayName string) {
 	delete(p.players, displayName)
 	delete(p.lastTracks, displayName)
 	delete(p.lastStates, displayName)
+	// A removal may take the last playing player with it — disarm the
+	// poller so a removed player can't pin the ticker on.
+	p.syncPlayingPollerLocked()
 	p.mu.Unlock()
 
 	p.logger.Debug("mpris: removed player", log.String("displayName", displayName))
@@ -164,6 +172,14 @@ func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 			info.CanGoPrevious = state.CanGoPrevious
 			info.CanPlay = state.CanPlay
 			info.CanPause = state.CanPause
+			// Anchor from the last broadcast, not this query: DebugStatus
+			// re-reads D-Bus live, but clients extrapolate from the
+			// cached anchor stamped at send time.
+			p.mu.RLock()
+			if cached := p.lastStates[pl.displayName]; cached != nil {
+				info.PosAnchorMs = cached.PosAnchorMs
+			}
+			p.mu.RUnlock()
 		} else {
 			info.Error = err.Error()
 		}

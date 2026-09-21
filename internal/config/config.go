@@ -35,6 +35,7 @@ type Config struct {
 	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
 	Notifications       NotificationConfig           `toml:"notifications"`
 	Battery             BatteryConfig                `toml:"battery"`
+	MPRIS               MPRISConfig                  `toml:"mpris"`
 	Notification        NotificationPluginConfig     `toml:"notification_plugin"`
 	Share               ShareConfig                  `toml:"share"`
 	SFTP                SFTPConfig                   `toml:"sftp"`
@@ -75,6 +76,7 @@ func Defaults() *Config {
 	c.Commands = make(map[string]string)
 	c.CommandsPerDevice = make(map[string]map[string]string)
 	c.Battery.Defaults()
+	c.MPRIS = MPRISConfig{PollWhilePlaying: true, PositionInterval: "2s"}
 	c.Notification.Defaults()
 	c.Share.Defaults()
 	c.SFTP.Defaults()

@@ -312,7 +312,16 @@ except KeyboardInterrupt:
 
 > **Position:** payloads stamp `posAnchorMs` (Unix millis when `pos` was
 > sampled). Live position is `pos + (nowMs - posAnchorMs)` while playing,
-> frozen otherwise — no client-side timers needed.
+> frozen otherwise — no client-side timers needed. Local (desktop-player)
+> broadcasts carry the anchor too, stamped at send time.
+>
+> **Local idle behavior:** the D-Bus watcher is event-driven, but while a
+> local player is playing the daemon re-reads its state every
+> `position_interval` (default `"2s"`, `[mpris]` section) so the phone's
+> now-playing display stays exact. Nothing is polled while paused or with
+> no players — a silent desktop costs zero wakeups. Set
+> `poll_while_playing = false` for pure event-driven mode (position then
+> extrapolates from `posAnchorMs` between D-Bus signals).
 
 See [`IPC_PROTOCOL.md §5`](IPC_PROTOCOL.md#5-event-types) for the full list.
 

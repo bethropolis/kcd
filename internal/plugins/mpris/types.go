@@ -97,16 +97,19 @@ type DebugPlayerInfo struct {
 	Album          string `json:"album"`
 	PlaybackStatus string `json:"playbackStatus"`
 	IsPlaying      bool   `json:"isPlaying"`
-	Volume         int    `json:"volume"`
+	Volume         int    `json:"volume,omitempty"`
 	Pos            int64  `json:"pos"`
-	Length         int64  `json:"length"`
-	AlbumArtUrl    string `json:"albumArtUrl"`
-	CanSeek        bool   `json:"canSeek"`
-	CanGoNext      bool   `json:"canGoNext"`
-	CanGoPrevious  bool   `json:"canGoPrevious"`
-	CanPlay        bool   `json:"canPlay"`
-	CanPause       bool   `json:"canPause"`
-	Error          string `json:"error,omitempty"`
+	// PosAnchorMs mirrors NowPlaying.PosAnchorMs: the wall-clock time the
+	// cached Pos was last broadcast, for client-side extrapolation.
+	PosAnchorMs   int64  `json:"posAnchorMs,omitempty"`
+	Length        int64  `json:"length"`
+	AlbumArtUrl   string `json:"albumArtUrl"`
+	CanSeek       bool   `json:"canSeek"`
+	CanGoNext     bool   `json:"canGoNext"`
+	CanGoPrevious bool   `json:"canGoPrevious"`
+	CanPlay       bool   `json:"canPlay"`
+	CanPause      bool   `json:"canPause"`
+	Error         string `json:"error,omitempty"`
 }
 
 type DebugStatus struct {

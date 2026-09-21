@@ -28,6 +28,13 @@ type DiscoveryConfig struct {
 	BroadcastIdleInterval string `toml:"broadcast_idle_interval"`
 }
 
+// MPRISConfig controls local media polling. The D-Bus watcher itself is
+// event-driven; the position poller only runs while music plays.
+type MPRISConfig struct {
+	PollWhilePlaying bool   `toml:"poll_while_playing"`
+	PositionInterval string `toml:"position_interval"`
+}
+
 // CacheConfig overrides storage directories. Empty values retain plugin defaults.
 type CacheConfig struct {
 	SMSAttachmentsDir string `toml:"sms_attachments_dir"`
@@ -58,6 +65,7 @@ func (c *Config) validateDurations() error {
 		{"discovery.broadcast_idle_interval", c.Discovery.BroadcastIdleInterval},
 		{"pairing.intent_ttl", c.Pairing.IntentTTL},
 		{"pairing.listen_timeout", c.Pairing.ListenTimeout},
+		{"mpris.position_interval", c.MPRIS.PositionInterval},
 	} {
 		d, err := time.ParseDuration(setting.value)
 		if err != nil {
