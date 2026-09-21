@@ -1,20 +1,9 @@
 package mpris
 
 import (
-	"time"
-
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/godbus/dbus/v5"
 )
-
-// reconcileInterval is how often the D-Bus watcher re-lists player names
-// and heals any drift between the bus and p.players. The signal fast-path
-// (NameOwnerChanged) handles the common case; this closes the gap when a
-// signal is missed, duplicated instance names race add/remove, or the
-// watcher connection dropped events during a restart — all of which
-// otherwise leave the phone with stale or missing media state forever,
-// since the polling loop skips an empty player map entirely.
-const reconcileInterval = 15 * time.Second
 
 // diffTracked compares live bus names against tracked players.
 // tracked maps busName -> displayName. It returns entries present on the
@@ -72,16 +61,20 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 		if err := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, e.busName).Store(&owner); err != nil || owner == "" {
 			continue
 		}
-		_ = conn.AddMatchSignal(
+		if err := conn.AddMatchSignal(
 			dbus.WithMatchSender(e.busName),
 			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 			dbus.WithMatchMember("PropertiesChanged"),
-		)
-		_ = conn.AddMatchSignal(
+		); err != nil {
+			p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
+		}
+		if err := conn.AddMatchSignal(
 			dbus.WithMatchSender(e.busName),
 			dbus.WithMatchInterface("org.mpris.MediaPlayer2.Player"),
 			dbus.WithMatchMember("Seeked"),
-		)
+		); err != nil {
+			p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
+		}
 		uniqueToDisplay[owner] = e.identity
 		p.addPlayer(e.busName, owner, e.identity, e.shortName)
 	}
