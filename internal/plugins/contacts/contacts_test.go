@@ -298,3 +298,34 @@ func TestListEmptyWhenNeverSynced(t *testing.T) {
 		t.Errorf("never-synced device must list empty, got %v", list)
 	}
 }
+
+// Issue #38: vCard 2.1 FN with ENCODING=QUOTED-PRINTABLE must be decoded,
+// not stored with =XX escapes intact.
+func TestParseVCardQuotedPrintable(t *testing.T) {
+	vcard := "BEGIN:VCARD\nVERSION:2.1\nFN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:=44=61=76=C3=AD=64=20=49=72=65=6C=61=6E=64\nTEL:+1-555-0100\nEND:VCARD"
+	name, _, _ := parseVCard(vcard)
+	if name != "Davíd Ireland" {
+		t.Errorf("qp name = %q, want %q", name, "Davíd Ireland")
+	}
+
+	// Emoji name + folded QP soft break (`=` EOL + space continuation).
+	vcard = "BEGIN:VCARD\nVERSION:2.1\nFN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:=50=61=74=20=F0=9F=92=A\n A\nTEL:1\nEND:VCARD"
+	name, _, _ = parseVCard(vcard)
+	if name != "Pat 💪" {
+		t.Errorf("folded qp name = %q, want %q", name, "Pat 💪")
+	}
+
+	// Malformed QP must keep the raw value, not drop the contact.
+	vcard = "BEGIN:VCARD\nFN;ENCODING=QUOTED-PRINTABLE:=ZZ=not-hex\nEND:VCARD"
+	name, _, _ = parseVCard(vcard)
+	if name != "=ZZ=not-hex" {
+		t.Errorf("malformed qp name = %q, want raw passthrough", name)
+	}
+
+	// Plain FN containing `=` must not be touched (no ENCODING param).
+	vcard = "BEGIN:VCARD\nFN:a=b\nEND:VCARD"
+	name, _, _ = parseVCard(vcard)
+	if name != "a=b" {
+		t.Errorf("plain name = %q, want %q", name, "a=b")
+	}
+}
