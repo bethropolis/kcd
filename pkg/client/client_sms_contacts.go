@@ -60,3 +60,10 @@ func (c *Client) ContactsList(deviceID string) ([]contacts.ContactSummary, error
 	}
 	return list, nil
 }
+
+// ContactsClear deletes a device's cached contacts. Offline-capable: the
+// cache is local state. Re-sync restores everything from the phone.
+func (c *Client) ContactsClear(deviceID string) error {
+	_, err := c.Call(ipc.CmdContactsClear, ipc.DevicePayload{DeviceID: deviceID})
+	return err
+}

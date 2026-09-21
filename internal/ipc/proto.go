@@ -36,6 +36,7 @@ const (
 	CmdSmsRequestAttachment = "sms_request_attachment"
 	CmdContactsSync         = "contacts_sync"
 	CmdContactsList         = "contacts_list"
+	CmdContactsClear        = "contacts_clear"
 	CmdSftpMountLocal       = "sftp_mount_local"
 	CmdSftpUnmount          = "sftp_unmount"
 	CmdStatus               = "status"

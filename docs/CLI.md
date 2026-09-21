@@ -876,6 +876,15 @@ unknown).
 kcd contacts list <device-id> [--json]
 ```
 
+### contacts clear
+
+Delete a device's cached contacts. Works offline (the cache is local
+state); re-sync restores everything from the phone.
+
+```
+kcd contacts clear <device-id>
+```
+
 ---
 
 ## volume
