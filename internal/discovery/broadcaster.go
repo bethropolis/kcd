@@ -37,7 +37,7 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 	normalInterval := b.interval
 	reducedInterval := b.idleInterval
 	if reducedInterval <= 0 {
-		reducedInterval = 60 * time.Second
+		reducedInterval = defaultIdleInterval
 	}
 
 	conn, err := net.ListenUDP("udp4", nil)

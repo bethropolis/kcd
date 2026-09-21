@@ -75,10 +75,16 @@ func configuredTCPPort() int {
 	return cfg.TCPPort
 }
 
+// Doctor probe budgets: the socket dial gets 1s, the whole probe 2s.
+const (
+	doctorDialTimeout  = 1 * time.Second
+	doctorProbeTimeout = 2 * time.Second
+)
+
 func checkDaemon() Check {
 	socketPath := config.DefaultSocketPath()
-	dialer := net.Dialer{Timeout: 1 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	dialer := net.Dialer{Timeout: doctorDialTimeout}
+	ctx, cancel := context.WithTimeout(context.Background(), doctorProbeTimeout)
 	defer cancel()
 	conn, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err == nil {

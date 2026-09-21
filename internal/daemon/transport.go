@@ -41,7 +41,13 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	return true
 }
 
+// discoveryDialMinInterval rate-limits ephemeral dials triggered by UDP
+// sightings of unknown devices: at most one dial per device per interval.
+// Without it a chatty announcer would spawn a dial storm.
+const discoveryDialMinInterval = 2 * time.Second
+
 func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
+
 	// TCP Listener
 	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
 	if err != nil {
@@ -152,7 +158,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// "not reachable"). A sighting at a new address is a genuine
 			// roam the backoff can't reach — dial it now.
 			if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
-				if dev.ShouldDiscoveryDial(2 * time.Second) {
+				if dev.ShouldDiscoveryDial(discoveryDialMinInterval) {
 					// Prefer the peer's last authenticated listening port
 					// over the unauthenticated sighted one.
 					port := tcpPort
@@ -165,7 +171,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
 					// Live socket is bound elsewhere: the peer roamed but
 					// kept its address assertion — replace the zombie.
-					if dev.ShouldDiscoveryDial(2 * time.Second) {
+					if dev.ShouldDiscoveryDial(discoveryDialMinInterval) {
 						port := tcpPort
 						if p := dev.LastPort(); validDialPort(p) {
 							port = p

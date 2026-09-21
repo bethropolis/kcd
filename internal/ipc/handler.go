@@ -13,6 +13,10 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
+// defaultPairListenTimeout bounds `kcd pair` listen mode when the daemon
+// config leaves the pairing listen timeout unset.
+const defaultPairListenTimeout = 60 * time.Second
+
 // Handler handles incoming IPC requests.
 type Handler struct {
 	devices           *device.Registry
@@ -225,7 +229,7 @@ func (h *Handler) SetPairListenTimeout(timeout time.Duration) {
 func (h *Handler) handlePairListen() Response {
 	timeout := h.pairListenTimeout
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		timeout = defaultPairListenTimeout
 	}
 	// Report any device already in StatePairRequestedByPeer WITHOUT
 	// accepting it. The caller (CLI / GUI / script) inspects the candidate

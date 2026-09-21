@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
@@ -54,17 +53,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 		logger.Debug("failed to dial peer", log.Error(err))
 		return
 	}
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		if err := tcpConn.SetKeepAliveConfig(net.KeepAliveConfig{
-			Enable:   true,
-			Idle:     30 * time.Second,
-			Interval: 10 * time.Second,
-			Count:    3,
-		}); err != nil {
-			_ = tcpConn.SetKeepAlive(true)
-			_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		}
-	}
+	transport.SetTCPKeepAlive(conn)
 
 	var myID protocol.IdentityBody
 	json.Unmarshal(identity.Body, &myID)

@@ -10,6 +10,11 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
+// defaultDispatchTimeout bounds one plugin Handle call when the plugin
+// reports no Timeout of its own. Every bundled plugin sets Timeout, so
+// this fires only for third-party or misconfigured plugins.
+const defaultDispatchTimeout = 15 * time.Second
+
 // Registry manages the set of active plugins and routes packets to them.
 type Registry struct {
 	plugins map[string]Plugin // keyed by packet type string
@@ -68,7 +73,7 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 
 	timeout := p.Timeout()
 	if timeout == 0 {
-		timeout = 15 * time.Second // Fallback default
+		timeout = defaultDispatchTimeout // Fallback default
 	}
 
 	// Because we must recover from panics, we execute Handle in a separate goroutine.
