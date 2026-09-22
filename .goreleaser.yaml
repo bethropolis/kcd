@@ -317,6 +317,12 @@ release:
     systemctl --user enable --now kcd.socket
     ```
 
+    **Arch Linux source:**
+    ```bash
+    yay -S kcd
+    systemctl --user enable --now kcd.socket
+    ```
+
     **Debian / Ubuntu:**
     ```bash
     curl -LO https://github.com/bethropolis/kcd/releases/download/v{{ .Version }}/kcd_{{ .Version }}_x86_64.deb
