@@ -31,6 +31,10 @@ type BroadcasterController struct {
 	running bool
 	cancel  context.CancelFunc
 	owners  map[string]struct{}
+	// browseStarter, when set, launches mDNS browsing on the same owned
+	// context as the broadcast loop: active discovery (both directions)
+	// shares one lifetime — pairing/reconnect only, never steady state.
+	browseStarter func(ctx context.Context)
 }
 
 // defaultIdleInterval is the broadcast period while idle (all pairs
@@ -68,6 +72,14 @@ func (bc *BroadcasterController) Stop() {
 	bc.StopOwned(OwnerPairing)
 }
 
+// SetBrowseStarter registers the mDNS browse function to run alongside
+// the owned broadcast loop. Called once at startup before any StartOwned.
+func (bc *BroadcasterController) SetBrowseStarter(starter func(ctx context.Context)) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	bc.browseStarter = starter
+}
+
 // StartOwned launches the loop (if needed) and records owner as needing it.
 func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner string) {
 	bc.mu.Lock()
@@ -95,6 +107,9 @@ func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner str
 		bc.running = false
 		bc.mu.Unlock()
 	}()
+	if bc.browseStarter != nil {
+		go bc.browseStarter(ctx)
+	}
 }
 
 // StopOwned withdraws owner's need. No-op if the owner holds nothing.

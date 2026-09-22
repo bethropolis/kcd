@@ -230,6 +230,12 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	}
 
 	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
+	// Active discovery shares the broadcast ownership lifetime: mDNS
+	// browsing (periodic probes) runs only while pairing or reconnect
+	// owners hold the controller, never at connected steady state.
+	if bc != nil {
+		bc.SetBrowseStarter(udpListener.RunMdnsDiscovery)
+	}
 	go udpListener.Run(ctx)
 
 	// Accept loop

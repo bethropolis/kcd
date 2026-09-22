@@ -75,7 +75,7 @@ with no pair in flight are disconnected immediately.
 
 At startup the `Broadcaster` registers the local device as a Zeroconf service with the `libp2p/zeroconf/v2` library. TXT records carry `id`, `name`, `type`, and `protocol` fields per the KDE Connect spec.
 
-`Listener.runMdnsDiscovery` browses `_kdeconnect._udp.local.` and synthesises a `protocol.Packet` for every discovered peer — feeding it through the same `onDeviceFound` callback used by UDP. This makes mDNS transparent to the rest of the stack.
+`Listener.RunMdnsDiscovery` browses `_kdeconnect._udp.local.` and synthesises a `protocol.Packet` for every discovered peer — feeding it through the same `onDeviceFound` callback used by UDP. This makes mDNS transparent to the rest of the stack. Browsing shares the broadcast ownership lifetime (pairing/reconnect only): the library re-queries periodically, so lifetime-on browsing would cost standing timers at connected steady state, where the always-on UDP listener and advertisement cover inbound discovery.
 
 **Why both?** UDP broadcast covers the common case instantly. mDNS handles restricted networks (Docker bridges, enterprise Wi-Fi, newer Android versions) where broadcast is filtered.
 
@@ -357,7 +357,7 @@ kcd watch [--events=...] [--json]  — stream live events
 4. Register all enabled plugins
 5. Start the TCP listener (inbound connections)
 6. Start the IPC Unix socket server
-7. Start the UDP listener and mDNS browser (discovery listener — always on)
+7. Start the UDP listener (always on) and register mDNS browsing with the broadcast controller (active only while pairing or reconnect owners hold it)
 8. Create the `BroadcasterController` in stopped state (broadcast is off by default)
 9. Block until context is cancelled (SIGINT / SIGTERM)
 10. Graceful shutdown: close listener, shutdown mDNS, stop broadcaster (if running)

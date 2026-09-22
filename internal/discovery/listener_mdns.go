@@ -46,12 +46,20 @@ func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger 
 	}()
 }
 
-// runMdnsDiscovery browses for peer _kdeconnect._udp services and feeds
+// RunMdnsDiscovery browses for peer _kdeconnect._udp services and feeds
 // sightings to onDeviceFound as synthetic identity packets. It is a method
 // on Listener (kept apart from the UDP Run loop) so both transports share
 // the same callback and self-filtering.
-func (l *Listener) runMdnsDiscovery(ctx context.Context) {
+//
+// It runs only while the broadcast controller holds owners (pairing or
+// reconnect): zeroconf Browse re-queries periodically (4s backoff to 60s)
+// plus a 10s cache-cleanup ticker, which is incompatible with zero-idle
+// steady state. Connected steady state relies on the lifetime UDP listener
+// and mDNS advertisement for inbound discovery instead. Returns when ctx
+// ends; the entries channel is closed so the results loop exits too.
+func (l *Listener) RunMdnsDiscovery(ctx context.Context) {
 	entries := make(chan *zeroconf.ServiceEntry)
+	defer close(entries)
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		for entry := range results {
 			var deviceId, deviceName, deviceType string
