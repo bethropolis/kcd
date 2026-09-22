@@ -30,7 +30,7 @@ require a restart; reloading notification filters alone does not apply them.
 | Section | Settings and defaults |
 |---|---|
 | `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"`, `transfer_idle_timeout = "60s"` |
-| `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"` |
+| `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"`, `sighting_driven = true`, `fallback_max = "1h"`, `stale_after = "24h"` |
 | `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
 | `[mpris]` | `poll_while_playing = true`, `position_interval = "2s"` |
 | `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |

@@ -20,6 +20,13 @@ type ReconnectConfig struct {
 	InitialBackoff string `toml:"initial_backoff"`
 	MaxBackoff     string `toml:"max_backoff"`
 	FlapThreshold  string `toml:"flap_threshold"`
+	// SightingDriven parks the redial timer on discovery sightings: while
+	// set, the loop dials immediately on sighting and otherwise waits up
+	// to FallbackMax, giving up entirely past StaleAfter. False restores
+	// the legacy pure-timer loop capped at MaxBackoff.
+	SightingDriven bool   `toml:"sighting_driven"`
+	FallbackMax    string `toml:"fallback_max"`
+	StaleAfter     string `toml:"stale_after"`
 }
 
 // DiscoveryConfig controls intervals while on-demand UDP discovery is running.
@@ -61,6 +68,8 @@ func (c *Config) validateDurations() error {
 		{"reconnect.initial_backoff", c.Reconnect.InitialBackoff},
 		{"reconnect.max_backoff", c.Reconnect.MaxBackoff},
 		{"reconnect.flap_threshold", c.Reconnect.FlapThreshold},
+		{"reconnect.fallback_max", c.Reconnect.FallbackMax},
+		{"reconnect.stale_after", c.Reconnect.StaleAfter},
 		{"discovery.broadcast_interval", c.Discovery.BroadcastInterval},
 		{"discovery.broadcast_idle_interval", c.Discovery.BroadcastIdleInterval},
 		{"pairing.intent_ttl", c.Pairing.IntentTTL},
@@ -77,6 +86,9 @@ func (c *Config) validateDurations() error {
 	}
 	if Duration(c.Reconnect.MaxBackoff) < Duration(c.Reconnect.InitialBackoff) {
 		return fmt.Errorf("config: reconnect.max_backoff must be >= reconnect.initial_backoff")
+	}
+	if Duration(c.Reconnect.FallbackMax) < Duration(c.Reconnect.MaxBackoff) {
+		return fmt.Errorf("config: reconnect.fallback_max must be >= reconnect.max_backoff")
 	}
 	if Duration(c.Discovery.BroadcastIdleInterval) < Duration(c.Discovery.BroadcastInterval) {
 		return fmt.Errorf("config: discovery.broadcast_idle_interval must be >= discovery.broadcast_interval")

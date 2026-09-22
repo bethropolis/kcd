@@ -177,6 +177,9 @@ remotesystemvolume = true
 # initial_backoff = "2s"
 # max_backoff = "5m"              # must be >= initial_backoff
 # flap_threshold = "15s"          # minimum lifetime for a stable connection
+# sighting_driven = true          # park redial on discovery sightings; false = legacy pure-timer loop
+# fallback_max = "1h"             # must be >= max_backoff; silent-case spacing while parked
+# stale_after = "24h"             # give up (zero timers) past this silence; next sighting respawns
 
 [discovery]
 # broadcast_interval = "30s"
