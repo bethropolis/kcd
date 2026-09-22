@@ -34,8 +34,9 @@ import (
 
 func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger log.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
 	sidechannel := transport.SidechannelOptions{
-		Timeout:     config.Duration(cfg.Network.SidechannelTimeout),
-		IdleTimeout: config.Duration(cfg.Network.TransferIdleTimeout),
+		Timeout:       config.Duration(cfg.Network.SidechannelTimeout),
+		IdleTimeout:   config.Duration(cfg.Network.TransferIdleTimeout),
+		KeepAliveIdle: config.Duration(cfg.Network.KeepAliveIdle),
 	}
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)

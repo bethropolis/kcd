@@ -172,6 +172,8 @@ remotesystemvolume = true
 # handshake_timeout = "10s"       # identity/TLS handshake
 # sidechannel_timeout = "15s"     # side-channel connection setup
 # transfer_idle_timeout = "60s"  # abort transfers silent longer than this
+# keepalive_idle = "30s"          # TCP keepalive first probe; >= 10s;
+                                 # larger = fewer probes, slower zombie detection
 
 [reconnect]
 # initial_backoff = "2s"

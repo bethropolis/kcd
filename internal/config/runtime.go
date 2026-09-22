@@ -8,11 +8,17 @@ import (
 // NetworkConfig controls connection setup deadlines, not transfer size limits.
 // TransferIdleTimeout bounds streaming silence on side-channel transfers:
 // any read/write gap longer than it aborts the transfer.
+// KeepAliveIdle is the TCP keepalive first-probe delay (kernel timers, not
+// application wakeups): larger values send fewer probes on idle
+// connections but detect dead peers more slowly. Never zero — idle
+// sockets without probes become undetectable zombies (the per-write
+// deadline guards writers only, not idle sockets).
 type NetworkConfig struct {
 	DialTimeout         string `toml:"dial_timeout"`
 	HandshakeTimeout    string `toml:"handshake_timeout"`
 	SidechannelTimeout  string `toml:"sidechannel_timeout"`
 	TransferIdleTimeout string `toml:"transfer_idle_timeout"`
+	KeepAliveIdle       string `toml:"keepalive_idle"`
 }
 
 // ReconnectConfig controls retry delays and the minimum stable connection age.
@@ -65,6 +71,7 @@ func (c *Config) validateDurations() error {
 		{"network.handshake_timeout", c.Network.HandshakeTimeout},
 		{"network.sidechannel_timeout", c.Network.SidechannelTimeout},
 		{"network.transfer_idle_timeout", c.Network.TransferIdleTimeout},
+		{"network.keepalive_idle", c.Network.KeepAliveIdle},
 		{"reconnect.initial_backoff", c.Reconnect.InitialBackoff},
 		{"reconnect.max_backoff", c.Reconnect.MaxBackoff},
 		{"reconnect.flap_threshold", c.Reconnect.FlapThreshold},
@@ -89,6 +96,9 @@ func (c *Config) validateDurations() error {
 	}
 	if Duration(c.Reconnect.FallbackMax) < Duration(c.Reconnect.MaxBackoff) {
 		return fmt.Errorf("config: reconnect.fallback_max must be >= reconnect.max_backoff")
+	}
+	if Duration(c.Network.KeepAliveIdle) < 10*time.Second {
+		return fmt.Errorf("config: network.keepalive_idle must be >= 10s (shorter delays keep weak radios awake)")
 	}
 	if Duration(c.Discovery.BroadcastIdleInterval) < Duration(c.Discovery.BroadcastInterval) {
 		return fmt.Errorf("config: discovery.broadcast_idle_interval must be >= discovery.broadcast_interval")

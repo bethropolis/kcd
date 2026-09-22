@@ -55,6 +55,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		return
 	}
 	defer tcpListener.Close()
+	tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
 
 	// Broadcast is off by default — controlled via `kcd pair` or IPC.
 	// The controller is started in stopped state.

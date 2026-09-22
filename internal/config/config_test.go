@@ -17,7 +17,7 @@ func TestDefaults(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"5s", "10s", "15s", "60s"}) {
+	if cfg.Network != (NetworkConfig{"5s", "10s", "15s", "60s", "30s"}) {
 		t.Errorf("network defaults: %+v", cfg.Network)
 	}
 	if cfg.Reconnect != (ReconnectConfig{"2s", "5m", "15s", true, "1h", "24h"}) {
@@ -105,7 +105,7 @@ app_name = "KDE Connect"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s", "90s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s", false, "2h", "48h"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
+	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s", "90s", "30s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s", false, "2h", "48h"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
 		t.Fatal("duration overrides not decoded")
 	}
 	if cfg.Cache != (CacheConfig{"/tmp/sms", "/tmp/art", "/tmp/contacts"}) || cfg.Pairing.IntentTTL != "7m" || cfg.Pairing.ListenTimeout != "2m" {
@@ -134,6 +134,7 @@ app_name = "KDE Connect"
 func TestDurationValidation(t *testing.T) {
 	fields := []struct{ section, key string }{
 		{"network", "dial_timeout"}, {"network", "handshake_timeout"}, {"network", "sidechannel_timeout"},
+		{"network", "keepalive_idle"},
 		{"reconnect", "initial_backoff"}, {"reconnect", "max_backoff"}, {"reconnect", "flap_threshold"},
 		{"reconnect", "fallback_max"}, {"reconnect", "stale_after"},
 		{"discovery", "broadcast_interval"}, {"discovery", "broadcast_idle_interval"},
@@ -180,6 +181,18 @@ func TestFallbackMaxRelationship(t *testing.T) {
 	}
 	if _, err := loadTOML(t, "[reconnect]\nmax_backoff = '5m'\nfallback_max = '1h'\n"); err != nil {
 		t.Fatalf("wider fallback_max should be valid: %v", err)
+	}
+}
+
+func TestKeepAliveIdleFloor(t *testing.T) {
+	// Below 10s the radio never sleeps: reject, even though the value
+	// parses as a positive duration.
+	if _, err := loadTOML(t, "[network]\nkeepalive_idle = '5s'\n"); err == nil ||
+		!strings.Contains(err.Error(), "network.keepalive_idle") {
+		t.Fatalf("expected keepalive_idle floor error, got %v", err)
+	}
+	if _, err := loadTOML(t, "[network]\nkeepalive_idle = '120s'\n"); err != nil {
+		t.Fatalf("120s keepalive_idle should be valid: %v", err)
 	}
 }
 

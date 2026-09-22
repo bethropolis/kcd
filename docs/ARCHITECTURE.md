@@ -81,6 +81,27 @@ At startup the `Broadcaster` registers the local device as a Zeroconf service wi
 
 ---
 
+## Idle behavior (zero standing timers)
+
+Connected steady state (all pairs connected, nothing playing, no transfers, no pairing) keeps **zero application timers**. Every periodic source is gated on actual activity instead of running free:
+
+| Source | Gating |
+|---|---|
+| UDP broadcast | Owned: pairing + reconnect owners only; zero owners = zero timers |
+| mDNS browse | Same owned lifetime as broadcast (probes are periodic by library design) |
+| mDNS advertise | Lifetime-on, responder-only (no timers) |
+| UDP/TCP/IPC listeners, D-Bus signals, bus subscriptions | Blocking waits, zero CPU until an event arrives |
+| Local position poller | Exists only while ≥1 local player `IsPlaying` (`[mpris] poll_while_playing`, `position_interval`) |
+| Remote state poller | Fires only while a client subscribes to `mpris.update` |
+| Reconnect redial | Parked on discovery sightings; fallback escalates to `fallback_max`, then gives up past `stale_after` until the next sighting |
+| TCP keepalive | Kernel probes, first delay `[network] keepalive_idle` (default 30s, minimum 10s) |
+
+Measured 2026-09-22 (phone connected, zero local players, one watch subscriber): 2 CPU ticks/min, 0 D-Bus `GetAll`/min — down from 13 ticks/min + 30 `GetAll`/min before. Methodology note: Go timers are runtime-managed (no timerfds to count) and `ptrace` is restricted by Yama, so `/proc` CPU deltas + `dbus-monitor` call rates are the working proxies.
+
+**Contributor invariant: new periodic work must be owner-gated or activity-gated, never standing.** A ticker that fires while nothing is happening is a bug — gate it on owners (discovery), playback state (MPRIS), subscribers (remote refresh), or sightings (reconnect).
+
+---
+
 ## 2. Transport (`internal/transport`)
 
 The KDE Connect TLS handshake is non-standard: **the TCP initiator acts as TLS server, and the acceptor acts as TLS client**. This is the opposite of conventional TLS and must be handled correctly.

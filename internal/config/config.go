@@ -69,7 +69,7 @@ func Defaults() *Config {
 	c.TCPPort = protocol.DefaultTCPPort
 	c.LogLevel = "info"
 
-	c.Network = NetworkConfig{DialTimeout: "5s", HandshakeTimeout: "10s", SidechannelTimeout: "15s", TransferIdleTimeout: "60s"}
+	c.Network = NetworkConfig{DialTimeout: "5s", HandshakeTimeout: "10s", SidechannelTimeout: "15s", TransferIdleTimeout: "60s", KeepAliveIdle: "30s"}
 	c.Reconnect = ReconnectConfig{InitialBackoff: "2s", MaxBackoff: "5m", FlapThreshold: "15s", SightingDriven: true, FallbackMax: "1h", StaleAfter: "24h"}
 	c.Discovery = DiscoveryConfig{BroadcastInterval: "30s", BroadcastIdleInterval: "60s"}
 	c.Plugins.Defaults()
