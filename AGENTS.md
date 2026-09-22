@@ -105,6 +105,7 @@ error message may be confusing.
 | SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger log.Logger) *SystemVolumePlugin` |
 | SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger) *SMSPlugin` |
 | Contacts | `contacts.NewContactsPlugin(bus *events.Bus, logger log.Logger) *ContactsPlugin` |
+| MPRIS | `mpris.NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mprisCfg config.MPRISConfig, logger log.Logger, cacheDirs ...string) *MPRISPlugin` |
 
 ### Interface
 

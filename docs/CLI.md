@@ -54,8 +54,9 @@ paths for overrides. Changing directories does not migrate existing files.
 `notifications.app_name` is reserved branding metadata, never a per-app filter.
 An explicit `ping.app_name = "KDE Connect"` in an older configuration remains an
 override even after changing the global name; remove it or set it to `""` to
-inherit. Protocol version, payload limits, packet buffers, queues and TCP
-keepalive remain fixed implementation settings, not configuration knobs.
+inherit. Protocol version, payload limits, packet buffers and queues
+remain fixed implementation settings, not configuration knobs. TCP
+keepalive is tunable via `[network] keepalive_idle` (minimum `"10s"`).
 
 ---
 

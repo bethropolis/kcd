@@ -56,7 +56,7 @@ Devices are found via two parallel mechanisms that run concurrently:
 
 `Listener` binds to `0.0.0.0:1716` and parses every incoming UDP packet. Packets whose `type` is not `kdeconnect.identity` or whose `deviceId` matches the local device are silently dropped.
 
-The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it only starts during `kcd pair` (listen mode) and stops when pairing completes. The UDP **listener** is always active, so paired devices reconnect without any broadcast.
+The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it runs only while an owner holds it (`kcd pair` listen mode, or the reconnect watcher while any paired device is offline) and stops fully when the last owner withdraws, so connected steady state keeps zero timers. The UDP **listener** is always active. See [Idle behavior](#idle-behavior-zero-standing-timers) for the full zero-timer inventory.
 
 ### Ephemeral discovery dials
 
