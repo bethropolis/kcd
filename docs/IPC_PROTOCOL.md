@@ -781,7 +781,8 @@ are delivered.
    ```
 
    The daemon keeps now-playing state fresh by re-requesting it every 5
-   seconds from devices with an **actively-playing** player (see the
+   seconds from devices with an **actively-playing** player — but only
+   while at least one client is subscribed to `mpris.update` (see the
    `mpris.update` section below), so this initial dump fires reliably for
    mid-track state — a pure-push client can mount and see the current track
    without polling. Stopped/paused players are deliberately not polled, so
@@ -1240,9 +1241,11 @@ Now-playing state from a device's media player.
 > path in a second `mpris.update`. If the fetch fails, the pending flag
 > clears on the next state change.
 
-> **Freshness:** the daemon re-requests now-playing from every connected
+> **Freshness:** while at least one client subscribes to `mpris.update`,
+> the daemon re-requests now-playing from every connected
 > device with an **actively-playing** player every 5 seconds
-> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). Responses are
+> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). With nobody
+> subscribed, no refresh requests go out. Responses are
 > deduplicated — an event is only emitted when the state actually changes.
 > This keeps `pos`/state current for pure-push clients (widgets, Waybar)
 > that never poll the CLI. Devices that haven't reported a player yet, or

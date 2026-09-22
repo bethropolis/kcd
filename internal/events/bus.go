@@ -142,6 +142,22 @@ func (b *Bus) unsubscribe(id uint64) {
 	}
 }
 
+// HasSubscribers reports whether at least one live subscriber would
+// receive events of the given type. Subscribers with no filters match
+// everything. Scanned on demand under RLock — subscriber counts are tiny
+// and callers tick at most every few seconds, so no counter state to keep
+// in sync on the unsubscribe path.
+func (b *Bus) HasSubscribers(typ EventType) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, sub := range b.subscribers {
+		if sub.matches(typ) {
+			return true
+		}
+	}
+	return false
+}
+
 // Publish broadcasts an event to all interested subscribers.
 func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
 	ev := Event{

@@ -294,11 +294,13 @@ except KeyboardInterrupt:
 | `pair.requested` | Remote device wants to pair |
 | `ping.received` | Ping from device |
 
-> **Freshness:** the daemon re-requests now-playing from devices with an
-> actively-playing player every 5 seconds, so a pure-push client (a widget watching the
+> **Freshness:** while at least one client watches `mpris.update`, the
+> daemon re-requests now-playing from devices with an actively-playing
+> player every 5 seconds, so a pure-push client (a widget watching the
 > event stream, with no polling) receives the current track within one poll
 > interval of subscribing — including mid-track mount, thanks to the initial
-> event dump. Events are deduplicated: `mpris.update` only fires when the
+> event dump. With nobody watching, no refresh requests go out at all.
+> Events are deduplicated: `mpris.update` only fires when the
 > state actually changed, so the stream stays quiet between track changes.
 > Stopped/paused players are not polled, and when the phone removes a player
 > from its `playerList` (session destroyed) the cached state is dropped with

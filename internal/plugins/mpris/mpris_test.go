@@ -287,7 +287,12 @@ func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
 }
 
 func TestPollRemoteStatesOnlyTargetsKnownPlayers(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())
+	bus := events.NewBus(log.Nop())
+	// The poller only emits while somebody listens for mpris.update;
+	// subscribe so this test exercises the targeting logic itself.
+	watch := bus.Subscribe(4, events.TypeMprisUpdate)
+	defer watch.Close()
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}

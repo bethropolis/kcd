@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -192,11 +193,12 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 }
 
 // startRemoteStatePoller periodically re-requests now-playing from every
-// connected device that has a known active player. The responses flow back
-// through Handle, where shouldPublishRemoteState dedupes them, so an
-// mpris.update is only republished when the state actually changes — not
-// on every poll. This closes the "watch client misses mid-track state"
-// gap from the initial dump's 10s freshness gate.
+// connected device that has a known active player, but only while somebody
+// listens: pollRemoteStates stays silent with zero mpris.update subscribers.
+// The responses flow back through Handle, where shouldPublishRemoteState
+// dedupes them, so an mpris.update is only republished when the state
+// actually changes — not on every poll. This closes the "watch client
+// misses mid-track state" gap from the initial dump's 10s freshness gate.
 func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(remoteStatePollInterval)
@@ -217,7 +219,14 @@ func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
 // reported a player) or whose player is stopped/paused are skipped — stopped
 // players are intentionally left to go stale instead of keeping a ghost track
 // perpetually fresh.
+//
+// The poller is demand-driven: with no subscriber for mpris.update (no
+// `kcd watch` listening for media), answers would be consumed by nobody, so
+// no requests go out. Subscribing re-arms the refresh within one interval.
 func (p *MPRISPlugin) pollRemoteStates() {
+	if !p.bus.HasSubscribers(events.TypeMprisUpdate) {
+		return
+	}
 	p.mu.RLock()
 	type target struct {
 		dev    device.Sender
