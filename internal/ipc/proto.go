@@ -201,6 +201,7 @@ type MprisPlayerInfo struct {
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume"`
 	Pos            int64  `json:"pos"`
+	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
 	Length         int64  `json:"length"`
 	AlbumArtUrl    string `json:"albumArtUrl"`
 	CanSeek        bool   `json:"canSeek"`

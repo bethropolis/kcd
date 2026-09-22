@@ -89,15 +89,7 @@ func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Durati
 				last := p.lastStates[pl.displayName]
 				p.mu.RUnlock()
 
-				changed := last == nil ||
-					state.PlaybackStatus != last.PlaybackStatus ||
-					state.Title != last.Title ||
-					state.Artist != last.Artist ||
-					state.Album != last.Album ||
-					state.AlbumArtUrl != last.AlbumArtUrl ||
-					state.Volume != last.Volume ||
-					state.IsPlaying != last.IsPlaying
-				if changed {
+				if localStateChanged(state, last) {
 					p.storeLocalState(pl.displayName, state)
 					p.broadcast(state)
 				}

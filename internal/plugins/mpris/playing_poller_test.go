@@ -90,6 +90,23 @@ func TestPollNeverArmsWhenDisabled(t *testing.T) {
 	}
 }
 
+// localStateChanged is the shared compare behind the poller tick and the
+// reconcile state refresh: nil cache always counts, equal states don't.
+func TestLocalStateChanged(t *testing.T) {
+	base := &NowPlaying{Player: "Nightdrive", PlaybackStatus: "Playing", IsPlaying: true, Title: "T"}
+	if !localStateChanged(base, nil) {
+		t.Fatal("nil cache must count as changed")
+	}
+	same := &NowPlaying{Player: "Nightdrive", PlaybackStatus: "Playing", IsPlaying: true, Title: "T"}
+	if localStateChanged(base, same) {
+		t.Fatal("equal states must not count as changed")
+	}
+	paused := &NowPlaying{Player: "Nightdrive", PlaybackStatus: "Paused", IsPlaying: false, Title: "T"}
+	if !localStateChanged(base, paused) {
+		t.Fatal("status flip must count as changed")
+	}
+}
+
 // Anchor is stamped on the broadcast state itself.
 func TestBroadcastAnchorFreshness(t *testing.T) {
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())

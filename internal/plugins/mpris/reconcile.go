@@ -52,6 +52,10 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 
 	add, drop := diffTracked(entries, tracked)
 	if len(add) == 0 && len(drop) == 0 {
+		// Names agree, but state may still be stale (a missed Play
+		// signal disarms the position poller with nothing left to
+		// correct it). Heal that too.
+		p.refreshTrackedStates()
 		return
 	}
 	p.logger.Debug("mpris: reconciling players")
@@ -101,4 +105,51 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 			}
 		}
 	}
+	p.refreshTrackedStates()
+}
+
+// refreshTrackedStates re-reads D-Bus state for every tracked player,
+// storing and broadcasting changes. Reconcile heals names; this heals
+// STATE: without it a missed or stale Play signal leaves the position
+// poller disarmed (or a pause missed leaves it armed) with no further
+// signal arriving to correct it. Triggers are rare (unknown senders,
+// explicit queries, connects), so the per-player GetAll is event-driven
+// cost — never a standing timer. Read failures change nothing.
+func (p *MPRISPlugin) refreshTrackedStates() {
+	if p.dbus == nil {
+		return
+	}
+	p.mu.RLock()
+	names := make([]string, 0, len(p.players))
+	for display := range p.players {
+		names = append(names, display)
+	}
+	p.mu.RUnlock()
+
+	for _, display := range names {
+		state, err := p.playerState(display)
+		if err != nil {
+			continue
+		}
+		p.mu.RLock()
+		last := p.lastStates[display]
+		p.mu.RUnlock()
+		if localStateChanged(state, last) {
+			p.storeLocalState(display, state)
+			p.broadcast(state)
+		}
+	}
+}
+
+// localStateChanged reports whether a fresh read differs from the cached
+// state on any broadcasted field. A nil cache always counts as changed.
+func localStateChanged(state, last *NowPlaying) bool {
+	return last == nil ||
+		state.PlaybackStatus != last.PlaybackStatus ||
+		state.Title != last.Title ||
+		state.Artist != last.Artist ||
+		state.Album != last.Album ||
+		state.AlbumArtUrl != last.AlbumArtUrl ||
+		state.Volume != last.Volume ||
+		state.IsPlaying != last.IsPlaying
 }
