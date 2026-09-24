@@ -1,6 +1,8 @@
 package mpris
 
 import (
+	"time"
+
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/godbus/dbus/v5"
 )
@@ -131,19 +133,32 @@ func (p *MPRISPlugin) refreshTrackedStates() {
 		if err != nil {
 			continue
 		}
+		// The comparison reads the cached anchor, which broadcast
+		// stamps under p.mu — hold RLock through it.
 		p.mu.RLock()
-		last := p.lastStates[display]
+		changed := localStateChanged(time.Now().UnixMilli(), state, p.lastStates[display])
 		p.mu.RUnlock()
-		if localStateChanged(state, last) {
+		if changed {
 			p.storeLocalState(display, state)
 			p.broadcast(state)
 		}
 	}
 }
 
+// positionDriftToleranceMs bounds how far the phone's extrapolated
+// position may drift from the true position before a poll tick
+// re-broadcasts. Steady playback inside the tolerance stays silent (the
+// phone extrapolates Pos + (now - PosAnchorMs) itself); seeks, missed
+// signals, and clock drift beyond it refresh the anchor.
+const positionDriftToleranceMs = 3000
+
 // localStateChanged reports whether a fresh read differs from the cached
 // state on any broadcasted field. A nil cache always counts as changed.
-func localStateChanged(state, last *NowPlaying) bool {
+// Position counts only on drift: while both reads agree the player is
+// playing, the phone extrapolates from the anchor, so a tick that merely
+// advances Pos on schedule is not a change. nowMs is the tick time the
+// extrapolation is measured against.
+func localStateChanged(nowMs int64, state, last *NowPlaying) bool {
 	return last == nil ||
 		state.PlaybackStatus != last.PlaybackStatus ||
 		state.Title != last.Title ||
@@ -151,5 +166,22 @@ func localStateChanged(state, last *NowPlaying) bool {
 		state.Album != last.Album ||
 		state.AlbumArtUrl != last.AlbumArtUrl ||
 		state.Volume != last.Volume ||
-		state.IsPlaying != last.IsPlaying
+		state.IsPlaying != last.IsPlaying ||
+		positionDrifted(nowMs, state, last)
+}
+
+// positionDrifted reports whether the fresh position has moved off the
+// phone's extrapolation past the tolerance. Outside steady playback
+// (either side paused, or no anchor stamped yet) there is no
+// extrapolation, so any raw Pos difference counts.
+func positionDrifted(nowMs int64, state, last *NowPlaying) bool {
+	if state.IsPlaying && last.IsPlaying && last.PosAnchorMs > 0 {
+		expected := last.Pos + (nowMs - last.PosAnchorMs)
+		drift := state.Pos - expected
+		if drift < 0 {
+			drift = -drift
+		}
+		return drift > positionDriftToleranceMs
+	}
+	return state.Pos != last.Pos
 }

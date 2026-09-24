@@ -131,9 +131,18 @@ func reconnectWithBackoff(
 			continue
 		}
 
+		// Reload the dial target every lap: a sighting while parked
+		// records a fresher address (roam) than this loop's spawn-time
+		// target, and the one-shot discovery dial may have failed. The
+		// spawn address stays the fallback when nothing was ever sighted.
+		dialIP := ip
+		if sighted := dev.LastSightedIP(); sighted != nil {
+			dialIP = sighted
+		}
+
 		logger.Info("auto-reconnect: dialling",
 			log.String("device_id", dev.ID()),
-			log.String("ip", ip.String()),
+			log.String("ip", dialIP.String()),
 			log.Int("attempt", attempt+1),
 			log.Bool("sighting_triggered", triggered),
 		)
@@ -142,7 +151,7 @@ func reconnectWithBackoff(
 		// default: the identity may carry a non-standard port (or none
 		// at all, in which case LastPort is 0 and we fall back).
 		port := reconnectPort(dev, opts.TCPPort)
-		DialDevice(ctx, ip, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+		DialDevice(ctx, dialIP, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 		lastDial = time.Now()
 
 		if dev.IsConnected() {

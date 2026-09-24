@@ -73,9 +73,18 @@ func (p *MPRISPlugin) broadcast(state *NowPlaying) {
 	// caller (signal-time query or poller GetAll) immediately before
 	// this broadcast, so receivers can extrapolate the live position as
 	// Pos + (nowMs - PosAnchorMs) while IsPlaying.
+	//
+	// The stamp takes p.mu, and the packet is marshalled from a snapshot
+	// taken under the same hold: state aliases the pointer cached in
+	// lastStates, and DebugStatus reads its anchor under RLock from the
+	// IPC path. Stamping without the mutex races those reads, and
+	// marshalling the live pointer races a concurrent broadcast's stamp.
+	p.mu.Lock()
 	state.PosAnchorMs = time.Now().UnixMilli()
+	snapshot := *state
+	p.mu.Unlock()
 
-	pkt, err := protocol.NewPacket("kdeconnect.mpris", state)
+	pkt, err := protocol.NewPacket("kdeconnect.mpris", &snapshot)
 	if err != nil {
 		return
 	}

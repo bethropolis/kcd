@@ -94,7 +94,7 @@ func (c *Config) validateDurations() error {
 	if Duration(c.Reconnect.MaxBackoff) < Duration(c.Reconnect.InitialBackoff) {
 		return fmt.Errorf("config: reconnect.max_backoff must be >= reconnect.initial_backoff")
 	}
-	if Duration(c.Reconnect.FallbackMax) < Duration(c.Reconnect.MaxBackoff) {
+	if c.Reconnect.SightingDriven && Duration(c.Reconnect.FallbackMax) < Duration(c.Reconnect.MaxBackoff) {
 		return fmt.Errorf("config: reconnect.fallback_max must be >= reconnect.max_backoff")
 	}
 	if Duration(c.Network.KeepAliveIdle) < 10*time.Second {

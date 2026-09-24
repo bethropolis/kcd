@@ -144,6 +144,18 @@ func (d *Device) NoteSighting(sighted net.IP) (roamed bool) {
 	return false
 }
 
+// LastSightedIP returns the most recent discovery sighting address, or
+// nil if the peer has never announced itself in this process. Unlike
+// LastIP (the last *authenticated* address), this tracks where the peer
+// provably is right now — the parked reconnect loop prefers it over its
+// spawn-time target so fallback attempts follow roams instead of
+// redialling a stale address after a failed one-shot dial.
+func (d *Device) LastSightedIP() net.IP {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.lastSightedIP
+}
+
 // TryReconnect attempts to mark the device as reconnecting.
 // Returns true if this goroutine should proceed; false if another
 // reconnect goroutine is already running.

@@ -91,8 +91,8 @@ Connected steady state (all pairs connected, nothing playing, no transfers, no p
 | mDNS browse | Same owned lifetime as broadcast (probes are periodic by library design) |
 | mDNS advertise | Lifetime-on, responder-only (no timers) |
 | UDP/TCP/IPC listeners, D-Bus signals, bus subscriptions | Blocking waits, zero CPU until an event arrives |
-| Local position poller | Exists only while ≥1 local player `IsPlaying` (`[mpris] poll_while_playing`, `position_interval`) |
-| Remote state poller | Fires only while a client subscribes to `mpris.update` |
+| Local position poller | Exists only while ≥1 local player `IsPlaying` (`[mpris] poll_while_playing`, `position_interval`); ticks re-broadcast only on metadata change or position drift >3s off the anchor extrapolation |
+| Remote state poller | Ticker itself exists only while a client subscribes to `mpris.update` (bus subscriber-change hook starts/stops it) |
 | Reconnect redial | Parked on discovery sightings; fallback escalates to `fallback_max`, then gives up past `stale_after` until the next sighting |
 | TCP keepalive | Kernel probes, first delay `[network] keepalive_idle` (default 30s, minimum 10s) |
 

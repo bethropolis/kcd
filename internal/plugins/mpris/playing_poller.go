@@ -85,11 +85,13 @@ func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Durati
 				if err != nil {
 					continue
 				}
+				// Hold RLock through the compare: it reads the cached
+				// anchor, which broadcast stamps under p.mu.
 				p.mu.RLock()
-				last := p.lastStates[pl.displayName]
+				changed := localStateChanged(time.Now().UnixMilli(), state, p.lastStates[pl.displayName])
 				p.mu.RUnlock()
 
-				if localStateChanged(state, last) {
+				if changed {
 					p.storeLocalState(pl.displayName, state)
 					p.broadcast(state)
 				}

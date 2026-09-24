@@ -182,6 +182,16 @@ func TestFallbackMaxRelationship(t *testing.T) {
 	if _, err := loadTOML(t, "[reconnect]\nmax_backoff = '5m'\nfallback_max = '1h'\n"); err != nil {
 		t.Fatalf("wider fallback_max should be valid: %v", err)
 	}
+	// Pre-1.20 configs that raised max_backoff above the new 1h fallback
+	// default must keep loading in legacy mode: fallback_max is unused
+	// with sighting_driven=false, so the relationship is not enforced.
+	if _, err := loadTOML(t, "[reconnect]\nsighting_driven = false\nmax_backoff = '2h'\n"); err != nil {
+		t.Fatalf("legacy max_backoff above default fallback must stay valid: %v", err)
+	}
+	if _, err := loadTOML(t, "[reconnect]\nsighting_driven = true\nmax_backoff = '2h'\n"); err == nil ||
+		!strings.Contains(err.Error(), "reconnect.fallback_max") {
+		t.Fatalf("expected fallback_max relationship error when sighting-driven, got %v", err)
+	}
 }
 
 func TestKeepAliveIdleFloor(t *testing.T) {

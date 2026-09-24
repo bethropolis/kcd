@@ -91,6 +91,37 @@ func TestBrowseStarterSharesOwnership(t *testing.T) {
 	}
 }
 
+// Startup race: reconnect ownership can begin before transport setup
+// registers the browse starter. A late setter must attach browsing to
+// the already-running owner instead of waiting for a cycle that may
+// never come (the pair is already offline and silent).
+func TestLateBrowseStarterAttachesToRunningOwner(t *testing.T) {
+	bc := NewBroadcasterController(testIdentity(t), protocol.DefaultTCPPort, time.Hour, log.Nop(), nil)
+	ctx := context.Background()
+
+	bc.StartOwned(ctx, OwnerReconnect)
+	if !bc.IsRunning() {
+		t.Fatal("loop must run before the starter is registered")
+	}
+
+	started := make(chan context.Context, 1)
+	bc.SetBrowseStarter(func(browseCtx context.Context) {
+		started <- browseCtx
+	})
+
+	select {
+	case browseCtx := <-started:
+		select {
+		case <-browseCtx.Done():
+			t.Fatal("attached browse context must live while the owner holds the loop")
+		default:
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late browse starter did not attach to the running owner")
+	}
+	bc.StopOwned(OwnerReconnect)
+}
+
 // Without a registered starter the controller behaves exactly as before.
 func TestNoBrowseStarterNoBrowse(t *testing.T) {
 	bc := NewBroadcasterController(testIdentity(t), protocol.DefaultTCPPort, time.Hour, log.Nop(), nil)

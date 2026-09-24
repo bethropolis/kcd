@@ -295,11 +295,12 @@ except KeyboardInterrupt:
 | `ping.received` | Ping from device |
 
 > **Freshness:** while at least one client watches `mpris.update`, the
-> daemon re-requests now-playing from devices with an actively-playing
-> player every 5 seconds, so a pure-push client (a widget watching the
-> event stream, with no polling) receives the current track within one poll
-> interval of subscribing — including mid-track mount, thanks to the initial
-> event dump. With nobody watching, no refresh requests go out at all.
+> daemon runs a 5-second ticker that re-requests now-playing from devices
+> with an actively-playing player, so a pure-push client (a widget watching
+> the event stream, with no polling) receives the current track within one
+> poll interval of subscribing — including mid-track mount, thanks to the
+> initial event dump. The ticker itself only runs while watched: with
+> nobody watching, there is no timer and no refresh requests go out at all.
 > Events are deduplicated: `mpris.update` only fires when the
 > state actually changed, so the stream stays quiet between track changes.
 > Stopped/paused players are not polled, and when the phone removes a player
@@ -319,8 +320,11 @@ except KeyboardInterrupt:
 >
 > **Local idle behavior:** the D-Bus watcher is event-driven, but while a
 > local player is playing the daemon re-reads its state every
-> `position_interval` (default `"2s"`, `[mpris]` section) so the phone's
-> now-playing display stays exact. Nothing is polled while paused or with
+> `position_interval` (default `"2s"`, `[mpris]` section). Steady playback
+> stays silent — the phone extrapolates from `posAnchorMs` — and a tick
+> re-broadcasts only on a metadata change or when the true position drifts
+> more than 3s off the extrapolation (seek, missed signal, clock drift).
+> Nothing is polled while paused or with
 > no players — a silent desktop costs zero wakeups. Set
 > `poll_while_playing = false` for pure event-driven mode (position then
 > extrapolates from `posAnchorMs` between D-Bus signals).

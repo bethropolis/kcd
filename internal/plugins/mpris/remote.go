@@ -192,26 +192,49 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 	p.requestPlayerList(dev)
 }
 
-// startRemoteStatePoller periodically re-requests now-playing from every
+// syncRemotePoller starts the remote-state poller when at least one
+// subscriber listens for mpris.update and stops it when the audience
+// drains. Invoked from the bus subscriber-change hook (which runs without
+// the bus lock) and once at construction. The hook only manages the
+// ticker lifecycle; pollRemoteStates keeps its own guard so a racing
+// unsubscribe between ticks still sends nothing.
+func (p *MPRISPlugin) syncRemotePoller() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.bus.HasSubscribers(events.TypeMprisUpdate) {
+		if p.remotePollCancel == nil {
+			ctx, cancel := context.WithCancel(p.watchCtx)
+			p.remotePollCancel = cancel
+			go p.runRemoteStatePoller(ctx)
+		}
+		return
+	}
+	if p.remotePollCancel != nil {
+		p.remotePollCancel()
+		p.remotePollCancel = nil
+	}
+}
+
+// runRemoteStatePoller periodically re-requests now-playing from every
 // connected device that has a known active player, but only while somebody
-// listens: pollRemoteStates stays silent with zero mpris.update subscribers.
+// listens: the ticker itself exists only with mpris.update subscribers
+// (see syncRemotePoller), and pollRemoteStates stays silent with zero
+// subscribers even if a tick races an unsubscribe.
 // The responses flow back through Handle, where shouldPublishRemoteState
 // dedupes them, so an mpris.update is only republished when the state
 // actually changes — not on every poll. This closes the "watch client
 // misses mid-track state" gap from the initial dump's 10s freshness gate.
-func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(remoteStatePollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				p.pollRemoteStates()
-			}
+func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
+	ticker := time.NewTicker(remoteStatePollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.pollRemoteStates()
 		}
-	}()
+	}
 }
 
 // pollRemoteStates requests a now-playing refresh from devices that have a

@@ -509,3 +509,47 @@ func TestPublishedEventHasAnchorAndPendingArt(t *testing.T) {
 		t.Errorf("anchor mismatch: published %d, served %d", pub.PosAnchorMs, rs.PosAnchorMs)
 	}
 }
+
+// Broadcast stamps the anchor on the same pointer cached in lastStates
+// while DebugStatus reads that cached anchor under RLock from the IPC
+// path. Hammer both concurrently: under -race any unsynchronized stamp
+// is reported. The locked RLock read mirrors DebugStatus's access.
+func TestBroadcastAnchorStampRace(t *testing.T) {
+	bus := events.NewBus(log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
+	if plugin.watchCancel != nil {
+		defer plugin.watchCancel()
+	}
+
+	state := &NowPlaying{Player: "Racer", Title: "T", Pos: 1000, IsPlaying: true}
+	plugin.mu.Lock()
+	plugin.lastStates["Racer"] = state
+	plugin.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				plugin.broadcast(state)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				plugin.mu.RLock()
+				_ = plugin.lastStates["Racer"].PosAnchorMs
+				plugin.mu.RUnlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if state.PosAnchorMs == 0 {
+		t.Error("expected broadcast to stamp PosAnchorMs")
+	}
+}

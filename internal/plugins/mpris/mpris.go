@@ -39,6 +39,11 @@ type MPRISPlugin struct {
 	mprisCfg   config.MPRISConfig
 	pollCancel context.CancelFunc
 
+	// remotePollCancel stops the remote-state poller; nil means it is
+	// not running. The poller is demand-driven (see syncRemotePoller):
+	// no mpris.update subscribers, no ticker — zero idle timers.
+	remotePollCancel context.CancelFunc
+
 	// reconcileCh nudges the D-Bus watcher loop to re-list player names
 	// and heal drift. Buffered size 1 so bursts of triggers coalesce;
 	// sends are non-blocking. Event-driven only — no timers.
@@ -103,7 +108,11 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mpr
 	p.watchCancel = cancel
 	p.watching = true
 	p.startWatcher(watchCtx)
-	p.startRemoteStatePoller(watchCtx)
+	// The remote-state poller follows the audience: the bus hook starts
+	// it on the first mpris.update subscriber and stops it on the last
+	// unsubscribe, so the 5s ticker never runs unobserved.
+	p.bus.OnSubscriberChange(p.syncRemotePoller)
+	p.syncRemotePoller()
 
 	// Subscribe to telephony events for pause-music-on-call.
 	if p.pauseMusic && p.dbus != nil {

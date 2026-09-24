@@ -56,10 +56,9 @@ func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger 
 // plus a 10s cache-cleanup ticker, which is incompatible with zero-idle
 // steady state. Connected steady state relies on the lifetime UDP listener
 // and mDNS advertisement for inbound discovery instead. Returns when ctx
-// ends; the entries channel is closed so the results loop exits too.
+// ends; zeroconf closes the entries channel, which ends the results loop.
 func (l *Listener) RunMdnsDiscovery(ctx context.Context) {
 	entries := make(chan *zeroconf.ServiceEntry)
-	defer close(entries)
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		for entry := range results {
 			var deviceId, deviceName, deviceType string

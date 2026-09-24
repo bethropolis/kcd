@@ -93,6 +93,10 @@ type Bus struct {
 	subscribers map[uint64]*Subscriber
 	nextID      uint64
 	logger      log.Logger
+	// changeHooks run (without the bus lock held) after every subscribe
+	// and unsubscribe, so demand-driven producers can start/stop with
+	// the audience instead of polling HasSubscribers on a timer.
+	changeHooks []func()
 }
 
 // NewBus creates a new event bus.
@@ -108,7 +112,6 @@ func NewBus(logger log.Logger) *Bus {
 // If filters is empty, it receives all events.
 func (b *Bus) Subscribe(capacity int, filters ...EventType) *Subscriber {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	b.nextID++
 	id := b.nextID
@@ -127,18 +130,45 @@ func (b *Bus) Subscribe(capacity int, filters ...EventType) *Subscriber {
 
 	b.subscribers[id] = sub
 	b.logger.Debug("new subscriber", log.Uint64("id", id), log.Int("filters", len(filters)))
+	b.mu.Unlock()
+	b.notifyChange()
 	return sub
 }
 
 // unsubscribe removes a subscriber.
 func (b *Bus) unsubscribe(id uint64) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
+	removed := false
 	if sub, ok := b.subscribers[id]; ok {
 		close(sub.ch)
 		delete(b.subscribers, id)
 		b.logger.Debug("subscriber removed", log.Uint64("id", id))
+		removed = true
+	}
+	b.mu.Unlock()
+	if removed {
+		b.notifyChange()
+	}
+}
+
+// OnSubscriberChange registers a hook invoked after every subscribe and
+// unsubscribe. Hooks run without the bus lock held and must return
+// quickly; they typically re-check HasSubscribers and start/stop a
+// producer. Register before subscribers arrive — hooks do not replay.
+func (b *Bus) OnSubscriberChange(fn func()) {
+	b.mu.Lock()
+	b.changeHooks = append(b.changeHooks, fn)
+	b.mu.Unlock()
+}
+
+func (b *Bus) notifyChange() {
+	b.mu.RLock()
+	hooks := make([]func(), len(b.changeHooks))
+	copy(hooks, b.changeHooks)
+	b.mu.RUnlock()
+	for _, fn := range hooks {
+		fn()
 	}
 }
 

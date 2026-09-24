@@ -185,9 +185,11 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				// Wake a parked reconnect loop (peer provably alive at
 				// this address), or respawn one that gave up past the
 				// stale horizon. TryReconnect single-flights: exactly one
-				// loop per device. The sighted address replaces a stale
-				// LastIP, and the attempt counter restarts — the peer is
-				// provably back, so escalated backoff no longer applies.
+				// loop per device. The sighting is recorded as the freshest
+				// known address (the parked loop reloads it every lap, so a
+				// roam survives a failed one-shot dial), and the attempt
+				// counter restarts — the peer is provably back, so escalated
+				// backoff no longer applies.
 				dev.PokeReconnect()
 				if !dev.IsConnected() && dev.TryReconnect() {
 					dev.ResetReconnectAttempt()

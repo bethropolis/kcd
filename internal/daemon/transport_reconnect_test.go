@@ -160,6 +160,56 @@ func TestReconnectUnpairExitsParkedLoop(t *testing.T) {
 	waitForReconnectExit(t, dev, 5*time.Second)
 }
 
+// A roam sighting while parked must redirect fallback dials: the loop is
+// spawned with a dead spawn-time target, a sighting is recorded at the
+// live listener address, and the poked loop must dial the sighted
+// address — not keep redialling the stale spawn target.
+func TestReconnectFollowsSightedAddress(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.2:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			count.Add(1)
+			c.Close()
+		}
+	}()
+	t.Cleanup(func() { ln.Close() })
+
+	dev := parkedDevice(t, "roam-2")
+	dev.SetLastPort(ln.Addr().(*net.TCPAddr).Port)
+
+	opts := parkedOpts()
+	identity, err := newTestIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Spawn target is dead (refused): only the sighted address can answer.
+	go reconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity,
+		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
+		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+
+	time.Sleep(100 * time.Millisecond) // let the loop park on the timer
+	dev.NoteSighting(net.ParseIP("127.0.0.2"))
+	dev.PokeReconnect()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for count.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if count.Load() == 0 {
+		t.Fatal("parked loop did not dial the sighted address within 5s")
+	}
+}
+
 // Legacy mode (sighting_driven=false) keeps pure-timer dials capped at
 // max_backoff: the timer path must still fire without any sighting.
 func TestReconnectLegacyTimerStillDials(t *testing.T) {

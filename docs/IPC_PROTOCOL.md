@@ -1242,10 +1242,11 @@ Now-playing state from a device's media player.
 > clears on the next state change.
 
 > **Freshness:** while at least one client subscribes to `mpris.update`,
-> the daemon re-requests now-playing from every connected
-> device with an **actively-playing** player every 5 seconds
-> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). With nobody
-> subscribed, no refresh requests go out. Responses are
+> the daemon runs a 5-second ticker that re-requests now-playing from
+> every connected device with an **actively-playing** player
+> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). The ticker
+> itself only exists while subscribed — with nobody listening there is no
+> timer and no refresh requests go out. Responses are
 > deduplicated — an event is only emitted when the state actually changes.
 > This keeps `pos`/state current for pure-push clients (widgets, Waybar)
 > that never poll the CLI. Devices that haven't reported a player yet, or

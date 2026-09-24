@@ -59,6 +59,36 @@ func TestPollRemoteRefreshesWhileWatched(t *testing.T) {
 	}
 }
 
+// The ticker itself is demand-driven: with zero subscribers no poller
+// goroutine exists, the first mpris.update subscribe starts it, and the
+// last unsubscribe stops it. The hook fires synchronously inside
+// Subscribe/Close, so no waiting is needed.
+func TestRemotePollerFollowsSubscribers(t *testing.T) {
+	bus := events.NewBus(log.Nop())
+	p := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
+	if p.watchCancel != nil {
+		defer p.watchCancel()
+	}
+
+	polling := func() bool {
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		return p.remotePollCancel != nil
+	}
+
+	if polling() {
+		t.Fatal("remote poller running with zero subscribers")
+	}
+	sub := bus.Subscribe(4, events.TypeMprisUpdate)
+	if !polling() {
+		t.Fatal("remote poller not started on first subscribe")
+	}
+	sub.Close()
+	if polling() {
+		t.Fatal("remote poller still running after last unsubscribe")
+	}
+}
+
 // Unsubscribing silences the poller again — attach/detach cycles must not
 // leak refreshes.
 func TestPollRemoteSilentAfterUnsubscribe(t *testing.T) {
