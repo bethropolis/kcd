@@ -75,7 +75,7 @@ command -v go >/dev/null 2>&1 \
 
 GO_VERSION="$(go version | awk '{print $3}' | tr -d 'go')"
 REQUIRED_MAJOR=1
-REQUIRED_MINOR=22
+REQUIRED_MINOR=25
 IFS='.' read -r MAJOR MINOR _ <<< "$GO_VERSION"
 if (( MAJOR < REQUIRED_MAJOR || (MAJOR == REQUIRED_MAJOR && MINOR < REQUIRED_MINOR) )); then
   die "Go ${GO_VERSION} is too old. kcd requires Go ${REQUIRED_MAJOR}.${REQUIRED_MINOR}+."
