@@ -35,7 +35,8 @@ end
 
 # All top-level subcommands (for "don't complete subcommands twice" guards)
 set -l __kcd_cmds daemon devices connect pair unpair ping battery connectivity watch \
-    sftp reply call findmyphone lock unlock share clipboard run sms mpris doctor status
+    sftp reply dismiss call findmyphone lock unlock share clipboard run sms contacts \
+    mpris volume doctor status
 
 # ---------------------------------------------------------------------------
 # Disable file completion globally — we re-enable it only where needed
@@ -81,9 +82,9 @@ complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a findmyphone -d 'Make the phone play a loud ringtone'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
-    -a lock        -d 'Lock the current desktop session'
+    -a lock        -d 'Ask a remote device to lock its screen'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
-    -a unlock      -d 'Unlock the current desktop session'
+    -a unlock      -d 'Ask a remote device to unlock its screen'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a share       -d 'Send a local file to a device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
@@ -91,9 +92,15 @@ complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a run         -d 'Execute and manage remote commands on the device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a dismiss     -d 'Dismiss a notification on a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a contacts    -d 'Sync and browse the device address book'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a sms         -d 'Send an SMS via a device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a mpris       -d 'Control media playback on remote devices'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a volume      -d 'Control remote device volume'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a doctor      -d 'Check runtime dependencies and configuration'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
@@ -122,9 +129,14 @@ complete -c kcd -n "__fish_seen_subcommand_from devices" \
 complete -c kcd -n "__fish_seen_subcommand_from pair && __kcd_at_arg 2" \
     -a '(__kcd_devices)' -d 'Device ID'
 
-# unpair / ping / battery / connectivity / findmyphone / lock / unlock / clipboard
+# unpair — completes ALL known devices, not just connected ones: removing
+# a device that is offline or broken is the main reason to unpair.
+complete -c kcd -n "__fish_seen_subcommand_from unpair && __kcd_at_arg 2" \
+    -a '(__kcd_devices)' -d 'Device ID'
+
+# ping / battery / connectivity / findmyphone / lock / unlock / clipboard
 #   — only make sense with connected devices
-for _cmd in unpair ping battery connectivity findmyphone lock unlock clipboard
+for _cmd in ping battery connectivity findmyphone lock unlock clipboard
     complete -c kcd -n "__fish_seen_subcommand_from $_cmd && __kcd_at_arg 2" \
         -a '(__kcd_connected_devices)' -d 'Device ID'
 end
@@ -241,6 +253,55 @@ complete -c kcd -n "__fish_seen_subcommand_from run && __fish_seen_subcommand_fr
 # command-key at position 4 is free-form
 
 # ---------------------------------------------------------------------------
+# contacts  sync|list|clear  [device-id]
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from contacts && not __fish_seen_subcommand_from sync list clear" \
+    -a sync  -d 'Request a contacts sync from a device'
+complete -c kcd -n "__fish_seen_subcommand_from contacts && not __fish_seen_subcommand_from sync list clear" \
+    -a list  -d 'List cached contacts for a device'
+complete -c kcd -n "__fish_seen_subcommand_from contacts && not __fish_seen_subcommand_from sync list clear" \
+    -a clear -d 'Delete cached contacts for a device'
+
+# list reads the local cache, so it completes all known devices; sync and
+# clear need the device online.
+complete -c kcd -n "__fish_seen_subcommand_from contacts && __fish_seen_subcommand_from list && __kcd_at_arg 3" \
+    -a '(__kcd_devices)' -d 'Device ID'
+for _sub in sync clear
+    complete -c kcd -n "__fish_seen_subcommand_from contacts && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
+        -a '(__kcd_connected_devices)' -d 'Device ID'
+end
+complete -c kcd -n "__fish_seen_subcommand_from contacts && __fish_seen_subcommand_from list" \
+    -l json -d 'Output raw JSON'
+
+# ---------------------------------------------------------------------------
+# dismiss  [device-id]  <notification-id>
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from dismiss && __kcd_at_arg 2" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
+# notification-id at position 3 is free-form
+
+# ---------------------------------------------------------------------------
+# volume  list|set|mute  [device-id]  ...
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from volume && not __fish_seen_subcommand_from list set mute" \
+    -a list -d 'List audio sinks on a remote device'
+complete -c kcd -n "__fish_seen_subcommand_from volume && not __fish_seen_subcommand_from list set mute" \
+    -a set  -d 'Set volume on a remote device sink'
+complete -c kcd -n "__fish_seen_subcommand_from volume && not __fish_seen_subcommand_from list set mute" \
+    -a mute -d 'Mute or unmute a remote device sink'
+
+# list auto-resolves the device; set/mute keep it mandatory so their
+# remaining positional arguments stay unambiguous.
+complete -c kcd -n "__fish_seen_subcommand_from volume && __fish_seen_subcommand_from list && __kcd_at_arg 3" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
+for _sub in set mute
+    complete -c kcd -n "__fish_seen_subcommand_from volume && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
+        -a '(__kcd_connected_devices)' -d 'Device ID'
+end
+complete -c kcd -n "__fish_seen_subcommand_from volume && __fish_seen_subcommand_from list" \
+    -l json -d 'Output raw JSON'
+
+# ---------------------------------------------------------------------------
 # sms  send|conversations|conversation|attachment  <device-id> [...]
 # ---------------------------------------------------------------------------
 complete -c kcd -n "__fish_seen_subcommand_from sms && not __fish_seen_subcommand_from send conversations conversation attachment" \
@@ -303,6 +364,13 @@ for _sub in play pause toggle next previous prev stop volume seek status
         -l device -d 'Target device ID' -r -a '(__kcd_connected_devices)'
     complete -c kcd -n "__fish_seen_subcommand_from mpris && __fish_seen_subcommand_from $_sub" \
         -l player -s p -d 'Player name' -r
+end
+
+# The action subcommands also take the device as an optional positional
+# (kcd mpris next <id>); volume and seek keep theirs for the value.
+for _sub in play pause toggle next previous prev stop
+    complete -c kcd -n "__fish_seen_subcommand_from mpris && __fish_seen_subcommand_from $_sub && __kcd_at_arg 3" \
+        -a '(__kcd_connected_devices)' -d 'Device ID'
 end
 
 # ---------------------------------------------------------------------------
