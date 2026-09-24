@@ -236,6 +236,8 @@ kcd pair <device-id>
 
 If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
 
+When `kcd` sends the request, it prints a **verification code**. Compare it with the code on the phone's prompt: they must match. A mismatch means something is intercepting the connection — cancel and `kcd unpair` the device. No code is printed when the phone initiated the request (use [listen mode](#listen-mode-headless--server) for that direction) or when the device is already paired.
+
 ### Listen mode (headless / server)
 
 ```bash

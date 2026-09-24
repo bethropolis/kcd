@@ -51,7 +51,7 @@ func TestIPCRoundTrip(t *testing.T) {
 	}
 
 	// Test 2: Pair (device exists)
-	if err := cl.Pair("dev123"); err != nil {
+	if _, err := cl.Pair("dev123"); err != nil {
 		t.Errorf("Pair() failed: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestIPCRoundTrip(t *testing.T) {
 	}
 
 	// Test 5: Pair (unknown device)
-	err = cl.Pair("unknown")
+	_, err = cl.Pair("unknown")
 	if err == nil {
 		t.Error("expected Pair() to fail for unknown device")
 	}

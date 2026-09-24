@@ -82,6 +82,14 @@ type PairListenResult struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
+// PairResult is returned by CmdPair on success. VerificationKey is the
+// out-of-band code the peer shows for the user to compare; it is empty
+// when no request was sent (already paired, or a pending peer request
+// that this accepted instead).
+type PairResult struct {
+	VerificationKey string `json:"verificationKey,omitempty"`
+}
+
 // DevicePayload is sent in requests requiring a device ID (like pair/unpair/ping).
 type DevicePayload struct {
 	DeviceID string `json:"deviceId"`

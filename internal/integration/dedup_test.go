@@ -134,7 +134,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 		t.Fatalf("send pair: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := cl.Pair("mock-peer"); err != nil {
+	if _, err := cl.Pair("mock-peer"); err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
 	if ev := nextFor(t, evCh, "mock-peer", "device.connected"); ev.Type != events.TypeDeviceConnected {

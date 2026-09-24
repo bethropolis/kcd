@@ -45,10 +45,15 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 
 		if c.NArg() >= 1 {
 			targetID := c.Args().First()
-			if err := cl.Pair(targetID); err != nil {
+			verificationKey, err := cl.Pair(targetID)
+			if err != nil {
 				return err
 			}
 			fmt.Printf("Pair request sent / accepted for %s\n", targetID)
+			if verificationKey != "" {
+				fmt.Printf("Verification code: %s\n", verificationKey)
+				fmt.Println("Compare it with the code shown on the device. If they differ, cancel and unpair.")
+			}
 			return nil
 		}
 
@@ -120,7 +125,7 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 						fmt.Println("Still listening… (Ctrl+C to cancel)")
 						continue
 					}
-					if err := cl.Pair(r.result.DeviceID); err != nil {
+					if _, err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
 					fmt.Printf("Paired with %s (%s)\n", protocol.DisplayName(r.result.DeviceName), r.result.DeviceID)
@@ -139,7 +144,7 @@ Without a device ID: enter listen mode to receive and verify incoming pairing re
 						_ = cl.Unpair(r.result.DeviceID)
 						return nil
 					}
-					if err := cl.Pair(r.result.DeviceID); err != nil {
+					if _, err := cl.Pair(r.result.DeviceID); err != nil {
 						return fmt.Errorf("failed to accept pairing: %w", err)
 					}
 					fmt.Printf("Paired with %s (%s)\n", protocol.DisplayName(r.result.DeviceName), r.result.DeviceID)

@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,9 +117,14 @@ func TestPairFlowIntegration(t *testing.T) {
 	// Give the daemon a moment to process the pair request
 	time.Sleep(100 * time.Millisecond)
 
-	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
-	if err := cl.Pair("mock-peer"); err != nil {
+	// Accept the pending pair request via IPC (auto_accept removed in v1.10).
+	// The peer initiated, so it owns the verification code and ours is empty.
+	verificationKey, err := cl.Pair("mock-peer")
+	if err != nil {
 		t.Fatalf("accept pair: %v", err)
+	}
+	if verificationKey != "" {
+		t.Errorf("accept path returned a verification key %q; the peer initiated", verificationKey)
 	}
 
 	ev := nextDomainEvent(t, evCh, 3*time.Second)
@@ -139,5 +145,90 @@ func TestPairFlowIntegration(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("mock-peer not found in Paired state; got: %+v", devs)
+	}
+}
+
+// Initiating pairing must hand the verification code back to the caller:
+// the phone shows its own copy, and the user can only compare codes if
+// this side displays one. The accept path returns empty, so the code
+// proves it came from the outbound request.
+func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfg := config.Defaults()
+	cfg.SocketPath = dir + "/kcd.sock"
+	cfg.CertFile = dir + "/cert.pem"
+	cfg.KeyFile = dir + "/key.pem"
+	cfg.DeviceID = "test-daemon-pair-init"
+	cfg.LogLevel = "debug"
+	cfg.Plugins.Battery = false
+	cfg.Plugins.Notification = false
+	cfg.Plugins.Clipboard = false
+	cfg.Plugins.Share = false
+	cfg.Plugins.RunCommand = false
+	cfg.Plugins.MPRIS = false
+	cfg.Plugins.Ping = false
+	cfg.Plugins.Telephony = false
+	cfg.Plugins.Connectivity = false
+	cfg.Plugins.Mousepad = false
+	cfg.Plugins.SFTP = false
+	cfg.Plugins.FindMyPhone = false
+	cfg.Plugins.LockDevice = false
+	cfg.Plugins.SystemVolume = false
+	cfg.Plugins.SMS = false
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cl := testutil.StartTestDaemon(t, cfg)
+
+	peerCertPair, err := cert.LoadOrGenerate(dir+"/peer-cert.pem", dir+"/peer-key.pem", "mock-peer")
+	if err != nil {
+		t.Fatalf("peer cert: %v", err)
+	}
+	peer := testutil.NewMockPeer(t, cert.TLSConfig(peerCertPair))
+	conn := peer.Dial("127.0.0.1:1716")
+	defer conn.Close()
+
+	_, _ = peer.ReadPacket(conn)
+
+	// Identity only — no pair request. The daemon must initiate, so the
+	// verification code is ours to report.
+	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
+		DeviceID:        "mock-peer",
+		DeviceName:      "Mock Peer",
+		DeviceType:      "phone",
+		ProtocolVersion: protocol.ProtocolVersion,
+	})
+	if err := peer.SendPacket(conn, identPkt); err != nil {
+		t.Fatalf("send identity: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		devs, err := cl.Devices()
+		if err != nil {
+			t.Fatalf("list devices: %v", err)
+		}
+		if len(devs) > 0 && devs[0].ID == "mock-peer" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	verificationKey, err := cl.Pair("mock-peer")
+	if err != nil {
+		t.Fatalf("initiate pair: %v", err)
+	}
+	if len(verificationKey) != 8 {
+		t.Fatalf("verification key %q: want 8 hex characters, got %d", verificationKey, len(verificationKey))
+	}
+	for _, r := range verificationKey {
+		if !strings.ContainsRune("0123456789ABCDEF", r) {
+			t.Fatalf("verification key %q contains a non-hex character %q", verificationKey, r)
+		}
 	}
 }

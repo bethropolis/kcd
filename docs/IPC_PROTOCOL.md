@@ -125,7 +125,17 @@ Optional fields:
   using its last-seen discovery address (background auto-dial no longer
   connects to unpaired devices), then sends the pair request.
 
-**Response data:** none (`{"ok": true}`)
+**Response data:** `PairResult`
+
+```json
+{"ok": true, "data": {"verificationKey": "A1B2C3D4"}}
+```
+
+`verificationKey` is the out-of-band code the peer displays so the user
+can confirm the connection is not intercepted; `kcd pair <device-id>`
+prints it for comparison. It is omitted when no request was sent — the
+device was already paired, the peer had requested first (so the peer owns
+the code), or the peer presented no certificate to derive it from.
 
 #### `pair_listen`
 

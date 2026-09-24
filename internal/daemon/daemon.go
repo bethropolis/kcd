@@ -211,7 +211,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 					logger.Warn("auto-accept on pair dial failed", log.Error(err))
 				}
 			} else if dev.State() != device.StatePaired {
-				if err := pairPlugin.RequestPairing(dev); err != nil {
+				// No CLI is attached to this dial, so the verification code
+				// only reaches the log; RequestPairing already logs it.
+				if _, err := pairPlugin.RequestPairing(dev); err != nil {
 					logger.Warn("pair request on dial failed", log.Error(err))
 				}
 			}
