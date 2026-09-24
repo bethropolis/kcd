@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/urfave/cli/v2"
 )
@@ -27,21 +26,9 @@ var connectivityCmd = &cli.Command{
 			return err
 		}
 
-		targetID := c.Args().First()
-		if targetID == "" {
-			devs, err := cl.Devices()
-			if err != nil {
-				return err
-			}
-			for _, d := range devs {
-				if d.Connected && d.State == device.StatePaired {
-					targetID = d.ID
-					break
-				}
-			}
-			if targetID == "" {
-				return fmt.Errorf("no paired connected devices found")
-			}
+		targetID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
 		}
 
 		raw, err := cl.Connectivity(targetID)

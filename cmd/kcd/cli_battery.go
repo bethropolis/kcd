@@ -10,7 +10,7 @@ import (
 var batteryCmd = &cli.Command{
 	Name:      "battery",
 	Usage:     "Fetch battery level and charging status",
-	ArgsUsage: "<device-id>",
+	ArgsUsage: "[device-id]",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:  "json",
@@ -18,14 +18,15 @@ var batteryCmd = &cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() < 1 {
-			return fmt.Errorf("missing device ID")
-		}
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		charge, charging, err := cl.Battery(c.Args().First())
+		deviceID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
+		}
+		charge, charging, err := cl.Battery(deviceID)
 		if err != nil {
 			return err
 		}

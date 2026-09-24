@@ -15,7 +15,7 @@ var volumeCmd = &cli.Command{
 		{
 			Name:      "list",
 			Usage:     "List audio sinks on a remote device",
-			ArgsUsage: "<device-id>",
+			ArgsUsage: "[device-id]",
 			Flags: []cli.Flag{
 				&cli.BoolFlag{
 					Name:  "json",
@@ -23,14 +23,15 @@ var volumeCmd = &cli.Command{
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
-					return fmt.Errorf("missing device ID")
-				}
 				cl, err := getClient(c)
 				if err != nil {
 					return err
 				}
-				data, err := cl.RemoteVolumeList(c.Args().First())
+				deviceID, err := resolveDeviceID(c, cl)
+				if err != nil {
+					return err
+				}
+				data, err := cl.RemoteVolumeList(deviceID)
 				if err != nil {
 					return err
 				}

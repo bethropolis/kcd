@@ -8,17 +8,18 @@ import (
 
 var unlockCmd = &cli.Command{
 	Name:      "unlock",
-	Usage:     "Unlock the current desktop session",
-	ArgsUsage: "<device-id>",
+	Usage:     "Unlock the screen of a remote device",
+	ArgsUsage: "[device-id]",
 	Action: func(c *cli.Context) error {
-		if c.NArg() < 1 {
-			return fmt.Errorf("missing device ID")
-		}
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		if err := cl.Unlock(c.Args().First()); err != nil {
+		deviceID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
+		}
+		if err := cl.Unlock(deviceID); err != nil {
 			return err
 		}
 		fmt.Println("Unlock requested")

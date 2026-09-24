@@ -15,13 +15,24 @@ var actionFlags = []cli.Flag{
 	&cli.StringFlag{Name: "player", Aliases: []string{"p"}, Usage: "Player name"},
 }
 
+// actionDeviceID returns the device for an mpris action subcommand. A
+// positional argument wins so `kcd mpris next <id>` matches every other
+// command in the CLI; --device stays as the fallback. (volume and seek
+// deliberately do not use this: their positional is the value.)
+func actionDeviceID(c *cli.Context) string {
+	if c.NArg() >= 1 {
+		return c.Args().First()
+	}
+	return c.String("device")
+}
+
 func actionCmd(action string) cli.ActionFunc {
 	return func(c *cli.Context) error {
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		return cl.MprisAction(c.String("device"), c.String("player"), action)
+		return cl.MprisAction(actionDeviceID(c), c.String("player"), action)
 	}
 }
 
@@ -36,7 +47,7 @@ func skipCmd(action string) cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		deviceID := c.String("device")
+		deviceID := actionDeviceID(c)
 		player := c.String("player")
 		wasPlaying := remotePlayerPlaying(cl, deviceID, player)
 
@@ -193,41 +204,47 @@ var mprisCmd = &cli.Command{
 			},
 		},
 		{
-			Name:   "play",
-			Usage:  "Start playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Play"),
+			Name:      "play",
+			ArgsUsage: "[device-id]",
+			Usage:     "Start playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Play"),
 		},
 		{
-			Name:   "pause",
-			Usage:  "Pause playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Pause"),
+			Name:      "pause",
+			ArgsUsage: "[device-id]",
+			Usage:     "Pause playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Pause"),
 		},
 		{
-			Name:   "toggle",
-			Usage:  "Toggle play/pause on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("PlayPause"),
+			Name:      "toggle",
+			ArgsUsage: "[device-id]",
+			Usage:     "Toggle play/pause on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("PlayPause"),
 		},
 		{
-			Name:   "next",
-			Usage:  "Skip to next track on a remote device (resumes playback if it was playing)",
-			Flags:  actionFlags,
-			Action: skipCmd("Next"),
+			Name:      "next",
+			ArgsUsage: "[device-id]",
+			Usage:     "Skip to next track on a remote device (resumes playback if it was playing)",
+			Flags:     actionFlags,
+			Action:    skipCmd("Next"),
 		},
 		{
-			Name:    "previous",
-			Aliases: []string{"prev"},
-			Usage:   "Go to previous track on a remote device (resumes playback if it was playing)",
-			Flags:   actionFlags,
-			Action:  skipCmd("Previous"),
+			Name:      "previous",
+			ArgsUsage: "[device-id]",
+			Aliases:   []string{"prev"},
+			Usage:     "Go to previous track on a remote device (resumes playback if it was playing)",
+			Flags:     actionFlags,
+			Action:    skipCmd("Previous"),
 		},
 		{
-			Name:   "stop",
-			Usage:  "Stop playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Stop"),
+			Name:      "stop",
+			ArgsUsage: "[device-id]",
+			Usage:     "Stop playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Stop"),
 		},
 		{
 			Name:      "volume",

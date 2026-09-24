@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/bethropolis/kcd/internal/device"
 	"github.com/urfave/cli/v2"
 )
 
@@ -31,25 +30,10 @@ var clipboardCmd = &cli.Command{
 			return err
 		}
 
-		var targetID string
-		if c.NArg() >= 1 {
-			targetID = c.Args().First()
-		} else {
-			devs, err := cl.Devices()
-			if err != nil {
-				return err
-			}
-			for _, d := range devs {
-				if d.Connected && d.State == device.StatePaired {
-					targetID = d.ID
-					break
-				}
-			}
-			if targetID == "" {
-				return fmt.Errorf("no paired connected devices found")
-			}
+		targetID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
 		}
-
 		if err := cl.ClipboardPush(targetID); err != nil {
 			return err
 		}

@@ -15,16 +15,17 @@ var contactsCmd = &cli.Command{
 		{
 			Name:      "sync",
 			Usage:     "Request a contacts sync from a device",
-			ArgsUsage: "<device-id>",
+			ArgsUsage: "[device-id]",
 			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
-					return fmt.Errorf("missing device ID")
-				}
 				cl, err := getClient(c)
 				if err != nil {
 					return err
 				}
-				if err := cl.ContactsSync(c.Args().Get(0)); err != nil {
+				deviceID, err := resolveDeviceID(c, cl)
+				if err != nil {
+					return err
+				}
+				if err := cl.ContactsSync(deviceID); err != nil {
 					return err
 				}
 				fmt.Println("Contacts sync requested. Use `kcd watch --events contacts.updated` to see results.")
@@ -34,7 +35,7 @@ var contactsCmd = &cli.Command{
 		{
 			Name:      "list",
 			Usage:     "List cached contacts for a device",
-			ArgsUsage: "<device-id>",
+			ArgsUsage: "[device-id]",
 			Flags: []cli.Flag{
 				&cli.BoolFlag{
 					Name:  "json",
@@ -42,14 +43,15 @@ var contactsCmd = &cli.Command{
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
-					return fmt.Errorf("missing device ID")
-				}
 				cl, err := getClient(c)
 				if err != nil {
 					return err
 				}
-				list, err := cl.ContactsList(c.Args().Get(0))
+				deviceID, err := resolveDeviceID(c, cl)
+				if err != nil {
+					return err
+				}
+				list, err := cl.ContactsList(deviceID)
 				if err != nil {
 					return err
 				}
@@ -72,16 +74,16 @@ var contactsCmd = &cli.Command{
 		{
 			Name:      "clear",
 			Usage:     "Delete cached contacts for a device (re-sync restores them)",
-			ArgsUsage: "<device-id>",
+			ArgsUsage: "[device-id]",
 			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
-					return fmt.Errorf("missing device ID")
-				}
 				cl, err := getClient(c)
 				if err != nil {
 					return err
 				}
-				id := c.Args().Get(0)
+				id, err := resolveDeviceID(c, cl)
+				if err != nil {
+					return err
+				}
 				list, err := cl.ContactsList(id)
 				if err != nil {
 					return err

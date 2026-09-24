@@ -202,6 +202,29 @@ kcd devices --json | jq '.[0] | {name, battery: .battery.charge}'
 
 ---
 
+## Targeting a device
+
+Commands that act on a device take it as an optional positional argument:
+
+```bash
+kcd battery [device-id]
+kcd ping [device-id]
+```
+
+Omit the argument and the single paired, connected device is selected, so
+the usual one-phone setup needs no ID. With **several** paired devices
+connected, `kcd` refuses to guess and lists the candidates:
+
+```text
+multiple devices connected (a1b2c3d4_..., f6e5d4c3_...) — pass a device ID
+```
+
+Commands with extra positional arguments after the device (`kcd volume set
+<device-id> <sink> <0-100>`, `kcd volume mute`) keep the device ID
+mandatory, so the remaining arguments stay unambiguous.
+
+---
+
 ## connect
 
 Manually connect to a device by IP address. Use this when UDP broadcast and mDNS are blocked (corporate Wi-Fi, Docker, university networks).
@@ -295,7 +318,7 @@ This sends a rejection packet to the device and removes it from the local device
 Send a ping notification to a device. The phone displays a "Ping!" notification.
 
 ```
-kcd ping <device-id>
+kcd ping [device-id]
 ```
 
 ---
@@ -305,7 +328,7 @@ kcd ping <device-id>
 Fetch the current battery level and charging state of a device.
 
 ```
-kcd battery <device-id> [--json]
+kcd battery [device-id] [--json]
 ```
 
 **Example output**
@@ -412,7 +435,7 @@ kcd mpris status [--device <id>] [--json]
 
 | Flag | Description |
 |---|---|
-| `--device` | Target device ID (omit for auto-detect) |
+| `--device` | Target device ID (omit for auto-detect; the positional `[device-id]` is equivalent and takes precedence) |
 | `--json` | Output as a JSON array |
 
 **Examples**
@@ -427,16 +450,16 @@ kcd mpris status --json | jq -r '.[].title'
 Control playback on the phone.
 
 ```
-kcd mpris play    [--device <id>] [--player <name>]
-kcd mpris pause   [--device <id>] [--player <name>]
-kcd mpris toggle  [--device <id>] [--player <name>]
+kcd mpris play    [device-id] [--device <id>] [--player <name>]
+kcd mpris pause   [device-id] [--device <id>] [--player <name>]
+kcd mpris toggle  [device-id] [--device <id>] [--player <name>]
 ```
 
 **Flags**
 
 | Flag | Description |
 |---|---|
-| `--device` | Target device ID (omit for auto-detect) |
+| `--device` | Target device ID (omit for auto-detect; the positional `[device-id]` is equivalent and takes precedence) |
 | `--player`, `-p` | Player name (omit for auto-fill from cached state) |
 
 ### mpris next / prev
@@ -444,9 +467,9 @@ kcd mpris toggle  [--device <id>] [--player <name>]
 Skip to the next or previous track. If the player was playing, a `Play` action follows the skip to handle phone-side MPRIS implementations that stop after a track change. A paused player is left paused — skipping never starts audio on its own.
 
 ```
-kcd mpris next       [--device <id>] [--player <name>]
-kcd mpris previous   [--device <id>] [--player <name>]
-kcd mpris prev       [--device <id>] [--player <name>]  (alias)
+kcd mpris next       [device-id] [--device <id>] [--player <name>]
+kcd mpris previous   [device-id] [--device <id>] [--player <name>]
+kcd mpris prev       [device-id] [--device <id>] [--player <name>]  (alias)
 ```
 
 ### mpris stop
@@ -454,7 +477,7 @@ kcd mpris prev       [--device <id>] [--player <name>]  (alias)
 Stop playback on the phone.
 
 ```
-kcd mpris stop [--device <id>] [--player <name>]
+kcd mpris stop [device-id] [--device <id>] [--player <name>]
 ```
 
 ### mpris volume
@@ -635,14 +658,14 @@ kcd findmyphone <device-id>
 
 ## lock / unlock
 
-Lock or unlock the current desktop session.
+Ask a remote device to lock or unlock its own screen.
 
 ```
-kcd lock   <device-id>
-kcd unlock <device-id>
+kcd lock   [device-id]
+kcd unlock [device-id]
 ```
 
-Uses `loginctl lock-session` / `loginctl unlock-session` under the hood.
+These send the KDE Connect lock packet to the **remote** device — they do not lock this PC. The reverse direction is separate: when a paired device sends a lock request, the daemon runs `loginctl lock-session` / `loginctl unlock-session` on this desktop.
 
 ---
 
@@ -875,7 +898,7 @@ Request a sync round (UID/timestamp list, then vCards for new or changed
 contacts). Progress arrives as `contacts.updated` events (counts only).
 
 ```
-kcd contacts sync <device-id>
+kcd contacts sync [device-id]
 ```
 
 ### contacts list
@@ -884,7 +907,7 @@ List cached contact summaries (empty when never synced — absent means
 unknown).
 
 ```
-kcd contacts list <device-id> [--json]
+kcd contacts list [device-id] [--json]
 ```
 
 ### contacts clear
@@ -893,7 +916,7 @@ Delete a device's cached contacts. Works offline (the cache is local
 state); re-sync restores everything from the phone.
 
 ```
-kcd contacts clear <device-id>
+kcd contacts clear [device-id]
 ```
 
 ---
@@ -907,7 +930,7 @@ Control the remote device's audio volume (requires `remotesystemvolume` plugin).
 List audio sinks on a remote device and their current volume/mute state.
 
 ```
-kcd volume list <device-id> [--json]
+kcd volume list [device-id] [--json]
 ```
 
 **Example output**
