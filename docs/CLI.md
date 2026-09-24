@@ -782,11 +782,18 @@ Request the list of commands available on the remote device.
 kcd run list <device-id>
 ```
 
-Results arrive as a `runcommand.list` event; watch for them:
+The phone holds the list, so the command blocks until it replies (10s
+timeout) and then prints `name<TAB>command` per entry:
 
-```bash
-kcd watch --json | jq 'select(.type=="runcommand.list")'
+```text
+Take photo	camera
+Toggle flashlight	light --toggle
 ```
+
+**Error cases:** the device is disconnected (`device not found`); the
+`runcommand` plugin is disabled in `kcd.toml`; or the phone's KDE Connect
+app is closed and does not answer within 10s. The KDE Connect app must be
+open on the device for this to return anything.
 
 ### run exec
 

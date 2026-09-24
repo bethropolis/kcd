@@ -500,8 +500,17 @@ Request a device's list of configured run commands.
 {"deviceId": "a1b2c3d4e5f6_..."}
 ```
 
-**Response data:** none (results arrive via `kdeconnect.runcommand` response
-packet).
+**Response data:** `[]RemoteCommand`
+
+```json
+{"ok": true, "data": [{"name": "Take photo", "command": "camera"}]}
+```
+
+The list lives only on the device, so the daemon holds this request open
+until the device replies or 10s elapses. Errors: `device not found`,
+`runcommand plugin not enabled`, a timeout naming the app that must be
+open, or `a command list request for <id> is already in flight` when two
+clients race for the single reply.
 
 #### `run_exec`
 
@@ -1380,6 +1389,7 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.lock.request` | LockDevice | `LockBody{}` (triggers lock/unlock) |
 | `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, AlbumArtUrl, TransferringAlbumArt, ...}` — inbound packets with `transferringAlbumArt: true` + `payloadTransferInfo` carry album art bytes (side channel) that the daemon caches to `$XDG_CACHE_HOME/kcd/art/` |
 | `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) — an outbound `kdeconnect.mpris.request` with `player` + `albumArtUrl` asks the phone to stream art back |
+| `kdeconnect.runcommand` | RunCommand | `{CommandList string}` — the phone's reply to a command-list request, holding a JSON object of label → `{name, command}` |
 | `kdeconnect.runcommand.request` | RunCommand | `RequestBody{RequestCommandList bool, Key string}` |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
 | `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |

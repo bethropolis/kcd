@@ -35,10 +35,25 @@ func (c *Client) ClipboardPush(deviceID string) error {
 	return err
 }
 
-// RunList requests the remote device to send its command list.
-func (c *Client) RunList(deviceID string) error {
-	_, err := c.Call(ipc.CmdRunList, ipc.DevicePayload{DeviceID: deviceID})
-	return err
+// RemoteCommand is one executable command advertised by a remote device.
+type RemoteCommand struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
+// RunList asks the remote device for its command list and returns it. The
+// daemon holds the request open until the device replies, so this blocks
+// for the reply or fails on timeout.
+func (c *Client) RunList(deviceID string) ([]RemoteCommand, error) {
+	resp, err := c.Call(ipc.CmdRunList, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
+	}
+	var commands []RemoteCommand
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &commands)
+	}
+	return commands, nil
 }
 
 // RunExec requests the remote device to execute a specific command key.
