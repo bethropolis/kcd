@@ -441,7 +441,7 @@ kcd mpris toggle  [--device <id>] [--player <name>]
 
 ### mpris next / prev
 
-Skip to the next or previous track. After skipping, an automatic `Play` action is sent to handle phone-side MPRIS implementations that stop after a track change.
+Skip to the next or previous track. If the player was playing, a `Play` action follows the skip to handle phone-side MPRIS implementations that stop after a track change. A paused player is left paused — skipping never starts audio on its own.
 
 ```
 kcd mpris next       [--device <id>] [--player <name>]
