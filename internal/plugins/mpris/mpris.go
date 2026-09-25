@@ -35,9 +35,12 @@ type MPRISPlugin struct {
 
 	// mprisCfg gates the position poller: with PollWhilePlaying the
 	// ticker exists only while at least one local player IsPlaying.
-	// pollCancel stops it; nil means no poller is running.
+	// pollCancel stops it; nil means no poller is running. pollGen
+	// identifies the current poller so a self-stopping one does not
+	// clear its successor's handle.
 	mprisCfg   config.MPRISConfig
 	pollCancel context.CancelFunc
+	pollGen    uint64
 
 	// remotePollCancel stops the remote-state poller; nil means it is
 	// not running. The poller is demand-driven (see syncRemotePoller):

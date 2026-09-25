@@ -40,7 +40,14 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 
 	uniqueToDisplay := make(map[string]string)
 
-	entries, _ := listPlayersDBus(p.dbus)
+	entries, err := listPlayersDBus(p.dbus)
+	if err != nil {
+		// Not fatal: the watcher keeps running so NameOwnerChanged can
+		// still pick players up as they appear. Logging matters — this
+		// error used to be discarded, leaving an empty tracker with no
+		// clue why.
+		p.logger.Warn("mpris: initial player listing failed", log.Error(err))
+	}
 	for _, e := range entries {
 		var owner string
 		if err := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, e.busName).Store(&owner); err == nil {
@@ -63,14 +70,23 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		}
 	}
 
+	// Register the name watch BEFORE anything can block, and narrow it to
+	// MPRIS names. An unfiltered NameOwnerChanged match delivers a signal
+	// for every name acquired on the session bus, and each one is handled
+	// synchronously with blocking D-Bus calls — enough volume overflows
+	// the signal buffer, and godbus drops the overflow. A dropped
+	// PlaybackStatus signal used to strand the position poller disarmed.
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
+		dbus.WithMatchOption("arg0prefix", mprisBusPrefix),
 	); err != nil {
 		return err
 	}
 
-	ch := make(chan *dbus.Signal, 64)
+	// Sized for a burst of player churn (browser restarts, several
+	// players at once) rather than bus-wide name traffic.
+	ch := make(chan *dbus.Signal, 256)
 	conn.Signal(ch)
 
 	for {

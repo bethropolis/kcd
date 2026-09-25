@@ -13,65 +13,128 @@ func testMPRISConfig() config.MPRISConfig {
 	return config.MPRISConfig{PollWhilePlaying: true, PositionInterval: "1h"}
 }
 
-// The poller must exist exactly while at least one tracked player reports
-// IsPlaying — and never otherwise.
-func TestPollArmsOnlyWhilePlaying(t *testing.T) {
+func pollerArmed(p *MPRISPlugin) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.pollCancel != nil
+}
+
+func trackPlayer(p *MPRISPlugin, name string) {
+	p.mu.Lock()
+	p.players[name] = &trackedPlayer{displayName: name}
+	p.mu.Unlock()
+}
+
+// An observed state change must arm the poller even when the cached
+// IsPlaying flag says paused. This is the regression guard: gating the
+// arm on the cache deadlocks, because a single lost PlaybackStatus
+// signal leaves the cache stale forever and the poller — the only other
+// thing that refreshes it — disarmed.
+func TestPollArmsOnObservedChange(t *testing.T) {
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, testMPRISConfig(), log.Nop())
+	defer p.watchCancel()
 
-	p.mu.RLock()
-	armed := p.pollCancel != nil
-	p.mu.RUnlock()
-	if armed {
-		t.Fatal("poller armed with zero players")
+	trackPlayer(p, "Nightdrive")
+	if pollerArmed(p) {
+		t.Fatal("poller armed before any state was observed")
 	}
 
-	p.storeLocalState("Paused FM", &NowPlaying{Player: "Paused FM", IsPlaying: false})
-
-	p.mu.RLock()
-	armed = p.pollCancel != nil
-	p.mu.RUnlock()
-	if armed {
-		t.Fatal("poller armed while only paused players tracked")
-	}
-
-	p.storeLocalState("Nightdrive", &NowPlaying{Player: "Nightdrive", IsPlaying: true})
-
-	p.mu.RLock()
-	armed = p.pollCancel != nil
-	p.mu.RUnlock()
-	if !armed {
-		t.Fatal("poller not armed while a player IsPlaying")
-	}
-
-	// Pausing the last playing player must disarm (the 1h ticker never
-	// fires, so no D-Bus traffic can occur during this test).
+	// Cached state says paused, but something changed, so the poller must
+	// start and verify against live D-Bus state itself.
 	p.storeLocalState("Nightdrive", &NowPlaying{Player: "Nightdrive", IsPlaying: false})
-
-	p.mu.RLock()
-	armed = p.pollCancel != nil
-	p.mu.RUnlock()
-	if armed {
-		t.Fatal("poller still armed after last player paused")
+	if !pollerArmed(p) {
+		t.Fatal("poller not armed after an observed change (deadlock regression)")
 	}
 }
 
-// Removing the last playing player must disarm even though no state
+// With no tracked players there is nothing to poll, so no poller.
+func TestPollNotArmedWithoutPlayers(t *testing.T) {
+	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, testMPRISConfig(), log.Nop())
+	defer p.watchCancel()
+
+	p.storeLocalState("Ghost FM", &NowPlaying{Player: "Ghost FM", IsPlaying: true})
+	if pollerArmed(p) {
+		t.Fatal("poller armed with zero tracked players")
+	}
+}
+
+// The poller must stop itself once a live read shows nothing playing.
+// Here D-Bus is unavailable, so every live read fails — the same path a
+// paused player takes, since a read that reports IsPlaying=false is what
+// keeps the ticker alive.
+func TestPollStopsItselfWhenNothingPlaying(t *testing.T) {
+	cfg := testMPRISConfig()
+	cfg.PositionInterval = "10ms"
+	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, cfg, log.Nop())
+	defer p.watchCancel()
+
+	trackPlayer(p, "Paused FM")
+	p.storeLocalState("Paused FM", &NowPlaying{Player: "Paused FM", IsPlaying: false})
+	if !pollerArmed(p) {
+		t.Fatal("poller not armed after an observed change")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for pollerArmed(p) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if pollerArmed(p) {
+		t.Fatal("poller still armed after live reads reported nothing playing")
+	}
+}
+
+// A self-stopping poller must not clear the handle of the poller that
+// replaced it, or the successor becomes unstoppable and a second ticker
+// keeps running.
+func TestSelfStoppingPollerDoesNotOrphanSuccessor(t *testing.T) {
+	cfg := testMPRISConfig()
+	cfg.PositionInterval = "10ms"
+	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, cfg, log.Nop())
+	defer p.watchCancel()
+
+	trackPlayer(p, "Paused FM")
+	p.storeLocalState("Paused FM", &NowPlaying{Player: "Paused FM", IsPlaying: false})
+
+	// Let the first poller arm, then simulate it self-stopping after a
+	// successor has already taken the slot.
+	p.mu.Lock()
+	firstGen := p.pollGen
+	p.pollGen++
+	successorGen := p.pollGen
+	p.mu.Unlock()
+
+	p.finishPlayingPoller(firstGen)
+
+	p.mu.RLock()
+	cleared := p.pollCancel == nil
+	p.mu.RUnlock()
+	if cleared {
+		t.Fatal("a stale poller cleared its successor's handle")
+	}
+
+	// The current generation may clear the slot.
+	p.finishPlayingPoller(successorGen)
+	if pollerArmed(p) {
+		t.Fatal("current poller generation failed to release the slot")
+	}
+}
+
+// Removing the last player must stop the poller even though no state
 // update flows through storeLocalState.
 func TestPollDisarmsOnPlayerRemoval(t *testing.T) {
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, testMPRISConfig(), log.Nop())
+	defer p.watchCancel()
 
-	p.mu.Lock()
-	p.players["Nightdrive"] = &trackedPlayer{displayName: "Nightdrive"}
-	p.mu.Unlock()
+	trackPlayer(p, "Nightdrive")
 	p.storeLocalState("Nightdrive", &NowPlaying{Player: "Nightdrive", IsPlaying: true})
+	if !pollerArmed(p) {
+		t.Fatal("poller not armed before removal")
+	}
 
 	p.removePlayer("Nightdrive")
 
-	p.mu.RLock()
-	armed := p.pollCancel != nil
-	p.mu.RUnlock()
-	if armed {
-		t.Fatal("poller still armed after playing player removed")
+	if pollerArmed(p) {
+		t.Fatal("poller still armed after last player removed")
 	}
 }
 
@@ -79,13 +142,12 @@ func TestPollDisarmsOnPlayerRemoval(t *testing.T) {
 // event-driven mode).
 func TestPollNeverArmsWhenDisabled(t *testing.T) {
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())
+	defer p.watchCancel()
 
+	trackPlayer(p, "Nightdrive")
 	p.storeLocalState("Nightdrive", &NowPlaying{Player: "Nightdrive", IsPlaying: true})
 
-	p.mu.RLock()
-	armed := p.pollCancel != nil
-	p.mu.RUnlock()
-	if armed {
+	if pollerArmed(p) {
 		t.Fatal("poller armed with PollWhilePlaying=false")
 	}
 }
@@ -160,6 +222,7 @@ func TestLocalStateChangedPausedPosition(t *testing.T) {
 // Anchor is stamped on the broadcast state itself.
 func TestBroadcastAnchorFreshness(t *testing.T) {
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())
+	defer p.watchCancel()
 
 	state := &NowPlaying{Player: "Nightdrive", Pos: 42000, IsPlaying: true}
 	before := time.Now().UnixMilli()

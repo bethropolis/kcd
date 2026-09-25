@@ -123,8 +123,9 @@ func (p *MPRISPlugin) removePlayer(displayName string) {
 	delete(p.players, displayName)
 	delete(p.lastTracks, displayName)
 	delete(p.lastStates, displayName)
-	// A removal may take the last playing player with it — disarm the
-	// poller so a removed player can't pin the ticker on.
+	// With no players left there is nothing to poll, so stop now rather
+	// than let the poller discover it on its next tick. sync handles
+	// the case where other players remain.
 	p.syncPlayingPollerLocked()
 	p.mu.Unlock()
 

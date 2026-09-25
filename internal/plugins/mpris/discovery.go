@@ -13,6 +13,11 @@ type playerEntry struct {
 	identity  string
 }
 
+// mprisBusPrefix is the well-known-name prefix every MPRIS player
+// advertises. Matching on it keeps the watcher's NameOwnerChanged
+// subscription off unrelated session-bus traffic.
+const mprisBusPrefix = "org.mpris.MediaPlayer2."
+
 func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 	if conn == nil {
 		return nil, nil
@@ -25,17 +30,17 @@ func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 
 	var all []playerEntry
 	for _, name := range names {
-		if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
+		if !strings.HasPrefix(name, mprisBusPrefix) {
 			continue
 		}
-		if strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") {
+		if strings.HasPrefix(name, mprisBusPrefix+"kdeconnect.") {
 			continue
 		}
 		if name == "org.mpris.MediaPlayer2.playerctld" {
 			continue
 		}
 
-		short := strings.TrimPrefix(name, "org.mpris.MediaPlayer2.")
+		short := strings.TrimPrefix(name, mprisBusPrefix)
 		if idx := strings.Index(short, ".instance"); idx != -1 {
 			short = short[:idx]
 		}
@@ -89,7 +94,7 @@ func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {
 }
 
 func resolveIdentity(conn *dbus.Conn, busName string) *playerEntry {
-	short := strings.TrimPrefix(busName, "org.mpris.MediaPlayer2.")
+	short := strings.TrimPrefix(busName, mprisBusPrefix)
 	if idx := strings.Index(short, ".instance"); idx != -1 {
 		short = short[:idx]
 	}
