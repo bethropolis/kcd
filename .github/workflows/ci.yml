@@ -116,7 +116,10 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    # Runs on pull_request too. `push` is scoped to main/master, so a
+    # feature branch only ever fires the pull_request event — gating on
+    # push alone meant integration never ran before merge.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     needs: test
     steps:
       - uses: actions/checkout@v4
