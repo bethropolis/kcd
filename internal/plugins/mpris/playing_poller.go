@@ -44,6 +44,77 @@ func (p *MPRISPlugin) syncPlayingPollerLocked() {
 		return
 	}
 	p.armPlayingPollerLocked()
+	p.startWatchdogLocked()
+}
+
+// startWatchdogLocked starts the slow re-check if it is not already
+// running. Callers must hold p.mu.
+func (p *MPRISPlugin) startWatchdogLocked() {
+	if p.watchdogCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(p.watchCtx)
+	p.watchdogCancel = cancel
+	go p.runWatchdog(ctx)
+}
+
+// stopWatchdogLocked stops the slow re-check. Callers must hold p.mu.
+func (p *MPRISPlugin) stopWatchdogLocked() {
+	if p.watchdogCancel != nil {
+		p.watchdogCancel()
+		p.watchdogCancel = nil
+	}
+}
+
+// runWatchdog restarts the position poller when it finds playback the
+// signal path failed to announce. It stays parked — one read per
+// interval — whenever the poller is already doing that job itself.
+func (p *MPRISPlugin) runWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(watchdogInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.mu.RLock()
+			armed := p.pollCancel != nil
+			tracked := len(p.players)
+			p.mu.RUnlock()
+
+			if armed || tracked == 0 {
+				continue
+			}
+			if !p.anyPlayerPlaying() {
+				continue
+			}
+			p.logger.Debug("mpris: watchdog found unpolled playback, arming position poller")
+			p.mu.Lock()
+			p.armPlayingPollerLocked()
+			p.mu.Unlock()
+		}
+	}
+}
+
+// anyPlayerPlaying reports whether any tracked player is playing right
+// now. It reads live state without touching the cache or broadcasting —
+// this only decides whether to restart the poller.
+func (p *MPRISPlugin) anyPlayerPlaying() bool {
+	p.mu.RLock()
+	players := make([]*trackedPlayer, 0, len(p.players))
+	for _, pl := range p.players {
+		players = append(players, pl)
+	}
+	p.mu.RUnlock()
+
+	for _, pl := range players {
+		state, err := p.playerState(pl.displayName)
+		if err == nil && state.IsPlaying {
+			return true
+		}
+	}
+	return false
 }
 
 // armPlayingPollerLocked starts the position ticker if it is not already
@@ -79,6 +150,23 @@ func (p *MPRISPlugin) stopPlayingPollerLocked() {
 // ticker on. Its name disappearing handles that case, so this is only a
 // backstop for a name that lingers with a dead object behind it.
 const maxConsecutiveReadFailures = 5
+
+// watchdogInterval is how often the slow re-check looks for playback that
+// the signal path missed.
+//
+// The poller stops the moment a live read reports nothing playing, and it
+// only restarts when an observed change re-arms it. That makes it hostage
+// to signal delivery: lose the PlaybackStatus=Playing edge and the poller
+// stays down for the rest of the session, so the phone's now-playing
+// freezes even though audio is playing. Firefox's MPRIS endpoint answers
+// intermittently, which makes that a routine event, not a corner case.
+//
+// So the watchdog samples once per interval and restarts the poller if it
+// finds something playing. 10s bounds how stale the phone's now-playing
+// can get after a resume, at six reads per minute while an MPRIS app sits
+// paused — still far below the 30/min the poller itself costs while
+// playing, and it disappears entirely once no player is tracked.
+const watchdogInterval = 10 * time.Second
 
 // runPlayingPoller re-reads D-Bus state for every tracked player at
 // PositionInterval. It returns once live reads say nothing is playing, so

@@ -207,16 +207,23 @@ func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
 		t.Fatalf("send identity: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	// Generous: under -race and a loaded CI runner the daemon's TLS
+	// handshake and device registration can take several seconds.
+	deadline := time.Now().Add(15 * time.Second)
+	registered := false
 	for time.Now().Before(deadline) {
 		devs, err := cl.Devices()
 		if err != nil {
 			t.Fatalf("list devices: %v", err)
 		}
 		if len(devs) > 0 && devs[0].ID == "mock-peer" {
+			registered = true
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if !registered {
+		t.Fatal("mock-peer never appeared in the device list")
 	}
 
 	verificationKey, err := cl.Pair("mock-peer")

@@ -148,6 +148,48 @@ func TestPollDisarmsOnPlayerRemoval(t *testing.T) {
 	}
 }
 
+// The watchdog exists because signal delivery is unreliable: the poller
+// stops on a confirmed pause and must be able to come back on its own
+// when playback resumes. It starts with the first tracked player and is
+// torn down with the last, so a desktop with no MPRIS app keeps no
+// timers at all.
+func TestWatchdogLifecycleFollowsTrackedPlayers(t *testing.T) {
+	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, testMPRISConfig(), log.Nop())
+	defer p.watchCancel()
+
+	watchdogRunning := func() bool {
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		return p.watchdogCancel != nil
+	}
+
+	if watchdogRunning() {
+		t.Fatal("watchdog running with zero tracked players")
+	}
+
+	trackPlayer(p, "Nightdrive")
+	p.storeLocalState("Nightdrive", &NowPlaying{Player: "Nightdrive", IsPlaying: false})
+	if !watchdogRunning() {
+		t.Fatal("watchdog not started alongside the first tracked player")
+	}
+
+	trackPlayer(p, "Second FM")
+	p.storeLocalState("Second FM", &NowPlaying{Player: "Second FM", IsPlaying: false})
+	if !watchdogRunning() {
+		t.Fatal("watchdog stopped while players remain")
+	}
+
+	p.removePlayer("Nightdrive")
+	if !watchdogRunning() {
+		t.Fatal("watchdog stopped while one player remains")
+	}
+
+	p.removePlayer("Second FM")
+	if watchdogRunning() {
+		t.Fatal("watchdog still running after the last player was removed")
+	}
+}
+
 // With PollWhilePlaying=false the poller must never arm (pure
 // event-driven mode).
 func TestPollNeverArmsWhenDisabled(t *testing.T) {

@@ -123,9 +123,11 @@ func (p *MPRISPlugin) removePlayer(displayName string) {
 	delete(p.players, displayName)
 	delete(p.lastTracks, displayName)
 	delete(p.lastStates, displayName)
-	// With no players left there is nothing to poll, so stop now rather
-	// than let the poller discover it on its next tick. sync handles
-	// the case where other players remain.
+	// With no players left there is nothing to poll, so stop the ticker
+	// and the watchdog rather than let them discover it on their own.
+	if len(p.players) == 0 {
+		p.stopWatchdogLocked()
+	}
 	p.syncPlayingPollerLocked()
 	p.mu.Unlock()
 

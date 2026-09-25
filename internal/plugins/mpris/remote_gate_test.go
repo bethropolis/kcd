@@ -1,6 +1,7 @@
 package mpris
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/bethropolis/kcd/internal/config"
@@ -9,13 +10,16 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
+// countingSender counts packets atomically: the plugin's real D-Bus
+// watcher can discover an actual player on the session bus and broadcast
+// from its own goroutine while the test goroutine reads the count.
 type countingSender struct {
 	testSender
-	sends int
+	sends atomic.Int32
 }
 
 func (s *countingSender) Send(_ *protocol.Packet) error {
-	s.sends++
+	s.sends.Add(1)
 	return nil
 }
 
@@ -38,8 +42,8 @@ func TestPollRemoteSilentWithoutSubscribers(t *testing.T) {
 
 	p.pollRemoteStates()
 
-	if sender.sends != 0 {
-		t.Fatalf("sent %d requests with zero subscribers", sender.sends)
+	if sender.sends.Load() != 0 {
+		t.Fatalf("sent %d requests with zero subscribers", sender.sends.Load())
 	}
 }
 
@@ -54,8 +58,8 @@ func TestPollRemoteRefreshesWhileWatched(t *testing.T) {
 
 	p.pollRemoteStates()
 
-	if sender.sends != 1 {
-		t.Fatalf("sent %d requests while watched, want 1", sender.sends)
+	if sender.sends.Load() != 1 {
+		t.Fatalf("sent %d requests while watched, want 1", sender.sends.Load())
 	}
 }
 
@@ -98,10 +102,10 @@ func TestPollRemoteSilentAfterUnsubscribe(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	p.pollRemoteStates()
 	sub.Close()
-	sender.sends = 0
+	sender.sends.Store(0)
 	p.pollRemoteStates()
 
-	if sender.sends != 0 {
-		t.Fatalf("sent %d requests after unsubscribe", sender.sends)
+	if sender.sends.Load() != 0 {
+		t.Fatalf("sent %d requests after unsubscribe", sender.sends.Load())
 	}
 }
