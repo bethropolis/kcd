@@ -58,28 +58,38 @@ func TestPollNotArmedWithoutPlayers(t *testing.T) {
 	}
 }
 
-// The poller must stop itself once a live read shows nothing playing.
-// Here D-Bus is unavailable, so every live read fails — the same path a
-// paused player takes, since a read that reports IsPlaying=false is what
-// keeps the ticker alive.
-func TestPollStopsItselfWhenNothingPlaying(t *testing.T) {
+// A live read that FAILS is not evidence that playback ended — Firefox's
+// MPRIS endpoint answers intermittently, and treating an error as "not
+// playing" used to strand the poller on the first hiccup. The poller must
+// retry through failures and only give up after the bounded backstop.
+func TestPollSurvivesReadFailures(t *testing.T) {
 	cfg := testMPRISConfig()
 	cfg.PositionInterval = "10ms"
 	p := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, cfg, log.Nop())
 	defer p.watchCancel()
 
-	trackPlayer(p, "Paused FM")
-	p.storeLocalState("Paused FM", &NowPlaying{Player: "Paused FM", IsPlaying: false})
+	// With no usable D-Bus connection every read fails, so this exercises
+	// the failure path exactly.
+	trackPlayer(p, "Flaky FM")
+	p.storeLocalState("Flaky FM", &NowPlaying{Player: "Flaky FM", IsPlaying: true})
 	if !pollerArmed(p) {
 		t.Fatal("poller not armed after an observed change")
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	// It must still be running well past the first failure.
+	time.Sleep(maxConsecutiveReadFailures * 3 * time.Millisecond)
+	if !pollerArmed(p) {
+		t.Fatal("poller stopped on a read failure instead of retrying")
+	}
+
+	// The bounded backstop must still release the slot rather than run
+	// forever on a name with a dead object behind it.
+	deadline := time.Now().Add(5 * time.Second)
 	for pollerArmed(p) && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if pollerArmed(p) {
-		t.Fatal("poller still armed after live reads reported nothing playing")
+		t.Fatal("poller never gave up after the bounded failure backstop")
 	}
 }
 

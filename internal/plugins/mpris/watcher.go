@@ -70,22 +70,19 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		}
 	}
 
-	// Register the name watch BEFORE anything can block, and narrow it to
-	// MPRIS names. An unfiltered NameOwnerChanged match delivers a signal
-	// for every name acquired on the session bus, and each one is handled
-	// synchronously with blocking D-Bus calls — enough volume overflows
-	// the signal buffer, and godbus drops the overflow. A dropped
-	// PlaybackStatus signal used to strand the position poller disarmed.
+	// Watch every name change and filter to MPRIS in the handler. D-Bus
+	// match rules have no string-prefix key, and the non-MPRIS signals
+	// this lets through are cheap — the handler rejects them on a prefix
+	// check before any blocking work.
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
-		dbus.WithMatchOption("arg0prefix", mprisBusPrefix),
 	); err != nil {
 		return err
 	}
 
 	// Sized for a burst of player churn (browser restarts, several
-	// players at once) rather than bus-wide name traffic.
+	// players appearing at once).
 	ch := make(chan *dbus.Signal, 256)
 	conn.Signal(ch)
 

@@ -73,24 +73,47 @@ func (p *MPRISPlugin) stopPlayingPollerLocked() {
 	}
 }
 
+// maxConsecutiveReadFailures bounds how long the poller keeps retrying
+// when every live read errors. A player that is merely slow to answer
+// must not end sampling; one that is gone for good should not pin a
+// ticker on. Its name disappearing handles that case, so this is only a
+// backstop for a name that lingers with a dead object behind it.
+const maxConsecutiveReadFailures = 5
+
 // runPlayingPoller re-reads D-Bus state for every tracked player at
-// PositionInterval. It returns once a live read says nothing is playing,
-// so its lifetime follows the player rather than the cache that armed
-// it. Paused players and an empty player list cost zero wakeups — that is
-// the entire point: idle desktops stay silent.
+// PositionInterval. It returns once live reads say nothing is playing, so
+// its lifetime follows the player rather than the cache that armed it.
+// Paused players and an empty player list cost zero wakeups — that is the
+// entire point: idle desktops stay silent.
 func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Duration, gen uint64) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	defer p.finishPlayingPoller(gen)
 
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !p.pollPlayingPlayers() {
+			playing, complete := p.pollPlayingPlayers()
+			switch {
+			case playing:
+				failures = 0
+			case complete:
+				// Every player answered and none is playing: a real stop.
 				p.logger.Debug("mpris: no player is playing, stopping position poller")
 				return
+			default:
+				// A read failed. That is not evidence playback ended —
+				// Firefox's MPRIS endpoint answers intermittently — so keep
+				// sampling, but do not do it forever.
+				failures++
+				if failures >= maxConsecutiveReadFailures {
+					p.logger.Warn("mpris: position poller gave up after repeated read failures",
+						log.Int("failures", failures))
+					return
+				}
 			}
 		}
 	}
@@ -108,10 +131,12 @@ func (p *MPRISPlugin) finishPlayingPoller(gen uint64) {
 }
 
 // pollPlayingPlayers samples every tracked player once, broadcasting the
-// ones whose state actually changed. It reports whether anything is
-// playing according to those live reads — the sole input to the
-// poller's stop decision.
-func (p *MPRISPlugin) pollPlayingPlayers() bool {
+// ones whose state actually changed.
+//
+// It reports whether anything is playing, and whether every tracked
+// player answered. An unanswered player makes the result incomplete: the
+// caller must not read that as "playback ended".
+func (p *MPRISPlugin) pollPlayingPlayers() (playing, complete bool) {
 	p.mu.RLock()
 	players := make([]*trackedPlayer, 0, len(p.players))
 	for _, pl := range p.players {
@@ -119,10 +144,15 @@ func (p *MPRISPlugin) pollPlayingPlayers() bool {
 	}
 	p.mu.RUnlock()
 
-	playing := false
+	if len(players) == 0 {
+		return false, true
+	}
+
+	complete = true
 	for _, pl := range players {
 		state, err := p.playerState(pl.displayName)
 		if err != nil {
+			complete = false
 			continue
 		}
 		if state.IsPlaying {
@@ -139,5 +169,5 @@ func (p *MPRISPlugin) pollPlayingPlayers() bool {
 			p.broadcast(state)
 		}
 	}
-	return playing
+	return playing, complete
 }
