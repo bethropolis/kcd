@@ -2,6 +2,10 @@ version: 2
 
 project_name: kcd
 
+# Source tarball for the AUR source package (aur_sources pipe).
+source:
+  enabled: true
+
 before:
   hooks:
     - go mod tidy
@@ -109,6 +113,57 @@ aurs:
       install -Dm644 "./packaging/ufw-kcd" "${pkgdir}/etc/ufw/applications.d/kcd"
 
       install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/kcd-bin/LICENSE"
+
+aur_sources:
+  - name: kcd
+    homepage: "https://github.com/bethropolis/kcd"
+    description: |
+      Lightweight, headless implementation of the KDE Connect protocol (v8) written in Go
+    maintainers:
+      - "bethropolis <bethropolis at gmail dot com>"
+    license: "MIT"
+    private_key: "{{ .Env.AUR_KEY }}"
+    skip_upload: true
+    git_url: "ssh://aur@aur.archlinux.org/kcd.git"
+    provides:
+      - kcd
+    conflicts:
+      - kcd-bin
+    makedepends:
+      - go
+    depends:
+      - glibc
+    optdepends:
+      - "libnotify: for desktop notifications"
+      - "wl-clipboard: for Wayland clipboard sync"
+      - "xclip: for X11 clipboard sync"
+      - "sshfs: for SFTP mounting support"
+      - "python-nautilus: for Nautilus file manager integration"
+      - "ydotool: for Wayland mousepad support"
+      - "xdotool: for X11 mousepad support"
+      - "wtype: for Wayland keyboard emulation"
+    build: |-
+      export CGO_ENABLED=0
+      go build -trimpath -ldflags "-s -w -X main.version=${pkgver} -X main.commit={{.Commit}} -X main.date={{.Date}}" -o kcd ./cmd/kcd
+    package: |-
+      install -Dm755 "./kcd" "${pkgdir}/usr/bin/kcd"
+
+      install -Dm644 "./packaging/kcd-pkg.service" "${pkgdir}/usr/lib/systemd/user/kcd.service"
+      install -Dm644 "./packaging/kcd-pkg.socket" "${pkgdir}/usr/lib/systemd/user/kcd.socket"
+      install -Dm644 "./packaging/kcd-system.service" "${pkgdir}/usr/lib/systemd/system/kcd@.service"
+
+      install -Dm644 "./packaging/kcd.example.toml" "${pkgdir}/usr/share/doc/kcd/kcd.example.toml"
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/kcd/README.md"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/kcd/LICENSE"
+
+      install -Dm644 "./packaging/kcd.bash-completion" "${pkgdir}/usr/share/bash-completion/completions/kcd"
+      install -Dm644 "./packaging/kcd.zsh-completion" "${pkgdir}/usr/share/zsh/site-functions/_kcd"
+      install -Dm644 "./packaging/kcd.fish-completion" "${pkgdir}/usr/share/fish/vendor_completions.d/kcd.fish"
+
+      install -Dm644 "./packaging/nautilus-kcd.py" "${pkgdir}/usr/share/nautilus-python/extensions/nautilus-kcd.py"
+
+      install -Dm644 "./packaging/firewalld-kcd.xml" "${pkgdir}/usr/lib/firewalld/services/kcd.xml"
+      install -Dm644 "./packaging/ufw-kcd" "${pkgdir}/etc/ufw/applications.d/kcd"
 
 dockers_v2:
   - images:
@@ -259,6 +314,12 @@ release:
     **Arch Linux:**
     ```bash
     yay -S kcd-bin
+    systemctl --user enable --now kcd.socket
+    ```
+
+    **Arch Linux source:**
+    ```bash
+    yay -S kcd
     systemctl --user enable --now kcd.socket
     ```
 

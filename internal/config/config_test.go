@@ -17,10 +17,10 @@ func TestDefaults(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"5s", "10s", "15s", "60s"}) {
+	if cfg.Network != (NetworkConfig{"5s", "10s", "15s", "60s", "30s"}) {
 		t.Errorf("network defaults: %+v", cfg.Network)
 	}
-	if cfg.Reconnect != (ReconnectConfig{"2s", "5m", "15s"}) {
+	if cfg.Reconnect != (ReconnectConfig{"2s", "5m", "15s", true, "1h", "24h"}) {
 		t.Errorf("reconnect defaults: %+v", cfg.Reconnect)
 	}
 	if cfg.Discovery != (DiscoveryConfig{"30s", "60s"}) {
@@ -82,6 +82,9 @@ transfer_idle_timeout = "90s"
 initial_backoff = "3s"
 max_backoff = "6m"
 flap_threshold = "20s"
+sighting_driven = false
+fallback_max = "2h"
+stale_after = "48h"
 [discovery]
 broadcast_interval = "45s"
 broadcast_idle_interval = "90s"
@@ -102,7 +105,7 @@ app_name = "KDE Connect"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s", "90s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
+	if cfg.Network != (NetworkConfig{"750ms", "12s", "25s", "90s", "30s"}) || cfg.Reconnect != (ReconnectConfig{"3s", "6m", "20s", false, "2h", "48h"}) || cfg.Discovery != (DiscoveryConfig{"45s", "90s"}) {
 		t.Fatal("duration overrides not decoded")
 	}
 	if cfg.Cache != (CacheConfig{"/tmp/sms", "/tmp/art", "/tmp/contacts"}) || cfg.Pairing.IntentTTL != "7m" || cfg.Pairing.ListenTimeout != "2m" {
@@ -131,9 +134,12 @@ app_name = "KDE Connect"
 func TestDurationValidation(t *testing.T) {
 	fields := []struct{ section, key string }{
 		{"network", "dial_timeout"}, {"network", "handshake_timeout"}, {"network", "sidechannel_timeout"},
+		{"network", "keepalive_idle"},
 		{"reconnect", "initial_backoff"}, {"reconnect", "max_backoff"}, {"reconnect", "flap_threshold"},
+		{"reconnect", "fallback_max"}, {"reconnect", "stale_after"},
 		{"discovery", "broadcast_interval"}, {"discovery", "broadcast_idle_interval"},
 		{"pairing", "intent_ttl"}, {"pairing", "listen_timeout"},
+		{"mpris", "position_interval"},
 	}
 	for _, field := range fields {
 		for _, value := range []string{"", "nonsense", "10", "0", "0s", "-1s", "9999999999999999999h"} {
@@ -163,6 +169,40 @@ func TestDurationRelationships(t *testing.T) {
 				t.Fatalf("equal or larger maximum should be valid: %v", err)
 			}
 		}
+	}
+}
+
+func TestFallbackMaxRelationship(t *testing.T) {
+	// fallback_max must be >= max_backoff: the parked fallback may only
+	// space attempts wider than the legacy loop, never tighter.
+	if _, err := loadTOML(t, "[reconnect]\nfallback_max = '1m'\n"); err == nil ||
+		!strings.Contains(err.Error(), "reconnect.fallback_max") {
+		t.Fatalf("expected fallback_max relationship error, got %v", err)
+	}
+	if _, err := loadTOML(t, "[reconnect]\nmax_backoff = '5m'\nfallback_max = '1h'\n"); err != nil {
+		t.Fatalf("wider fallback_max should be valid: %v", err)
+	}
+	// Pre-1.20 configs that raised max_backoff above the new 1h fallback
+	// default must keep loading in legacy mode: fallback_max is unused
+	// with sighting_driven=false, so the relationship is not enforced.
+	if _, err := loadTOML(t, "[reconnect]\nsighting_driven = false\nmax_backoff = '2h'\n"); err != nil {
+		t.Fatalf("legacy max_backoff above default fallback must stay valid: %v", err)
+	}
+	if _, err := loadTOML(t, "[reconnect]\nsighting_driven = true\nmax_backoff = '2h'\n"); err == nil ||
+		!strings.Contains(err.Error(), "reconnect.fallback_max") {
+		t.Fatalf("expected fallback_max relationship error when sighting-driven, got %v", err)
+	}
+}
+
+func TestKeepAliveIdleFloor(t *testing.T) {
+	// Below 10s the radio never sleeps: reject, even though the value
+	// parses as a positive duration.
+	if _, err := loadTOML(t, "[network]\nkeepalive_idle = '5s'\n"); err == nil ||
+		!strings.Contains(err.Error(), "network.keepalive_idle") {
+		t.Fatalf("expected keepalive_idle floor error, got %v", err)
+	}
+	if _, err := loadTOML(t, "[network]\nkeepalive_idle = '120s'\n"); err != nil {
+		t.Fatalf("120s keepalive_idle should be valid: %v", err)
 	}
 }
 

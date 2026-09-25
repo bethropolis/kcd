@@ -53,7 +53,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 		logger.Debug("failed to dial peer", log.Error(err))
 		return
 	}
-	transport.SetTCPKeepAlive(conn)
+	transport.SetTCPKeepAlive(conn, config.Duration(opts.Network.KeepAliveIdle))
 
 	var myID protocol.IdentityBody
 	json.Unmarshal(identity.Body, &myID)

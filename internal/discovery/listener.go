@@ -28,10 +28,9 @@ func NewListener(port int, localDeviceID string, callback func(ip net.IP, tcpPor
 }
 
 // Run starts the UDP listener loop to parse incoming discovery broadcasts.
+// Lifetime-on: blocking read, zero timers. mDNS browsing is owned
+// separately by the broadcast controller (see RunMdnsDiscovery).
 func (l *Listener) Run(ctx context.Context) {
-	// mDNS Discovery
-	go l.runMdnsDiscovery(ctx)
-
 	addr := &net.UDPAddr{Port: l.port}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {

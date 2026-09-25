@@ -20,6 +20,9 @@ import (
 type SidechannelOptions struct {
 	Timeout     time.Duration
 	IdleTimeout time.Duration
+	// KeepAliveIdle overrides the TCP keepalive first-probe delay for
+	// the dial; zero keeps DefaultKeepAliveIdle.
+	KeepAliveIdle time.Duration
 }
 
 // defaultSetupTimeout bounds side-channel establishment (TCP dial + TLS
@@ -44,12 +47,15 @@ func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Co
 	if opts.Timeout <= 0 {
 		opts.Timeout = defaultSetupTimeout
 	}
+	if opts.KeepAliveIdle <= 0 {
+		opts.KeepAliveIdle = DefaultKeepAliveIdle
+	}
 	addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 	// One wall-clock budget covers everything before payload streaming:
 	// the TCP connect and the TLS handshake together.
 	setupCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	dialer := net.Dialer{Timeout: opts.Timeout, KeepAlive: keepAliveIdle}
+	dialer := net.Dialer{Timeout: opts.Timeout, KeepAlive: opts.KeepAliveIdle}
 	raw, err := dialer.DialContext(setupCtx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("side-channel: dial %s: %w", addr, err)

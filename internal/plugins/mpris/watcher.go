@@ -29,62 +29,6 @@ func (p *MPRISPlugin) startWatcher(ctx context.Context) {
 			}
 		}
 	}()
-
-	go p.runPollingLoop(ctx)
-}
-
-func (p *MPRISPlugin) runPollingLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	var lastHash string
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.mu.RLock()
-			players := make([]*trackedPlayer, 0, len(p.players))
-			for _, pl := range p.players {
-				players = append(players, pl)
-			}
-			p.mu.RUnlock()
-
-			if len(players) == 0 {
-				continue
-			}
-
-			var hash string
-			for _, pl := range players {
-				if state, err := p.playerState(pl.displayName); err == nil {
-					p.mu.RLock()
-					last := p.lastStates[pl.displayName]
-					p.mu.RUnlock()
-
-					changed := state.PlaybackStatus != last.PlaybackStatus ||
-						state.Title != last.Title ||
-						state.Artist != last.Artist ||
-						state.Album != last.Album ||
-						state.AlbumArtUrl != last.AlbumArtUrl ||
-						state.Volume != last.Volume ||
-						state.IsPlaying != last.IsPlaying
-
-					if changed {
-						p.mu.Lock()
-						p.lastStates[pl.displayName] = state
-						p.mu.Unlock()
-						p.broadcast(state)
-					}
-
-					hash += pl.displayName + state.PlaybackStatus + state.Title
-				}
-			}
-
-			if hash != lastHash {
-				lastHash = hash
-			}
-		}
-	}
 }
 
 func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
@@ -96,7 +40,14 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 
 	uniqueToDisplay := make(map[string]string)
 
-	entries, _ := listPlayersDBus(p.dbus)
+	entries, err := listPlayersDBus(p.dbus)
+	if err != nil {
+		// Not fatal: the watcher keeps running so NameOwnerChanged can
+		// still pick players up as they appear. Logging matters — this
+		// error used to be discarded, leaving an empty tracker with no
+		// clue why.
+		p.logger.Warn("mpris: initial player listing failed", log.Error(err))
+	}
 	for _, e := range entries {
 		var owner string
 		if err := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, e.busName).Store(&owner); err == nil {
@@ -119,6 +70,10 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		}
 	}
 
+	// Watch every name change and filter to MPRIS in the handler. D-Bus
+	// match rules have no string-prefix key, and the non-MPRIS signals
+	// this lets through are cheap — the handler rejects them on a prefix
+	// check before any blocking work.
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
@@ -126,7 +81,9 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		return err
 	}
 
-	ch := make(chan *dbus.Signal, 64)
+	// Sized for a burst of player churn (browser restarts, several
+	// players appearing at once).
+	ch := make(chan *dbus.Signal, 256)
 	conn.Signal(ch)
 
 	for {

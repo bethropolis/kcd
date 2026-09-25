@@ -8,17 +8,18 @@ import (
 
 var lockCmd = &cli.Command{
 	Name:      "lock",
-	Usage:     "Lock the current desktop session",
-	ArgsUsage: "<device-id>",
+	Usage:     "Lock the screen of a remote device",
+	ArgsUsage: "[device-id]",
 	Action: func(c *cli.Context) error {
-		if c.NArg() < 1 {
-			return fmt.Errorf("missing device ID")
-		}
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		if err := cl.Lock(c.Args().First()); err != nil {
+		deviceID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
+		}
+		if err := cl.Lock(deviceID); err != nil {
 			return err
 		}
 		fmt.Println("Lock requested")

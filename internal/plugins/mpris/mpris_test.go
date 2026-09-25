@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
@@ -37,7 +38,7 @@ func TestHandleDeduplicatesRemoteMPRISUpdates(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -142,7 +143,7 @@ func (s *recordingSender) sent() []*protocol.Packet {
 }
 
 func TestHandleRequestsAlbumArtForKdeconnectURI(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
+	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -188,7 +189,7 @@ func TestHandleRequestsAlbumArtForKdeconnectURI(t *testing.T) {
 }
 
 func TestHandleIgnoresEmptyAlbumArtPayload(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
+	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -212,7 +213,7 @@ func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -286,7 +287,12 @@ func TestStampAlbumArtMatchesCurrentTrack(t *testing.T) {
 }
 
 func TestPollRemoteStatesOnlyTargetsKnownPlayers(t *testing.T) {
-	plugin := NewMPRISPlugin(nil, events.NewBus(log.Nop()), false, log.Nop())
+	bus := events.NewBus(log.Nop())
+	// The poller only emits while somebody listens for mpris.update;
+	// subscribe so this test exercises the targeting logic itself.
+	watch := bus.Subscribe(4, events.TypeMprisUpdate)
+	defer watch.Close()
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -357,7 +363,7 @@ func TestHandlePrunesRemovedPlayer(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -398,7 +404,7 @@ func TestHandlePrunesPlayerOnEmptyList(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -429,7 +435,7 @@ func TestHandleKeepsListedPlayer(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -458,7 +464,7 @@ func TestPublishedEventHasAnchorAndPendingArt(t *testing.T) {
 	sub := bus.Subscribe(4, events.TypeMprisUpdate)
 	defer sub.Close()
 
-	plugin := NewMPRISPlugin(nil, bus, false, log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
 	if plugin.watchCancel != nil {
 		defer plugin.watchCancel()
 	}
@@ -501,5 +507,49 @@ func TestPublishedEventHasAnchorAndPendingArt(t *testing.T) {
 	}
 	if rs.PosAnchorMs != pub.PosAnchorMs {
 		t.Errorf("anchor mismatch: published %d, served %d", pub.PosAnchorMs, rs.PosAnchorMs)
+	}
+}
+
+// Broadcast stamps the anchor on the same pointer cached in lastStates
+// while DebugStatus reads that cached anchor under RLock from the IPC
+// path. Hammer both concurrently: under -race any unsynchronized stamp
+// is reported. The locked RLock read mirrors DebugStatus's access.
+func TestBroadcastAnchorStampRace(t *testing.T) {
+	bus := events.NewBus(log.Nop())
+	plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
+	if plugin.watchCancel != nil {
+		defer plugin.watchCancel()
+	}
+
+	state := &NowPlaying{Player: "Racer", Title: "T", Pos: 1000, IsPlaying: true}
+	plugin.mu.Lock()
+	plugin.lastStates["Racer"] = state
+	plugin.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				plugin.broadcast(state)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				plugin.mu.RLock()
+				_ = plugin.lastStates["Racer"].PosAnchorMs
+				plugin.mu.RUnlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if state.PosAnchorMs == 0 {
+		t.Error("expected broadcast to stamp PosAnchorMs")
 	}
 }

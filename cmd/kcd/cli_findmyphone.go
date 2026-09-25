@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/bethropolis/kcd/internal/device"
 	"github.com/urfave/cli/v2"
 )
 
@@ -17,21 +16,9 @@ var findmyphoneCmd = &cli.Command{
 			return err
 		}
 
-		targetID := c.Args().First()
-		if targetID == "" {
-			devs, err := cl.Devices()
-			if err != nil {
-				return err
-			}
-			for _, d := range devs {
-				if d.Connected && d.State == device.StatePaired {
-					targetID = d.ID
-					break
-				}
-			}
-			if targetID == "" {
-				return fmt.Errorf("no paired connected devices found")
-			}
+		targetID, err := resolveDeviceID(c, cl)
+		if err != nil {
+			return err
 		}
 
 		if err := cl.FindMyPhone(targetID); err != nil {

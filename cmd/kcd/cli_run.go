@@ -22,10 +22,17 @@ var runCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-				if err := cl.RunList(c.Args().First()); err != nil {
+				commands, err := cl.RunList(c.Args().First())
+				if err != nil {
 					return err
 				}
-				fmt.Println("Command list requested. Run 'kcd watch' to see results.")
+				if len(commands) == 0 {
+					fmt.Println("No commands available on this device.")
+					return nil
+				}
+				for _, cmd := range commands {
+					fmt.Printf("%s\t%s\n", cmd.Name, cmd.Command)
+				}
 				return nil
 			},
 		},

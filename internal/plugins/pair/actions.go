@@ -29,16 +29,20 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 	return nil
 }
 
-// RequestPairing initiates a pairing request to a device.
-func (p *PairPlugin) RequestPairing(dev *device.Device) error {
+// RequestPairing initiates a pairing request to a device and returns the
+// out-of-band verification code the peer displays for the user to compare.
+// The code is empty when nothing needed requesting: an already-paired
+// device, or a pending request from the peer that this accepts instead
+// (the peer owns the code in that direction).
+func (p *PairPlugin) RequestPairing(dev *device.Device) (string, error) {
 	if dev.State() == device.StatePaired {
 		p.logger.Warn("device already paired", log.String("device_id", dev.ID()))
-		return nil
+		return "", nil
 	}
 
 	if dev.State() == device.StatePairRequestedByPeer {
 		// They already requested, just accept
-		return p.AcceptPairing(dev)
+		return "", p.AcceptPairing(dev)
 	}
 
 	// The request timestamp seeds the verification code on both sides,
@@ -46,7 +50,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 	timestamp := time.Now().Unix()
 	pkt, err := protocol.NewPairPacket(protocol.PairAccept, timestamp)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	p.mu.Lock()
@@ -55,15 +59,17 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 
 	if err := dev.Send(pkt); err != nil {
 		p.logger.Error("failed to send pair request", log.Error(err))
-		return err
+		return "", err
 	}
 
-	peerCert := dev.PeerCert()
-	if peerCert != nil {
-		vKey := cert.VerificationKey(p.localCert, peerCert, timestamp)
+	// Without a peer certificate (unauthenticated legacy device) there is
+	// no code to compare; the caller surfaces an empty string.
+	var verificationKey string
+	if peerCert := dev.PeerCert(); peerCert != nil {
+		verificationKey = cert.VerificationKey(p.localCert, peerCert, timestamp)
 		p.logger.Info("pairing verification code",
 			log.String("device_id", dev.ID()),
-			log.String("code", vKey))
+			log.String("code", verificationKey))
 	}
 
 	dev.SetState(device.StatePairRequested)
@@ -73,7 +79,7 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) error {
 		p.onStateChanged()
 	}
 
-	return nil
+	return verificationKey, nil
 }
 
 // RejectPairing rejects an incoming pair request.

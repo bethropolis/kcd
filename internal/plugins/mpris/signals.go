@@ -17,8 +17,8 @@ func (p *MPRISPlugin) handleNameOwnerChanged(sig *dbus.Signal, conn *dbus.Conn, 
 	oldOwner, _ := sig.Body[1].(string)
 	newOwner, _ := sig.Body[2].(string)
 
-	if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") ||
-		strings.HasPrefix(name, "org.mpris.MediaPlayer2.kdeconnect.") ||
+	if !strings.HasPrefix(name, mprisBusPrefix) ||
+		strings.HasPrefix(name, mprisBusPrefix+"kdeconnect.") ||
 		name == "org.mpris.MediaPlayer2.playerctld" {
 		return
 	}
@@ -167,9 +167,7 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 	state.Pos = pos
 	state.CanSeek = canSeek
 
-	p.mu.Lock()
-	p.lastStates[displayName] = state
-	p.mu.Unlock()
+	p.storeLocalState(displayName, state)
 
 	p.broadcast(state)
 }

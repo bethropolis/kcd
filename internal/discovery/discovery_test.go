@@ -61,6 +61,81 @@ func TestBroadcasterOwners(t *testing.T) {
 	}
 }
 
+// The mDNS browse starter shares the owned loop lifetime: it launches on
+// StartOwned and its context ends on the last StopOwned, so periodic
+// browse probes never run at steady state.
+func TestBrowseStarterSharesOwnership(t *testing.T) {
+	bc := NewBroadcasterController(testIdentity(t), protocol.DefaultTCPPort, time.Hour, log.Nop(), nil)
+	ctx := context.Background()
+
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	bc.SetBrowseStarter(func(browseCtx context.Context) {
+		close(started)
+		<-browseCtx.Done()
+		close(stopped)
+	})
+
+	bc.StartOwned(ctx, OwnerReconnect)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("browse starter not launched with owned loop")
+	}
+
+	bc.StopOwned(OwnerReconnect)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("browse context not cancelled with owned loop")
+	}
+}
+
+// Startup race: reconnect ownership can begin before transport setup
+// registers the browse starter. A late setter must attach browsing to
+// the already-running owner instead of waiting for a cycle that may
+// never come (the pair is already offline and silent).
+func TestLateBrowseStarterAttachesToRunningOwner(t *testing.T) {
+	bc := NewBroadcasterController(testIdentity(t), protocol.DefaultTCPPort, time.Hour, log.Nop(), nil)
+	ctx := context.Background()
+
+	bc.StartOwned(ctx, OwnerReconnect)
+	if !bc.IsRunning() {
+		t.Fatal("loop must run before the starter is registered")
+	}
+
+	started := make(chan context.Context, 1)
+	bc.SetBrowseStarter(func(browseCtx context.Context) {
+		started <- browseCtx
+	})
+
+	select {
+	case browseCtx := <-started:
+		select {
+		case <-browseCtx.Done():
+			t.Fatal("attached browse context must live while the owner holds the loop")
+		default:
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late browse starter did not attach to the running owner")
+	}
+	bc.StopOwned(OwnerReconnect)
+}
+
+// Without a registered starter the controller behaves exactly as before.
+func TestNoBrowseStarterNoBrowse(t *testing.T) {
+	bc := NewBroadcasterController(testIdentity(t), protocol.DefaultTCPPort, time.Hour, log.Nop(), nil)
+	ctx := context.Background()
+	bc.StartOwned(ctx, OwnerReconnect)
+	if !bc.IsRunning() {
+		t.Fatal("loop must run without a browse starter")
+	}
+	bc.StopOwned(OwnerReconnect)
+	if bc.IsRunning() {
+		t.Fatal("loop must stop without a browse starter")
+	}
+}
+
 // A non-default tcp_port must reach the broadcaster: the controller stores
 // it and hands it to every Broadcaster it spawns.
 func TestBroadcasterControllerStoresPort(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/bethropolis/kcd/pkg/client"
 	"github.com/urfave/cli/v2"
 )
 
@@ -14,14 +15,74 @@ var actionFlags = []cli.Flag{
 	&cli.StringFlag{Name: "player", Aliases: []string{"p"}, Usage: "Player name"},
 }
 
+// actionDeviceID returns the device for an mpris action subcommand. A
+// positional argument wins so `kcd mpris next <id>` matches every other
+// command in the CLI; --device stays as the fallback. (volume and seek
+// deliberately do not use this: their positional is the value.)
+func actionDeviceID(c *cli.Context) string {
+	if c.NArg() >= 1 {
+		return c.Args().First()
+	}
+	return c.String("device")
+}
+
 func actionCmd(action string) cli.ActionFunc {
 	return func(c *cli.Context) error {
 		cl, err := getClient(c)
 		if err != nil {
 			return err
 		}
-		return cl.MprisAction(c.String("device"), c.String("player"), action)
+		return cl.MprisAction(actionDeviceID(c), c.String("player"), action)
 	}
+}
+
+// skipCmd builds the next/previous actions. Some phone MPRIS
+// implementations stop after a skip, so the new track is nudged with
+// Play — but only when something was actually playing. Skipping a paused
+// player must leave it paused; unpausing it would start audio the user
+// never asked for.
+func skipCmd(action string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		deviceID := actionDeviceID(c)
+		player := c.String("player")
+		wasPlaying := remotePlayerPlaying(cl, deviceID, player)
+
+		if err := cl.MprisAction(deviceID, player, action); err != nil {
+			return err
+		}
+		if !wasPlaying {
+			return nil
+		}
+		return cl.MprisAction(deviceID, player, "Play")
+	}
+}
+
+// remotePlayerPlaying reports whether the target player is currently
+// playing. An empty player name means the device's only/first player.
+//
+// State the daemon cannot report — the query failed, the device is
+// unknown, or no player matches — returns true, preserving the old
+// always-nudge behavior for the phones that need it rather than
+// silently dropping the workaround.
+func remotePlayerPlaying(cl *client.Client, deviceID, player string) bool {
+	remote, err := cl.MprisRemote()
+	if err != nil {
+		return true
+	}
+	for _, p := range remote.Players {
+		if deviceID != "" && p.DeviceID != deviceID {
+			continue
+		}
+		if player != "" && p.Player != player {
+			continue
+		}
+		return p.IsPlaying
+	}
+	return true
 }
 
 var mprisCmd = &cli.Command{
@@ -143,61 +204,47 @@ var mprisCmd = &cli.Command{
 			},
 		},
 		{
-			Name:   "play",
-			Usage:  "Start playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Play"),
+			Name:      "play",
+			ArgsUsage: "[device-id]",
+			Usage:     "Start playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Play"),
 		},
 		{
-			Name:   "pause",
-			Usage:  "Pause playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Pause"),
+			Name:      "pause",
+			ArgsUsage: "[device-id]",
+			Usage:     "Pause playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Pause"),
 		},
 		{
-			Name:   "toggle",
-			Usage:  "Toggle play/pause on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("PlayPause"),
+			Name:      "toggle",
+			ArgsUsage: "[device-id]",
+			Usage:     "Toggle play/pause on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("PlayPause"),
 		},
 		{
-			Name:  "next",
-			Usage: "Skip to next track on a remote device (also starts playback)",
-			Flags: actionFlags,
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
-				if err != nil {
-					return err
-				}
-				if err := cl.MprisAction(c.String("device"), c.String("player"), "Next"); err != nil {
-					return err
-				}
-				// Some phone MPRIS implementations stop after Next.
-				// Send Play to ensure the new track starts.
-				return cl.MprisAction(c.String("device"), c.String("player"), "Play")
-			},
+			Name:      "next",
+			ArgsUsage: "[device-id]",
+			Usage:     "Skip to next track on a remote device (resumes playback if it was playing)",
+			Flags:     actionFlags,
+			Action:    skipCmd("Next"),
 		},
 		{
-			Name:    "previous",
-			Aliases: []string{"prev"},
-			Usage:   "Go to previous track on a remote device (also starts playback)",
-			Flags:   actionFlags,
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
-				if err != nil {
-					return err
-				}
-				if err := cl.MprisAction(c.String("device"), c.String("player"), "Previous"); err != nil {
-					return err
-				}
-				return cl.MprisAction(c.String("device"), c.String("player"), "Play")
-			},
+			Name:      "previous",
+			ArgsUsage: "[device-id]",
+			Aliases:   []string{"prev"},
+			Usage:     "Go to previous track on a remote device (resumes playback if it was playing)",
+			Flags:     actionFlags,
+			Action:    skipCmd("Previous"),
 		},
 		{
-			Name:   "stop",
-			Usage:  "Stop playback on a remote device",
-			Flags:  actionFlags,
-			Action: actionCmd("Stop"),
+			Name:      "stop",
+			ArgsUsage: "[device-id]",
+			Usage:     "Stop playback on a remote device",
+			Flags:     actionFlags,
+			Action:    actionCmd("Stop"),
 		},
 		{
 			Name:      "volume",

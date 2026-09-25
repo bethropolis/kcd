@@ -75,7 +75,7 @@ command -v go >/dev/null 2>&1 \
 
 GO_VERSION="$(go version | awk '{print $3}' | tr -d 'go')"
 REQUIRED_MAJOR=1
-REQUIRED_MINOR=22
+REQUIRED_MINOR=25
 IFS='.' read -r MAJOR MINOR _ <<< "$GO_VERSION"
 if (( MAJOR < REQUIRED_MAJOR || (MAJOR == REQUIRED_MAJOR && MINOR < REQUIRED_MINOR) )); then
   die "Go ${GO_VERSION} is too old. kcd requires Go ${REQUIRED_MAJOR}.${REQUIRED_MINOR}+."
@@ -101,7 +101,48 @@ step "Building static binary"
 
 cd "${REPO_ROOT}"
 
-VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
+# Version follows the git tag, never a hand-maintained constant:
+#   v1.20.0                      checkout sitting exactly on a release tag
+#   v1.19.1+42.gbaa21f5          N commits after that tag on this branch
+#   v1.19.1-dev+gbaa21f5         branch that forked before the newest tag
+#   dev                          no tags reachable at all
+#
+# The base is the newest release tag in the repo, not the newest one
+# reachable from HEAD. dev/next forks before the release merge, so
+# `git describe` alone walks past v1.19.1 and reports the ancient v1.18.2
+# the branch also descends from — labelling v1.19.x+ code as 1.18.2.
+resolve_version() {
+  local short_sha exact latest_tag ahead
+  short_sha="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+  exact="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+  if [ -n "$exact" ]; then
+    VERSION="$exact"
+    return
+  fi
+
+  latest_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname 2>/dev/null | head -n 1)"
+  if [ -z "$latest_tag" ]; then
+    VERSION="dev"
+  elif git merge-base --is-ancestor "$latest_tag" HEAD 2>/dev/null; then
+    ahead="$(git rev-list --count "${latest_tag}..HEAD" 2>/dev/null || echo 0)"
+    VERSION="${latest_tag}+${ahead}.g${short_sha}"
+  else
+    # Not in this branch's history, so a commit count would be fiction.
+    VERSION="${latest_tag}-dev+g${short_sha}"
+  fi
+}
+
+VERSION="dev"
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  resolve_version
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    VERSION="${VERSION}-dirty"
+  fi
+else
+  warn "Not a git checkout — building as 'dev' (no tag information available)."
+fi
+
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

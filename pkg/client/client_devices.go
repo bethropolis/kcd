@@ -50,10 +50,20 @@ func (c *Client) PairListen() (*ipc.PairListenResult, error) {
 	return &result, nil
 }
 
-// Pair requests the daemon to pair with a specific device.
-func (c *Client) Pair(deviceID string) error {
-	_, err := c.Call(ipc.CmdPair, ipc.DevicePayload{DeviceID: deviceID})
-	return err
+// Pair requests the daemon to pair with a specific device and returns the
+// out-of-band verification code to compare against the peer's prompt. The
+// code is empty when the device was already paired or had a pending
+// request that the daemon accepted instead.
+func (c *Client) Pair(deviceID string) (string, error) {
+	resp, err := c.Call(ipc.CmdPair, ipc.DevicePayload{DeviceID: deviceID})
+	if err != nil {
+		return "", err
+	}
+	var result ipc.PairResult
+	if len(resp.Data) > 0 {
+		_ = json.Unmarshal(resp.Data, &result)
+	}
+	return result.VerificationKey, nil
 }
 
 // Unpair requests the daemon to unpair and forget a specific device.

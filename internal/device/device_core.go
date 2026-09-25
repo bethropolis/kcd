@@ -97,6 +97,12 @@ type Device struct {
 	// auto-reconnect goroutines for this device.
 	reconnecting atomic.Bool
 
+	// reconnectWake nudges a parked auto-reconnect loop: discovery
+	// sightings (peer provably alive) and unpair transitions. Buffered-1
+	// so pokes never block the discovery listener; coalesced bursts mean
+	// "check now", not N dials.
+	reconnectWake chan struct{}
+
 	// reconnectAttempt persists the auto-reconnect backoff counter across
 	// disconnect cycles. A connection that flaps (drops shortly after a
 	// successful dial) keeps the counter so the backoff escalates instead of
@@ -127,7 +133,11 @@ func NewDevice(id, name, dtype string, logger log.Logger) *Device {
 		state:    StateUnpaired,
 		sendChan: make(chan *protocol.Packet, 32),
 		done:     make(chan struct{}),
-		logger:   logger.With(log.String("device_id", id)),
+		// Nil-safe by construction, but PokeReconnect also tolerates a
+		// zero-value Device (tests): a send on a nil channel blocks, so
+		// the select always takes the default branch.
+		reconnectWake: make(chan struct{}, 1),
+		logger:        logger.With(log.String("device_id", id)),
 	}
 }
 
@@ -160,6 +170,33 @@ func (d *Device) SetState(s PairingState) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.state = s
+	// Wake a parked reconnect loop so unpair takes effect immediately
+	// instead of at the next timer fire (or never, past the stale
+	// horizon). The loop re-checks state on wake and exits.
+	if s == StateUnpaired {
+		d.PokeReconnect()
+	}
+}
+
+// PokeReconnect nudges the auto-reconnect loop to re-check now (sighting
+// arrived, or state changed). Non-blocking and nil-safe: bursts coalesce
+// into a single wakeup.
+func (d *Device) PokeReconnect() {
+	select {
+	case d.reconnectWake <- struct{}{}:
+	default:
+	}
+}
+
+// ReconnectWake exposes the wake channel for the auto-reconnect loop's
+// select. A nil channel (zero-value Device) blocks forever — safe.
+func (d *Device) ReconnectWake() <-chan struct{} {
+	return d.reconnectWake
+}
+
+// Reconnecting reports whether an auto-reconnect goroutine is running.
+func (d *Device) Reconnecting() bool {
+	return d.reconnecting.Load()
 }
 func (d *Device) LastSeen() time.Time {
 	d.mu.RLock()

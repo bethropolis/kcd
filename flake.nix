@@ -19,7 +19,7 @@
           src = ./.;
 
           # Update when go.sum changes: nix build 2>&1 | grep 'got:' | awk '{print $2}'
-          vendorHash = "sha256-6zwzWlboTQeZcBiiHU7Jt+vDn2FYCrQ8CzGgCntKRGo=";
+          vendorHash = "sha256-/rT2aUVw0AG5oSMq/nTaybsvMUd+bPLMPJR2J1dltic=";
 
           subPackages = [ "cmd/kcd" ];
 

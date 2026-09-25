@@ -8,11 +8,17 @@ import (
 // NetworkConfig controls connection setup deadlines, not transfer size limits.
 // TransferIdleTimeout bounds streaming silence on side-channel transfers:
 // any read/write gap longer than it aborts the transfer.
+// KeepAliveIdle is the TCP keepalive first-probe delay (kernel timers, not
+// application wakeups): larger values send fewer probes on idle
+// connections but detect dead peers more slowly. Never zero — idle
+// sockets without probes become undetectable zombies (the per-write
+// deadline guards writers only, not idle sockets).
 type NetworkConfig struct {
 	DialTimeout         string `toml:"dial_timeout"`
 	HandshakeTimeout    string `toml:"handshake_timeout"`
 	SidechannelTimeout  string `toml:"sidechannel_timeout"`
 	TransferIdleTimeout string `toml:"transfer_idle_timeout"`
+	KeepAliveIdle       string `toml:"keepalive_idle"`
 }
 
 // ReconnectConfig controls retry delays and the minimum stable connection age.
@@ -20,12 +26,26 @@ type ReconnectConfig struct {
 	InitialBackoff string `toml:"initial_backoff"`
 	MaxBackoff     string `toml:"max_backoff"`
 	FlapThreshold  string `toml:"flap_threshold"`
+	// SightingDriven parks the redial timer on discovery sightings: while
+	// set, the loop dials immediately on sighting and otherwise waits up
+	// to FallbackMax, giving up entirely past StaleAfter. False restores
+	// the legacy pure-timer loop capped at MaxBackoff.
+	SightingDriven bool   `toml:"sighting_driven"`
+	FallbackMax    string `toml:"fallback_max"`
+	StaleAfter     string `toml:"stale_after"`
 }
 
 // DiscoveryConfig controls intervals while on-demand UDP discovery is running.
 type DiscoveryConfig struct {
 	BroadcastInterval     string `toml:"broadcast_interval"`
 	BroadcastIdleInterval string `toml:"broadcast_idle_interval"`
+}
+
+// MPRISConfig controls local media polling. The D-Bus watcher itself is
+// event-driven; the position poller only runs while music plays.
+type MPRISConfig struct {
+	PollWhilePlaying bool   `toml:"poll_while_playing"`
+	PositionInterval string `toml:"position_interval"`
 }
 
 // CacheConfig overrides storage directories. Empty values retain plugin defaults.
@@ -51,13 +71,17 @@ func (c *Config) validateDurations() error {
 		{"network.handshake_timeout", c.Network.HandshakeTimeout},
 		{"network.sidechannel_timeout", c.Network.SidechannelTimeout},
 		{"network.transfer_idle_timeout", c.Network.TransferIdleTimeout},
+		{"network.keepalive_idle", c.Network.KeepAliveIdle},
 		{"reconnect.initial_backoff", c.Reconnect.InitialBackoff},
 		{"reconnect.max_backoff", c.Reconnect.MaxBackoff},
 		{"reconnect.flap_threshold", c.Reconnect.FlapThreshold},
+		{"reconnect.fallback_max", c.Reconnect.FallbackMax},
+		{"reconnect.stale_after", c.Reconnect.StaleAfter},
 		{"discovery.broadcast_interval", c.Discovery.BroadcastInterval},
 		{"discovery.broadcast_idle_interval", c.Discovery.BroadcastIdleInterval},
 		{"pairing.intent_ttl", c.Pairing.IntentTTL},
 		{"pairing.listen_timeout", c.Pairing.ListenTimeout},
+		{"mpris.position_interval", c.MPRIS.PositionInterval},
 	} {
 		d, err := time.ParseDuration(setting.value)
 		if err != nil {
@@ -69,6 +93,12 @@ func (c *Config) validateDurations() error {
 	}
 	if Duration(c.Reconnect.MaxBackoff) < Duration(c.Reconnect.InitialBackoff) {
 		return fmt.Errorf("config: reconnect.max_backoff must be >= reconnect.initial_backoff")
+	}
+	if c.Reconnect.SightingDriven && Duration(c.Reconnect.FallbackMax) < Duration(c.Reconnect.MaxBackoff) {
+		return fmt.Errorf("config: reconnect.fallback_max must be >= reconnect.max_backoff")
+	}
+	if Duration(c.Network.KeepAliveIdle) < 10*time.Second {
+		return fmt.Errorf("config: network.keepalive_idle must be >= 10s (shorter delays keep weak radios awake)")
 	}
 	if Duration(c.Discovery.BroadcastIdleInterval) < Duration(c.Discovery.BroadcastInterval) {
 		return fmt.Errorf("config: discovery.broadcast_idle_interval must be >= discovery.broadcast_interval")

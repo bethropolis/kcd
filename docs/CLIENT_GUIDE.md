@@ -294,11 +294,14 @@ except KeyboardInterrupt:
 | `pair.requested` | Remote device wants to pair |
 | `ping.received` | Ping from device |
 
-> **Freshness:** the daemon re-requests now-playing from devices with an
-> actively-playing player every 5 seconds, so a pure-push client (a widget watching the
-> event stream, with no polling) receives the current track within one poll
-> interval of subscribing — including mid-track mount, thanks to the initial
-> event dump. Events are deduplicated: `mpris.update` only fires when the
+> **Freshness:** while at least one client watches `mpris.update`, the
+> daemon runs a 5-second ticker that re-requests now-playing from devices
+> with an actively-playing player, so a pure-push client (a widget watching
+> the event stream, with no polling) receives the current track within one
+> poll interval of subscribing — including mid-track mount, thanks to the
+> initial event dump. The ticker itself only runs while watched: with
+> nobody watching, there is no timer and no refresh requests go out at all.
+> Events are deduplicated: `mpris.update` only fires when the
 > state actually changed, so the stream stays quiet between track changes.
 > Stopped/paused players are not polled, and when the phone removes a player
 > from its `playerList` (session destroyed) the cached state is dropped with
@@ -312,7 +315,22 @@ except KeyboardInterrupt:
 
 > **Position:** payloads stamp `posAnchorMs` (Unix millis when `pos` was
 > sampled). Live position is `pos + (nowMs - posAnchorMs)` while playing,
-> frozen otherwise — no client-side timers needed.
+> frozen otherwise — no client-side timers needed. Local (desktop-player)
+> broadcasts carry the anchor too, stamped at send time.
+>
+> **Local idle behavior:** the D-Bus watcher is event-driven, but while a
+> local player is playing the daemon re-reads its state every
+> `position_interval` (default `"2s"`, `[mpris]` section). Steady playback
+> stays silent — the phone extrapolates from `posAnchorMs` — and a tick
+> re-broadcasts only on a metadata change or when the true position drifts
+> more than 3s off the extrapolation (seek, missed signal, clock drift).
+> With no player running at all, nothing is polled — a silent desktop costs
+> zero wakeups. While a player is merely paused, a 10s watchdog re-checks
+> live state and restarts the poller if playback resumed without the daemon
+> seeing the signal, so a dropped D-Bus edge cannot leave the phone's
+> display frozen. Set
+> `poll_while_playing = false` for pure event-driven mode (position then
+> extrapolates from `posAnchorMs` between D-Bus signals).
 
 See [`IPC_PROTOCOL.md §5`](IPC_PROTOCOL.md#5-event-types) for the full list.
 

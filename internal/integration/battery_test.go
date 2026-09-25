@@ -94,7 +94,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
-	if err := cl.Pair("mock-peer"); err != nil {
+	if _, err := cl.Pair("mock-peer"); err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)

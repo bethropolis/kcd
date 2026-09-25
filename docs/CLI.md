@@ -29,9 +29,10 @@ require a restart; reloading notification filters alone does not apply them.
 
 | Section | Settings and defaults |
 |---|---|
-| `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"`, `transfer_idle_timeout = "60s"` |
-| `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"` |
+| `[network]` | `dial_timeout = "5s"`, `handshake_timeout = "10s"`, `sidechannel_timeout = "15s"`, `transfer_idle_timeout = "60s"`, `keepalive_idle = "30s"` (minimum `"10s"`) |
+| `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"`, `sighting_driven = true`, `fallback_max = "1h"`, `stale_after = "24h"` |
 | `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
+| `[mpris]` | `poll_while_playing = true`, `position_interval = "2s"` |
 | `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |
 | `[cache]` | `sms_attachments_dir = ""`, `album_art_dir = ""`, `contacts_dir = ""` |
 | `[notifications]` | `app_name = "KDE Connect"`; per-app `"show"`/`"silent"` filters and `"*"` fallback remain supported |
@@ -53,8 +54,9 @@ paths for overrides. Changing directories does not migrate existing files.
 `notifications.app_name` is reserved branding metadata, never a per-app filter.
 An explicit `ping.app_name = "KDE Connect"` in an older configuration remains an
 override even after changing the global name; remove it or set it to `""` to
-inherit. Protocol version, payload limits, packet buffers, queues and TCP
-keepalive remain fixed implementation settings, not configuration knobs.
+inherit. Protocol version, payload limits, packet buffers and queues
+remain fixed implementation settings, not configuration knobs. TCP
+keepalive is tunable via `[network] keepalive_idle` (minimum `"10s"`).
 
 ---
 
@@ -200,6 +202,29 @@ kcd devices --json | jq '.[0] | {name, battery: .battery.charge}'
 
 ---
 
+## Targeting a device
+
+Commands that act on a device take it as an optional positional argument:
+
+```bash
+kcd battery [device-id]
+kcd ping [device-id]
+```
+
+Omit the argument and the single paired, connected device is selected, so
+the usual one-phone setup needs no ID. With **several** paired devices
+connected, `kcd` refuses to guess and lists the candidates:
+
+```text
+multiple devices connected (a1b2c3d4_..., f6e5d4c3_...) — pass a device ID
+```
+
+Commands with extra positional arguments after the device (`kcd volume set
+<device-id> <sink> <0-100>`, `kcd volume mute`) keep the device ID
+mandatory, so the remaining arguments stay unambiguous.
+
+---
+
 ## connect
 
 Manually connect to a device by IP address. Use this when UDP broadcast and mDNS are blocked (corporate Wi-Fi, Docker, university networks).
@@ -233,6 +258,8 @@ kcd pair <device-id>
 ```
 
 If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
+
+When `kcd` sends the request, it prints a **verification code**. Compare it with the code on the phone's prompt: they must match. A mismatch means something is intercepting the connection — cancel and `kcd unpair` the device. No code is printed when the phone initiated the request (use [listen mode](#listen-mode-headless--server) for that direction) or when the device is already paired.
 
 ### Listen mode (headless / server)
 
@@ -291,7 +318,7 @@ This sends a rejection packet to the device and removes it from the local device
 Send a ping notification to a device. The phone displays a "Ping!" notification.
 
 ```
-kcd ping <device-id>
+kcd ping [device-id]
 ```
 
 ---
@@ -301,7 +328,7 @@ kcd ping <device-id>
 Fetch the current battery level and charging state of a device.
 
 ```
-kcd battery <device-id> [--json]
+kcd battery [device-id] [--json]
 ```
 
 **Example output**
@@ -408,7 +435,7 @@ kcd mpris status [--device <id>] [--json]
 
 | Flag | Description |
 |---|---|
-| `--device` | Target device ID (omit for auto-detect) |
+| `--device` | Target device ID (omit for auto-detect; the positional `[device-id]` is equivalent and takes precedence) |
 | `--json` | Output as a JSON array |
 
 **Examples**
@@ -423,26 +450,26 @@ kcd mpris status --json | jq -r '.[].title'
 Control playback on the phone.
 
 ```
-kcd mpris play    [--device <id>] [--player <name>]
-kcd mpris pause   [--device <id>] [--player <name>]
-kcd mpris toggle  [--device <id>] [--player <name>]
+kcd mpris play    [device-id] [--device <id>] [--player <name>]
+kcd mpris pause   [device-id] [--device <id>] [--player <name>]
+kcd mpris toggle  [device-id] [--device <id>] [--player <name>]
 ```
 
 **Flags**
 
 | Flag | Description |
 |---|---|
-| `--device` | Target device ID (omit for auto-detect) |
+| `--device` | Target device ID (omit for auto-detect; the positional `[device-id]` is equivalent and takes precedence) |
 | `--player`, `-p` | Player name (omit for auto-fill from cached state) |
 
 ### mpris next / prev
 
-Skip to the next or previous track. After skipping, an automatic `Play` action is sent to handle phone-side MPRIS implementations that stop after a track change.
+Skip to the next or previous track. If the player was playing, a `Play` action follows the skip to handle phone-side MPRIS implementations that stop after a track change. A paused player is left paused — skipping never starts audio on its own.
 
 ```
-kcd mpris next       [--device <id>] [--player <name>]
-kcd mpris previous   [--device <id>] [--player <name>]
-kcd mpris prev       [--device <id>] [--player <name>]  (alias)
+kcd mpris next       [device-id] [--device <id>] [--player <name>]
+kcd mpris previous   [device-id] [--device <id>] [--player <name>]
+kcd mpris prev       [device-id] [--device <id>] [--player <name>]  (alias)
 ```
 
 ### mpris stop
@@ -450,7 +477,7 @@ kcd mpris prev       [--device <id>] [--player <name>]  (alias)
 Stop playback on the phone.
 
 ```
-kcd mpris stop [--device <id>] [--player <name>]
+kcd mpris stop [device-id] [--device <id>] [--player <name>]
 ```
 
 ### mpris volume
@@ -532,7 +559,7 @@ kcd watch --events=mpris.update
 # bindsym XF86AudioNext exec kcd mpris next
 ```
 
-> **Note:** The `mpris.update` event fires whenever the phone sends a now-playing state change (track change, play/pause toggle). Subscribe with `kcd watch --events=mpris.update`. The daemon also re-requests now-playing every 5 seconds from devices with an **actively-playing** player, so state stays fresh for pure-push clients without polling — but events are deduplicated, so `mpris.update` only fires on real changes. Stopped/paused players are not polled (a stopped-but-alive track stays listed so it can be resumed), and when the phone removes a player from its `playerList` (session destroyed) the cached state is dropped and an empty `mpris.update` is emitted so the widget falls back to "no media playing".
+> **Note:** The `mpris.update` event fires whenever the phone sends a now-playing state change (track change, play/pause toggle). Subscribe with `kcd watch --events=mpris.update`. While subscribed, the daemon runs a 5-second ticker that re-requests now-playing from devices with an **actively-playing** player, so state stays fresh for pure-push clients without polling — but events are deduplicated, so `mpris.update` only fires on real changes. The ticker stops with the last unsubscriber, so nothing ticks unobserved. Stopped/paused players are not polled (a stopped-but-alive track stays listed so it can be resumed), and when the phone removes a player from its `playerList` (session destroyed) the cached state is dropped and an empty `mpris.update` is emitted so the widget falls back to "no media playing".
 >
 > **Note:** Phone album art URIs (`kdeconnect:/artUri?...`) are resolved by the
 > daemon: it fetches the art bytes from the phone, caches them to
@@ -631,14 +658,14 @@ kcd findmyphone <device-id>
 
 ## lock / unlock
 
-Lock or unlock the current desktop session.
+Ask a remote device to lock or unlock its own screen.
 
 ```
-kcd lock   <device-id>
-kcd unlock <device-id>
+kcd lock   [device-id]
+kcd unlock [device-id]
 ```
 
-Uses `loginctl lock-session` / `loginctl unlock-session` under the hood.
+These send the KDE Connect lock packet to the **remote** device — they do not lock this PC. The reverse direction is separate: when a paired device sends a lock request, the daemon runs `loginctl lock-session` / `loginctl unlock-session` on this desktop.
 
 ---
 
@@ -778,11 +805,18 @@ Request the list of commands available on the remote device.
 kcd run list <device-id>
 ```
 
-Results arrive as a `runcommand.list` event; watch for them:
+The phone holds the list, so the command blocks until it replies (10s
+timeout) and then prints `name<TAB>command` per entry:
 
-```bash
-kcd watch --json | jq 'select(.type=="runcommand.list")'
+```text
+Take photo	camera
+Toggle flashlight	light --toggle
 ```
+
+**Error cases:** the device is disconnected (`device not found`); the
+`runcommand` plugin is disabled in `kcd.toml`; or the phone's KDE Connect
+app is closed and does not answer within 10s. The KDE Connect app must be
+open on the device for this to return anything.
 
 ### run exec
 
@@ -864,7 +898,7 @@ Request a sync round (UID/timestamp list, then vCards for new or changed
 contacts). Progress arrives as `contacts.updated` events (counts only).
 
 ```
-kcd contacts sync <device-id>
+kcd contacts sync [device-id]
 ```
 
 ### contacts list
@@ -873,7 +907,7 @@ List cached contact summaries (empty when never synced — absent means
 unknown).
 
 ```
-kcd contacts list <device-id> [--json]
+kcd contacts list [device-id] [--json]
 ```
 
 ### contacts clear
@@ -882,7 +916,7 @@ Delete a device's cached contacts. Works offline (the cache is local
 state); re-sync restores everything from the phone.
 
 ```
-kcd contacts clear <device-id>
+kcd contacts clear [device-id]
 ```
 
 ---
@@ -896,7 +930,7 @@ Control the remote device's audio volume (requires `remotesystemvolume` plugin).
 List audio sinks on a remote device and their current volume/mute state.
 
 ```
-kcd volume list <device-id> [--json]
+kcd volume list [device-id] [--json]
 ```
 
 **Example output**

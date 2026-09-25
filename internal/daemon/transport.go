@@ -55,6 +55,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		return
 	}
 	defer tcpListener.Close()
+	tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
 
 	// Broadcast is off by default — controlled via `kcd pair` or IPC.
 	// The controller is started in stopped state.
@@ -180,6 +181,21 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					}
 				}
 			}
+			if opts.Reconnect.SightingDriven {
+				// Wake a parked reconnect loop (peer provably alive at
+				// this address), or respawn one that gave up past the
+				// stale horizon. TryReconnect single-flights: exactly one
+				// loop per device. The sighting is recorded as the freshest
+				// known address (the parked loop reloads it every lap, so a
+				// roam survives a failed one-shot dial), and the attempt
+				// counter restarts — the peer is provably back, so escalated
+				// backoff no longer applies.
+				dev.PokeReconnect()
+				if !dev.IsConnected() && dev.TryReconnect() {
+					dev.ResetReconnectAttempt()
+					go reconnectWithBackoff(ctx, dev, ip, identity, cfg, devices, plugins, localDeviceID, logger, opts)
+				}
+			}
 			return
 		}
 
@@ -217,6 +233,12 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	}
 
 	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
+	// Active discovery shares the broadcast ownership lifetime: mDNS
+	// browsing (periodic probes) runs only while pairing or reconnect
+	// owners hold the controller, never at connected steady state.
+	if bc != nil {
+		bc.SetBrowseStarter(udpListener.RunMdnsDiscovery)
+	}
 	go udpListener.Run(ctx)
 
 	// Accept loop

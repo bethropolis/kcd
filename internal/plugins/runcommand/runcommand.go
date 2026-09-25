@@ -19,8 +19,11 @@ type RunCommandPlugin struct {
 	Mu                sync.RWMutex // exported so daemon.go can lock it during reload
 	Commands          map[string]string
 	CommandsPerDevice map[string]map[string]string // keyed by device ID
-	logger            log.Logger
-	wg                sync.WaitGroup // exported for tests to synchronize with background goroutines
+	// pendingLists holds one buffered waiter per device awaiting that
+	// device's command-list reply, keyed by device ID.
+	pendingLists map[string]chan []Command
+	logger       log.Logger
+	wg           sync.WaitGroup // exported for tests to synchronize with background goroutines
 }
 
 func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, logger log.Logger) *RunCommandPlugin {
@@ -30,6 +33,7 @@ func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[strin
 	return &RunCommandPlugin{
 		Commands:          commands,
 		CommandsPerDevice: commandsPerDevice,
+		pendingLists:      make(map[string]chan []Command),
 		logger:            logger.With(log.String("plugin", "runcommand")),
 	}
 }
@@ -46,9 +50,11 @@ func (p *RunCommandPlugin) Name() string { return "RunCommand" }
 // Timeout returns the timeout.
 func (p *RunCommandPlugin) Timeout() time.Duration { return 5 * time.Second }
 
-// IncomingTypes returns the packet types this plugin handles.
+// IncomingTypes returns the packet types this plugin handles. The bare
+// kdeconnect.runcommand type carries the phone's reply to a command-list
+// request; without it the reply is dropped as unhandled.
 func (p *RunCommandPlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.runcommand.request"}
+	return []string{"kdeconnect.runcommand.request", "kdeconnect.runcommand"}
 }
 
 // OutgoingTypes returns the packet types this plugin may send.
@@ -58,6 +64,11 @@ func (p *RunCommandPlugin) OutgoingTypes() []string {
 
 // Handle processes incoming command requests.
 func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+	if pkt.Type == "kdeconnect.runcommand" {
+		p.handleListReply(dev, pkt)
+		return nil
+	}
+
 	var body RequestBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err

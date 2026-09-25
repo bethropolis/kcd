@@ -125,7 +125,17 @@ Optional fields:
   using its last-seen discovery address (background auto-dial no longer
   connects to unpaired devices), then sends the pair request.
 
-**Response data:** none (`{"ok": true}`)
+**Response data:** `PairResult`
+
+```json
+{"ok": true, "data": {"verificationKey": "A1B2C3D4"}}
+```
+
+`verificationKey` is the out-of-band code the peer displays so the user
+can confirm the connection is not intercepted; `kcd pair <device-id>`
+prints it for comparison. It is omitted when no request was sent — the
+device was already paired, the peer had requested first (so the peer owns
+the code), or the peer presented no certificate to derive it from.
 
 #### `pair_listen`
 
@@ -490,8 +500,17 @@ Request a device's list of configured run commands.
 {"deviceId": "a1b2c3d4e5f6_..."}
 ```
 
-**Response data:** none (results arrive via `kdeconnect.runcommand` response
-packet).
+**Response data:** `[]RemoteCommand`
+
+```json
+{"ok": true, "data": [{"name": "Take photo", "command": "camera"}]}
+```
+
+The list lives only on the device, so the daemon holds this request open
+until the device replies or 10s elapses. Errors: `device not found`,
+`runcommand plugin not enabled`, a timeout naming the app that must be
+open, or `a command list request for <id> is already in flight` when two
+clients race for the single reply.
 
 #### `run_exec`
 
@@ -781,7 +800,8 @@ are delivered.
    ```
 
    The daemon keeps now-playing state fresh by re-requesting it every 5
-   seconds from devices with an **actively-playing** player (see the
+   seconds from devices with an **actively-playing** player — but only
+   while at least one client is subscribed to `mpris.update` (see the
    `mpris.update` section below), so this initial dump fires reliably for
    mid-track state — a pure-push client can mount and see the current track
    without polling. Stopped/paused players are deliberately not polled, so
@@ -1240,9 +1260,12 @@ Now-playing state from a device's media player.
 > path in a second `mpris.update`. If the fetch fails, the pending flag
 > clears on the next state change.
 
-> **Freshness:** the daemon re-requests now-playing from every connected
-> device with an **actively-playing** player every 5 seconds
-> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). Responses are
+> **Freshness:** while at least one client subscribes to `mpris.update`,
+> the daemon runs a 5-second ticker that re-requests now-playing from
+> every connected device with an **actively-playing** player
+> (`kdeconnect.mpris.request` with `requestNowPlaying: true`). The ticker
+> itself only exists while subscribed — with nobody listening there is no
+> timer and no refresh requests go out. Responses are
 > deduplicated — an event is only emitted when the state actually changes.
 > This keeps `pos`/state current for pure-push clients (widgets, Waybar)
 > that never poll the CLI. Devices that haven't reported a player yet, or
@@ -1366,6 +1389,7 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.lock.request` | LockDevice | `LockBody{}` (triggers lock/unlock) |
 | `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, AlbumArtUrl, TransferringAlbumArt, ...}` — inbound packets with `transferringAlbumArt: true` + `payloadTransferInfo` carry album art bytes (side channel) that the daemon caches to `$XDG_CACHE_HOME/kcd/art/` |
 | `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) — an outbound `kdeconnect.mpris.request` with `player` + `albumArtUrl` asks the phone to stream art back |
+| `kdeconnect.runcommand` | RunCommand | `{CommandList string}` — the phone's reply to a command-list request, holding a JSON object of label → `{name, command}` |
 | `kdeconnect.runcommand.request` | RunCommand | `RequestBody{RequestCommandList bool, Key string}` |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
 | `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |

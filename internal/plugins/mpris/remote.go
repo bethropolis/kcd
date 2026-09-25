@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -191,25 +192,49 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 	p.requestPlayerList(dev)
 }
 
-// startRemoteStatePoller periodically re-requests now-playing from every
-// connected device that has a known active player. The responses flow back
-// through Handle, where shouldPublishRemoteState dedupes them, so an
-// mpris.update is only republished when the state actually changes — not
-// on every poll. This closes the "watch client misses mid-track state"
-// gap from the initial dump's 10s freshness gate.
-func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(remoteStatePollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				p.pollRemoteStates()
-			}
+// syncRemotePoller starts the remote-state poller when at least one
+// subscriber listens for mpris.update and stops it when the audience
+// drains. Invoked from the bus subscriber-change hook (which runs without
+// the bus lock) and once at construction. The hook only manages the
+// ticker lifecycle; pollRemoteStates keeps its own guard so a racing
+// unsubscribe between ticks still sends nothing.
+func (p *MPRISPlugin) syncRemotePoller() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.bus.HasSubscribers(events.TypeMprisUpdate) {
+		if p.remotePollCancel == nil {
+			ctx, cancel := context.WithCancel(p.watchCtx)
+			p.remotePollCancel = cancel
+			go p.runRemoteStatePoller(ctx)
 		}
-	}()
+		return
+	}
+	if p.remotePollCancel != nil {
+		p.remotePollCancel()
+		p.remotePollCancel = nil
+	}
+}
+
+// runRemoteStatePoller periodically re-requests now-playing from every
+// connected device that has a known active player, but only while somebody
+// listens: the ticker itself exists only with mpris.update subscribers
+// (see syncRemotePoller), and pollRemoteStates stays silent with zero
+// subscribers even if a tick races an unsubscribe.
+// The responses flow back through Handle, where shouldPublishRemoteState
+// dedupes them, so an mpris.update is only republished when the state
+// actually changes — not on every poll. This closes the "watch client
+// misses mid-track state" gap from the initial dump's 10s freshness gate.
+func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
+	ticker := time.NewTicker(remoteStatePollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.pollRemoteStates()
+		}
+	}
 }
 
 // pollRemoteStates requests a now-playing refresh from devices that have a
@@ -217,7 +242,14 @@ func (p *MPRISPlugin) startRemoteStatePoller(ctx context.Context) {
 // reported a player) or whose player is stopped/paused are skipped — stopped
 // players are intentionally left to go stale instead of keeping a ghost track
 // perpetually fresh.
+//
+// The poller is demand-driven: with no subscriber for mpris.update (no
+// `kcd watch` listening for media), answers would be consumed by nobody, so
+// no requests go out. Subscribing re-arms the refresh within one interval.
 func (p *MPRISPlugin) pollRemoteStates() {
+	if !p.bus.HasSubscribers(events.TypeMprisUpdate) {
+		return
+	}
 	p.mu.RLock()
 	type target struct {
 		dev    device.Sender

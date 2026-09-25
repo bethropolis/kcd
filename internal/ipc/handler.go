@@ -152,10 +152,15 @@ func (h *Handler) handlePair(payload []byte) Response {
 				return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
 			}
 		} else {
-			// Initiate new pairing request
-			if err := h.pairPlugin.RequestPairing(dev); err != nil {
+			// Initiate new pairing request. The code lets the CLI show the
+			// user what to compare against the phone's prompt; without it
+			// the out-of-band check is impossible from this side.
+			verificationKey, err := h.pairPlugin.RequestPairing(dev)
+			if err != nil {
 				return Response{OK: false, Error: "failed to request pairing: " + err.Error()}
 			}
+			data, _ := json.Marshal(PairResult{VerificationKey: verificationKey})
+			return Response{OK: true, Data: data}
 		}
 		return Response{OK: true}
 	}

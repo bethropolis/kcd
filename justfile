@@ -18,10 +18,11 @@ default: all
 test:
     CGO_ENABLED=0 go test -p 1 ./...
 
-# Clean build artifacts
+# Clean build artifacts. Only generated output: packaging/ holds tracked
+# sources (systemd units, completions, example config) that goreleaser and
+# the install scripts consume.
 @clean:
-    rm -f {{ bin_dir }}/{{ binary_daemon }}
-    rm -rf packaging/
+    rm -rf {{ bin_dir }} dist/
     echo "Cleanup complete"
 
 # Install the binary and systemd service

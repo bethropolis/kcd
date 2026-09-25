@@ -172,17 +172,34 @@ remotesystemvolume = true
 # handshake_timeout = "10s"       # identity/TLS handshake
 # sidechannel_timeout = "15s"     # side-channel connection setup
 # transfer_idle_timeout = "60s"  # abort transfers silent longer than this
+# keepalive_idle = "30s"          # TCP keepalive first probe; >= 10s;
+                                 # larger = fewer probes, slower zombie detection
 
 [reconnect]
 # initial_backoff = "2s"
 # max_backoff = "5m"              # must be >= initial_backoff
 # flap_threshold = "15s"          # minimum lifetime for a stable connection
+# sighting_driven = true          # park redial on discovery sightings; false = legacy pure-timer loop
+# fallback_max = "1h"             # must be >= max_backoff; silent-case spacing while parked
+# stale_after = "24h"             # give up (zero timers) past this silence; next sighting respawns
 
 [discovery]
 # broadcast_interval = "30s"
 # broadcast_idle_interval = "60s" # must be >= broadcast_interval
 # These intervals apply only while on-demand UDP broadcast is running;
 # they do not enable permanent broadcast or change mDNS advertisement.
+
+[mpris]
+# The local D-Bus watcher is event-driven; this section tunes the position
+# poller that keeps the phone's now-playing display exact while music plays.
+# poll_while_playing = true  # false = pure event-driven (position extrapolates
+                             # from posAnchorMs; no poller and no watchdog, so a
+                             # dropped D-Bus signal can leave the display stale)
+# position_interval = "2s"    # D-Bus re-read cadence while playing only.
+                             # While a player is tracked but paused, a 10s
+                             # watchdog still runs so a missed play signal cannot
+                             # strand the poller; with no player tracked, zero
+                             # timers remain.
 
 [cache]
 # Empty values preserve existing storage paths; use absolute paths to override.
