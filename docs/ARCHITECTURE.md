@@ -56,7 +56,7 @@ Devices are found via two parallel mechanisms that run concurrently:
 
 `Listener` binds to `0.0.0.0:1716` and parses every incoming UDP packet. Packets whose `type` is not `kdeconnect.identity` or whose `deviceId` matches the local device are silently dropped.
 
-The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it runs only while an owner holds it (`kcd pair` listen mode, or the reconnect watcher while any paired device is offline) and stops fully when the last owner withdraws, so connected steady state keeps zero timers. The UDP **listener** is always active. See [Idle behavior](#idle-behavior-zero-standing-timers) for the full zero-timer inventory.
+The broadcast interval is adaptive: when `shouldReduce()` returns true (all known devices already connected) the interval steps up to 60 seconds. Broadcast is controlled by a `BroadcasterController` which is off by default — it runs only while an owner holds it (`kcd pair` listen mode, or the reconnect watcher while any paired device is offline) and stops fully when the last owner withdraws, so connected steady state keeps zero timers. The UDP **listener** is always active. See [Idle behavior](#idle-behavior-gated-timers) for the full zero-timer inventory.
 
 ### Ephemeral discovery dials
 
@@ -81,7 +81,7 @@ At startup the `Broadcaster` registers the local device as a Zeroconf service wi
 
 ---
 
-## Idle behavior (zero standing timers)
+## Idle behavior (gated timers)
 
 Connected steady state (all pairs connected, nothing playing, no transfers, no pairing) keeps **zero application timers**. Every periodic source is gated on actual activity instead of running free:
 
@@ -92,13 +92,22 @@ Connected steady state (all pairs connected, nothing playing, no transfers, no p
 | mDNS advertise | Lifetime-on, responder-only (no timers) |
 | UDP/TCP/IPC listeners, D-Bus signals, bus subscriptions | Blocking waits, zero CPU until an event arrives |
 | Local position poller | Exists only while ≥1 local player `IsPlaying` (`[mpris] poll_while_playing`, `position_interval`); ticks re-broadcast only on metadata change or position drift >3s off the anchor extrapolation |
+| MPRIS watchdog | 10s re-check, alive only while ≥1 local player is tracked; restarts the position poller if it finds unpolled playback (see below) |
 | Remote state poller | Ticker itself exists only while a client subscribes to `mpris.update` (bus subscriber-change hook starts/stops it) |
 | Reconnect redial | Parked on discovery sightings; fallback escalates to `fallback_max`, then gives up past `stale_after` until the next sighting |
 | TCP keepalive | Kernel probes, first delay `[network] keepalive_idle` (default 30s, minimum 10s) |
 
-Measured 2026-09-22 (phone connected, zero local players, one watch subscriber): 2 CPU ticks/min, 0 D-Bus `GetAll`/min — down from 13 ticks/min + 30 `GetAll`/min before. Methodology note: Go timers are runtime-managed (no timerfds to count) and `ptrace` is restricted by Yama, so `/proc` CPU deltas + `dbus-monitor` call rates are the working proxies.
+### The one deliberate exception: the MPRIS watchdog
 
-**Contributor invariant: new periodic work must be owner-gated or activity-gated, never standing.** A ticker that fires while nothing is happening is a bug — gate it on owners (discovery), playback state (MPRIS), subscribers (remote refresh), or sightings (reconnect).
+The position poller arms on an observed state change and stops as soon as a live read confirms nothing is playing. Restarting it therefore depends on a D-Bus `PlaybackStatus` signal arriving — and a missed signal strands the poller for the rest of the session, leaving the phone's now-playing frozen while audio plays. Firefox's MPRIS endpoint answers intermittently, so a dropped edge is routine rather than a corner case.
+
+So while any local player is tracked, a 10s watchdog samples live state and re-arms the poller if it finds unpolled playback. This bounds the stale window regardless of signal reliability.
+
+The cost: with an MPRIS application open but paused, the daemon performs one D-Bus read per 10s. **"Zero timers at idle" means zero when no MPRIS player is tracked**, not zero on a desktop with a media player merely running. This is a deliberate trade — a bounded ~6 reads/min beats an unbounded frozen now-playing display.
+
+Measured 2026-09-25 (phone connected, Firefox playing): 7.5 CPU ticks/min, 0 voluntary context switches. Idle with no MPRIS player tracked: 0.00 CPU ticks/min, 0 `GetAll`/min. Methodology note: Go timers are runtime-managed (no timerfds to count) and `ptrace` is restricted by Yama, so `/proc` CPU deltas + `dbus-monitor` call rates are the working proxies.
+
+**Contributor invariant: new periodic work must be owner-gated or activity-gated, never standing.** A ticker that fires while nothing is happening is a bug — gate it on owners (discovery), playback state (MPRIS), subscribers (remote refresh), or sightings (reconnect). Where a signal-driven design cannot be made reliable, add a slow self-healing check scoped to the thing it watches, and document it here as a known cost rather than quietly reintroducing a standing timer.
 
 ---
 
