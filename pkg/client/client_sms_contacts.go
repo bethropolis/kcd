@@ -25,8 +25,23 @@ func (c *Client) SmsRequestConversations(deviceID string) error {
 }
 
 // SmsRequestConversation asks a device to send messages from a specific thread.
+// With no range it returns the whole thread.
 func (c *Client) SmsRequestConversation(deviceID string, threadID int64) error {
-	_, err := c.Call(ipc.CmdSmsRequestConv, ipc.SMSConvPayload{DeviceID: deviceID, ThreadID: threadID})
+	return c.SmsRequestConversationRange(deviceID, threadID, nil, nil)
+}
+
+// SmsRequestConversationRange is SmsRequestConversation with a window: only
+// messages at or before rangeStart (ms epoch), capped at count newest first.
+// A nil pointer leaves the field out of the packet; the phone reads an
+// explicit 0 as "older than the epoch" or "zero messages" and returns
+// nothing, so callers must not default missing values to 0.
+func (c *Client) SmsRequestConversationRange(deviceID string, threadID int64, rangeStart, count *int64) error {
+	_, err := c.Call(ipc.CmdSmsRequestConv, ipc.SMSConvPayload{
+		DeviceID:            deviceID,
+		ThreadID:            threadID,
+		RangeStartTimestamp: rangeStart,
+		NumberToRequest:     count,
+	})
 	return err
 }
 

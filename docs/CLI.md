@@ -989,11 +989,19 @@ kcd sms conversations <device-id>
 
 ### sms conversation
 
-Request messages from a specific conversation thread.
+Request messages from a specific conversation thread. With no flags the phone
+returns the whole thread.
 
 ```
 kcd sms conversation <device-id> <thread-id>
+kcd sms conversation --before <ms-epoch> --limit <n> <device-id> <thread-id>
 ```
+
+`--before` maps to `rangeStartTimestamp` (only messages at or before it),
+`--limit` to `numberToRequest` (cap, newest first). Either may be used on its
+own. An omitted field stays out of the request; an explicit `0` does not mean
+"no bound" — the phone reads it as "older than the epoch" or "zero messages"
+and returns nothing.
 
 > **Both commands arm the phone, permanently.** The phone latches on its first
 > request and cannot be un-armed — after either of these it pushes *every* new
