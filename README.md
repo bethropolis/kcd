@@ -279,14 +279,15 @@ A ready-made config snippet, bash script and stylesheet are in [`desktop-integra
 ### Tiling Window Managers
 
 kcd fits into WM setups without pulling in KDE Plasma — single binary,
-systemd user unit alongside your compositor. All `mpris` commands auto-
-discover your phone, no device ID needed.
+systemd user unit alongside your compositor. `mpris` status commands
+auto-discover your phone; actions take the device ID positionally or via
+`--device` (find it with `kcd devices`).
 
 **Hyprland** (`~/.config/hypr/hyprland.lua` personal overrides file):
 ```lua
-hl.bind("SUPER + F9",  hl.dsp.exec_cmd("kcd mpris toggle"),   { description = "MPRIS toggle" })
-hl.bind("SUPER + F10", hl.dsp.exec_cmd("kcd mpris previous"), { description = "MPRIS previous" })
-hl.bind("SUPER + F11", hl.dsp.exec_cmd("kcd mpris next"),     { description = "MPRIS next" })
+hl.bind("SUPER + F9",  hl.dsp.exec_cmd("kcd mpris toggle a1b2..."),   { description = "MPRIS toggle" })
+hl.bind("SUPER + F10", hl.dsp.exec_cmd("kcd mpris previous a1b2..."), { description = "MPRIS previous" })
+hl.bind("SUPER + F11", hl.dsp.exec_cmd("kcd mpris next a1b2..."),     { description = "MPRIS next" })
 ```
 
 **Sway / i3** (`~/.config/sway/config` or `~/.config/i3/config`):

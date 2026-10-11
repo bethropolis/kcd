@@ -6,6 +6,11 @@ replace `docker` with `podman`).
 Multi-architecture images (linux/amd64, linux/arm64) are published to
 [ghcr.io/bethropolis/kcd](https://github.com/bethropolis/kcd/pkgs/container/kcd).
 
+> [!NOTE]
+> This guide shows one working setup — the published image with host
+> networking — not the only way to run kcd in a container. Adapt the volumes
+> and network mode to your environment.
+
 ```bash
 docker pull ghcr.io/bethropolis/kcd:latest
 ```

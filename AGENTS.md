@@ -372,8 +372,9 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 
 ## References
 
-- KDE Connect protocol spec: https://valent.andyholmes.ca/documentation/protocol.html
+- KDE Connect protocol spec: https://github.com/KDE/kdeconnect-meta/blob/work/protocol-schemas/protocol.md
 - KDE Connect meta / plugin list: https://github.com/KDE/kdeconnect-meta
+- KDE Connect android app repo:  https://github.com/KDE/kdeconnect-android
 - `godbus` (D-Bus bindings): https://pkg.go.dev/github.com/godbus/dbus/v5
 - MPRIS2 spec: https://specifications.freedesktop.org/mpris-spec/latest/
 - `libp2p/zeroconf/v2` (mDNS): https://github.com/libp2p/zeroconf
