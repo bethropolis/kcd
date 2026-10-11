@@ -8,7 +8,12 @@
 [![GHCR](https://img.shields.io/badge/container-ghcr.io-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/bethropolis/kcd/pkgs/container/kcd)
 [![Platforms](https://img.shields.io/badge/Platform-Linux-6e40c9?style=for-the-badge&logoColor=white)](https://github.com/bethropolis/kcd)
 
-`kcd` is a lightweight, headless implementation of the [KDE Connect protocol v8](https://kdeconnect.kde.org/) written in Go. It lets Linux servers, containers, and minimal desktop environments participate in the KDE Connect ecosystem without a GUI, a full KDE installation, or heavy D-Bus dependencies.
+`kcd` is a headless implementation of the [KDE Connect protocol v8](https://kdeconnect.kde.org/)
+written in Go. It runs on Linux servers, containers and minimal desktops
+without a GUI, a full KDE installation, or heavy D-Bus dependencies.
+
+It has no UI of its own. You drive it from the `kcd` CLI or over a Unix socket,
+which is how the [projects in Community](#community) are built.
 
 ## Features
 
@@ -385,6 +390,24 @@ kcd connect 192.168.1.100
 | [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
 
 ---
+
+## Community
+
+Projects built on kcd's [IPC socket](docs/IPC_PROTOCOL.md) and
+`kcd watch --json` event stream. Third-party projects are maintained by their
+authors, not by kcd.
+
+| Project | What it does | Author |
+|---|---|---|
+| [kdeconnect-mcp](https://github.com/DaBlitzStein/kdeconnect-mcp) | MCP server for kcd written in python | @DaBlitzStein |
+| [omaconnect](https://github.com/ekollof/omaconnect) | Omarchy bar widget: pairing, SMS, file share, phone storage mounting | @ekollof |
+| [omarchy-kcd-plugin](https://github.com/bethropolis/omarchy-kcd-plugin) | Omarchy bar widget: battery, media controls, quick actions | @bethropolis |
+
+
+**Built something?** Open a PR adding a row. It should work with a current
+kcd release and have a README.
+
+Writing your own client? Start with the [Client Guide](docs/CLIENT_GUIDE.md).
 
 ## License
 
