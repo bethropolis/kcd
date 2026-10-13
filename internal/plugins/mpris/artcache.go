@@ -1,7 +1,12 @@
 package mpris
 
 import (
+	"fmt"
 	"hash/fnv"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"net/url"
 	"os"
@@ -13,9 +18,19 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 )
 
+// Decoded-art bounds: rasters above 2048x2048 (16 MiB RGBA worst case)
+// are rejected, never cached.
+
 // maxAlbumArtBytes caps inbound album art payloads (matches the 5 MiB
 // limit in the KDE Connect reference AlbumArtCache).
 const maxAlbumArtBytes = 5 * 1024 * 1024
+
+// maxArtDimension/maxArtPixels bound decoded album art: rasters above
+// 2048x2048 (16 MiB RGBA worst case) are rejected, never cached.
+const (
+	maxArtDimension = 2048
+	maxArtPixels    = 2048 * 2048
+)
 
 // maxArtCacheFiles bounds the on-disk cache. Exceeding it clears the
 // directory, mirroring the reference implementation's startup purge.
@@ -111,24 +126,52 @@ func (c *ArtCache) Resolve(rawURL string) string {
 	return path
 }
 
-// Commit moves a streamed temp file into the cache, sniffing its type
-// from the first bytes, and returns the file:// URL for rawURL.
+// Commit bounds and sanitizes art before caching: dimensions gate allocation,
+// and the cache holds a fresh JPEG re-encode, never peer bytes with chunks.
 func (c *ArtCache) Commit(rawURL, tmpPath string) (string, error) {
+	defer os.Remove(tmpPath)
+
 	f, err := os.Open(tmpPath)
 	if err != nil {
 		return "", err
 	}
-	buf := make([]byte, 16)
-	n, _ := io.ReadFull(f, buf)
-	f.Close()
+	defer f.Close()
 
-	ext := sniffImageExt(buf[:n])
-	dst := filepath.Join(c.dir, c.Key(rawURL)+ext)
-	if err := os.Rename(tmpPath, dst); err != nil {
-		_ = os.Remove(dst)
-		if err := os.Rename(tmpPath, dst); err != nil {
-			return "", err
-		}
+	// Header only: no raster allocation yet.
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return "", fmt.Errorf("artcache: bad image header: %w", err)
+	}
+	w, h := int64(cfg.Width), int64(cfg.Height)
+	if w <= 0 || h <= 0 || w > maxArtDimension || h > maxArtDimension || w*h > maxArtPixels {
+		return "", fmt.Errorf("artcache: dimensions rejected: %dx%d", cfg.Width, cfg.Height)
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	// Full decode is dimension-gated above; Go skips ancillary text chunks
+	// rather than retaining them. Re-encoding strips whatever survives for
+	// downstream decoders that do retain them.
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return "", fmt.Errorf("artcache: decode failed: %w", err)
+	}
+
+	// Written in place inside the cache dir: no cross-device rename involved.
+	dst := filepath.Join(c.dir, c.Key(rawURL)+".jpg")
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", err
+	}
+	if err := jpeg.Encode(out, img, &jpeg.Options{Quality: 85}); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return "", fmt.Errorf("artcache: re-encode failed: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return "", fmt.Errorf("artcache: close failed: %w", err)
 	}
 
 	fileURL := "file://" + dst
@@ -136,21 +179,4 @@ func (c *ArtCache) Commit(rawURL, tmpPath string) (string, error) {
 	c.resolved[rawURL] = fileURL
 	c.mu.Unlock()
 	return fileURL, nil
-}
-
-// sniffImageExt guesses the file extension from image magic bytes.
-// Falls back to .jpg, matching the reference implementation.
-func sniffImageExt(data []byte) string {
-	switch {
-	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
-		return ".jpg"
-	case len(data) >= 8 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G':
-		return ".png"
-	case len(data) >= 6 && string(data[:4]) == "GIF8":
-		return ".gif"
-	case len(data) >= 12 && string(data[8:12]) == "WEBP":
-		return ".webp"
-	default:
-		return ".jpg"
-	}
 }
