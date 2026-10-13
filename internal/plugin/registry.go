@@ -10,9 +10,8 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// defaultDispatchTimeout bounds one plugin Handle call when the plugin
-// reports no Timeout of its own. Every bundled plugin sets Timeout, so
-// this fires only for third-party or misconfigured plugins.
+// defaultDispatchTimeout bounds Handle calls with no plugin Timeout; every
+// bundled plugin sets one, so this fires for third-party plugins only.
 const defaultDispatchTimeout = 15 * time.Second
 
 // Registry manages the set of active plugins and routes packets to them.
@@ -55,11 +54,9 @@ func (r *Registry) Register(p Plugin) {
 	r.logger.Debug("registered plugin", log.String("plugin", p.Name()))
 }
 
-// Dispatch routes an incoming packet to the appropriate plugin.
-// Returns true if the packet was processed within the timeout and may be safely
-// returned to the packet pool. Returns false if the plugin timed out — the
-// caller must NOT recycle the packet because the background goroutine may still
-// hold a reference to it.
+// Dispatch routes an incoming packet to the appropriate plugin. True means
+// processed in time and safe to recycle; false means a timed-out handler
+// may still hold it — the caller must NOT recycle.
 func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protocol.Packet) bool {
 	r.mu.RLock()
 	p, ok := r.plugins[pkt.Type]
@@ -76,10 +73,8 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 		timeout = defaultDispatchTimeout // Fallback default
 	}
 
-	// Because we must recover from panics, we execute Handle in a separate goroutine.
-	// But the goroutine itself might panic. So we need to recover inside the goroutine.
-	// The outer defer will catch panics that happen before spawning or in select, but
-	// the plugin execution is where it matters.
+	// Handle runs in a goroutine with recovery inside it: panics must land
+	// in done, or the select below blocks forever.
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

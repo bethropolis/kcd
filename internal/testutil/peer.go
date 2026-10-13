@@ -26,9 +26,8 @@ func NewMockPeer(t *testing.T, tlsConfig *tls.Config) *MockPeer {
 	return &MockPeer{t: t, tlsConfig: tlsConfig}
 }
 
-// Dial connects to the given TCP address, completes the plaintext identity
-// exchange, then upgrades to TLS as the TLS server (KDE Connect rule: the
-// TCP initiator acts as TLS server).
+// Dial connects, exchanges plaintext identity, then upgrades to TLS as the
+// server: the TCP initiator acts as TLS server, per protocol rule.
 func (p *MockPeer) Dial(serverAddr string) net.Conn {
 	p.t.Helper()
 	conn, err := p.TryDial(serverAddr)
@@ -79,10 +78,8 @@ func (p *MockPeer) TryDial(serverAddr string) (net.Conn, error) {
 	return tlsConn, nil
 }
 
-// DialPipe creates an in-process net.Pipe pair, performs the identity exchange
-// on the given server-side connection (serverConn), and returns the peer-side
-// conn ready for SendPacket/ReadPacket.
-// The caller is responsible for handling serverConn in a goroutine.
+// DialPipe returns a peer conn ready to use after exchanging identity on
+// serverConn, which the caller must handle in a goroutine.
 func (p *MockPeer) DialPipe() (peerConn net.Conn, serverConn net.Conn) {
 	p.t.Helper()
 	peerConn, serverConn = net.Pipe()

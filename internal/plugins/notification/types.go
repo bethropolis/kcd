@@ -33,9 +33,8 @@ type NotificationPlugin struct {
 	newExec        func(ctx context.Context, name string, args ...string) *exec.Cmd
 }
 
-// NewNotificationPlugin creates a NotificationPlugin.
-// tlsConfig is used to fetch notification icon payloads over the KDE Connect
-// side-channel; pass nil to disable icon fetching.
+// NewNotificationPlugin creates a NotificationPlugin; nil tlsConfig disables
+// icon fetching over the side-channel.
 func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
 	var sidechannel transport.SidechannelOptions
 	if len(options) > 0 {

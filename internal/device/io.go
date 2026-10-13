@@ -12,11 +12,8 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-// writeTimeout bounds one WritePacket call. LAN writes complete in
-// milliseconds; anything slower is a half-open zombie whose retransmit
-// queue never drains (TCP keepalive can't save it — it only probes idle
-// sockets). Timing out routes the death through disconnectConn so the
-// backoff and discovery repair paths can run.
+// writeTimeout bounds one WritePacket call: anything slower is a half-open
+// zombie keepalive cannot save, so time out into the disconnect path.
 const writeTimeout = 10 * time.Second
 
 func (d *Device) Send(p *protocol.Packet) error {
@@ -78,9 +75,8 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 				// Plugin completed within timeout — safe to recycle.
 				protocol.ReleasePacket(pkt)
 			}
-			// If dispatch returned false (timeout), the background goroutine
-			// still holds a reference to the packet. Skip ReleasePacket to
-			// prevent a data race — the packet will be GC'd.
+			// Dispatch timed out, so its goroutine still holds the packet: skip
+			// ReleasePacket (a data race) and let the GC take it.
 		} else {
 			// Don't leak memory; return the packet to pool after dispatch returns.
 			// Handlers shouldn't keep references to the original packet struct.
@@ -89,10 +85,8 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 	}
 }
 
-// writerLoop is the sole writer to device sockets. It resolves the
-// preferred session per packet so promotions need no restart; write
-// timeouts fail the session via disconnectConn, other write errors keep
-// looping while readLoop routes the death.
+// writerLoop is the sole socket writer, resolving the session per packet so
+// promotions need no restart; write timeouts fail it, other errors loop on.
 func (d *Device) writerLoop(ctx context.Context) {
 	d.mu.RLock()
 	sendChan := d.sendChan

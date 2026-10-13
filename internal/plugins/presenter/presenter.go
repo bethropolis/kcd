@@ -1,7 +1,5 @@
-// Package presenter implements the KDE Connect presenter remote plugin.
-// It receives gyroscope-based pointer movements from the phone and moves
-// the system cursor accordingly. Special keys (next/prev/fullscreen/esc)
-// are handled by the mousepad plugin via kdeconnect.mousepad.request.
+// Package presenter implements the KDE Connect presenter remote plugin,
+// moving the cursor from phone gyroscope input; special keys live in mousepad.
 package presenter
 
 import (

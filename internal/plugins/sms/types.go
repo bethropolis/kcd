@@ -25,9 +25,8 @@ const (
 
 	maxSMSMessages = 1000 // safety limit to prevent OOM from malicious payload
 
-	// maxSMSAttachmentBytes caps a single MMS attachment download (mirrors
-	// the clipboard 50MB safety limit). Anything larger is refused before
-	// any bytes hit disk.
+	// maxSMSAttachmentBytes caps a single MMS download (mirroring clipboard's
+	// limit); anything larger is refused before any bytes hit disk.
 	maxSMSAttachmentBytes = 50 * 1024 * 1024
 )
 
@@ -47,9 +46,8 @@ type SMSPlugin struct {
 	// devices holds the currently connected devices, keyed by ID, so the
 	// bus hook can arm them without reaching for a registry.
 	devices map[string]device.Sender
-	// armedAt records when each device was last armed, and doubles as the
-	// set of already-armed devices: arming twice on one connection would
-	// re-trigger a full conversation-head burst for no benefit.
+	// armedAt records per-device arm times, doubling as the armed set: arming
+	// twice would re-trigger a full history burst for no benefit.
 	armedAt map[string]time.Time
 }
 

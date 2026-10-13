@@ -8,10 +8,8 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 )
 
-// storeLocalState caches the latest known state for a local player, then
-// syncs the position poller. It is the single choke point for all
-// lastStates writes, so every observed change — signal or poll — has a
-// chance to (re)arm the poller.
+// storeLocalState is the single choke point for lastStates writes, so
+// every observed change gets a chance to (re)arm the poller.
 func (p *MPRISPlugin) storeLocalState(displayName string, state *NowPlaying) {
 	p.mu.Lock()
 	p.lastStates[displayName] = state
@@ -19,20 +17,8 @@ func (p *MPRISPlugin) storeLocalState(displayName string, state *NowPlaying) {
 	p.mu.Unlock()
 }
 
-// syncPlayingPollerLocked reconciles the poller with what we know.
-//
-// It deliberately does NOT trust the cached IsPlaying flag to decide
-// whether to run. The cache is only refreshed by a signal or by the
-// poller itself, so gating on it deadlocks: lose one PlaybackStatus
-// signal and the cache stays "paused", so the poller never arms, so
-// nothing ever refreshes the cache — and no further PlaybackStatus
-// signal arrives until the next pause/play.
-//
-// Instead any observed change arms the poller, and the poller decides
-// its own lifetime from live D-Bus reads. A paused desktop pays one
-// extra tick per signal, then goes quiet.
-//
-// Callers must hold p.mu.
+// syncPlayingPollerLocked arms the poller on any change rather than the
+// cached flag, where one lost signal deadlocks it paused. Callers hold p.mu.
 func (p *MPRISPlugin) syncPlayingPollerLocked() {
 	if !p.mprisCfg.PollWhilePlaying {
 		p.stopPlayingPollerLocked()
@@ -62,9 +48,8 @@ func (p *MPRISPlugin) armPlayingPollerLocked() {
 	go p.runPlayingPoller(ctx, interval, gen)
 }
 
-// stopPlayingPollerLocked cancels a running position poller, if any.
-// Callers must hold p.mu. Cancelling is non-blocking; the goroutine exits
-// on its own via ctx.Done.
+// stopPlayingPollerLocked cancels a running poller, if any. Callers hold p.mu;
+// cancelling is non-blocking, the goroutine exits on ctx.Done itself.
 func (p *MPRISPlugin) stopPlayingPollerLocked() {
 	if p.pollCancel != nil {
 		p.pollCancel()
@@ -72,18 +57,12 @@ func (p *MPRISPlugin) stopPlayingPollerLocked() {
 	}
 }
 
-// maxConsecutiveReadFailures bounds how long the poller keeps retrying
-// when every live read errors. A player that is merely slow to answer
-// must not end sampling; one that is gone for good should not pin a
-// ticker on. Its name disappearing handles that case, so this is only a
-// backstop for a name that lingers with a dead object behind it.
+// maxConsecutiveReadFailures bounds retries when every live read errors: a
+// backstop for names lingering with dead objects behind them, not slow players.
 const maxConsecutiveReadFailures = 5
 
-// runPlayingPoller re-reads D-Bus state for every tracked player at
-// PositionInterval. It returns once live reads say nothing is playing, so
-// its lifetime follows the player rather than the cache that armed it.
-// Paused players and an empty player list cost zero wakeups — that is the
-// entire point: idle desktops stay silent.
+// runPlayingPoller re-reads D-Bus state at PositionInterval, returning once
+// nothing is playing: idle desktops hold zero wakeups by design.
 func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Duration, gen uint64) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -104,9 +83,8 @@ func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Durati
 				p.logger.Debug("mpris: no player is playing, stopping position poller")
 				return
 			default:
-				// A read failed. That is not evidence playback ended —
-				// Firefox's MPRIS endpoint answers intermittently — so keep
-				// sampling, but do not do it forever.
+				// A failed read is not evidence playback ended (Firefox answers
+				// intermittently): keep sampling, but not forever.
 				failures++
 				if failures >= maxConsecutiveReadFailures {
 					p.logger.Warn("mpris: position poller gave up after repeated read failures",
@@ -118,9 +96,8 @@ func (p *MPRISPlugin) runPlayingPoller(ctx context.Context, interval time.Durati
 	}
 }
 
-// finishPlayingPoller releases the poller slot when this poller stops on
-// its own. It only clears the handle if a later arm has not already
-// replaced it, so a self-stopping poller cannot orphan its successor.
+// finishPlayingPoller releases the slot on self-stop, clearing the handle
+// only if no later arm replaced it, so successors are never orphaned.
 func (p *MPRISPlugin) finishPlayingPoller(gen uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -129,12 +106,8 @@ func (p *MPRISPlugin) finishPlayingPoller(gen uint64) {
 	}
 }
 
-// pollPlayingPlayers samples every tracked player once, broadcasting the
-// ones whose state actually changed.
-//
-// It reports whether anything is playing, and whether every tracked
-// player answered. An unanswered player makes the result incomplete: the
-// caller must not read that as "playback ended".
+// pollPlayingPlayers samples tracked players, broadcasting real changes. An
+// unanswered player makes the result incomplete, not "playback ended".
 func (p *MPRISPlugin) pollPlayingPlayers() (playing, complete bool) {
 	p.mu.RLock()
 	players := make([]*trackedPlayer, 0, len(p.players))

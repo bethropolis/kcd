@@ -32,11 +32,8 @@ func (k signalKind) String() string {
 	}
 }
 
-// classifySignal routes a signal to its handler.
-//
-// godbus fills Signal.Name as "<interface>.<member>", so these must be fully
-// qualified. Match rules passed to AddMatchSignal use the bare member instead;
-// the two spellings are not interchangeable.
+// classifySignal routes a signal to its handler. godbus fills fully qualified
+// names but match rules take bare members; the spellings don't interchange.
 func classifySignal(name string) signalKind {
 	switch name {
 	case "org.freedesktop.DBus.NameOwnerChanged":

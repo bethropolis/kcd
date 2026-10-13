@@ -23,11 +23,8 @@ func NewTest(t *testing.T) Logger {
 	return Logger{zap: zaptest.NewLogger(t, zaptest.WrapOptions(zap.AddCallerSkip(1))), level: zap.NewAtomicLevel()}
 }
 
-// Observe returns a debug-level Logger and a snapshot func rendering every
-// captured entry as "message key=value ...". Tests outside this package need
-// it because depguard keeps zap imports here, so they cannot build an
-// observing core themselves. Use it to assert what does and does not reach
-// the log, which is the only way to guard a "never log this" rule.
+// Observe returns a debug Logger plus a snapshot of captured entries, for
+// asserting what reaches the log — depguard keeps zap imports out of tests.
 func Observe() (Logger, func() []string) {
 	level := zap.NewAtomicLevel()
 	level.SetLevel(zapcore.DebugLevel)

@@ -11,11 +11,8 @@ import (
 	"github.com/libp2p/zeroconf/v2"
 )
 
-// AdvertiseMDNS registers the local identity as _kdeconnect._udp until
-// ctx ends. Unlike UDP broadcast this is responder-only (it wakes on
-// incoming queries), so it stays up for the daemon lifetime at negligible
-// idle cost and gives phones a standing discovery path even while UDP
-// broadcast is stopped.
+// AdvertiseMDNS registers the local identity until ctx ends. Responder-only,
+// so it stays up for the daemon lifetime at negligible idle cost.
 func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger log.Logger) {
 	var idBody protocol.IdentityBody
 	if err := json.Unmarshal(identityPacket.Body, &idBody); err != nil {
@@ -46,17 +43,8 @@ func AdvertiseMDNS(ctx context.Context, identityPacket *protocol.Packet, logger 
 	}()
 }
 
-// RunMdnsDiscovery browses for peer _kdeconnect._udp services and feeds
-// sightings to onDeviceFound as synthetic identity packets. It is a method
-// on Listener (kept apart from the UDP Run loop) so both transports share
-// the same callback and self-filtering.
-//
-// It runs only while the broadcast controller holds owners (pairing or
-// reconnect): zeroconf Browse re-queries periodically (4s backoff to 60s)
-// plus a 10s cache-cleanup ticker, which is incompatible with zero-idle
-// steady state. Connected steady state relies on the lifetime UDP listener
-// and mDNS advertisement for inbound discovery instead. Returns when ctx
-// ends; zeroconf closes the entries channel, which ends the results loop.
+// RunMdnsDiscovery feeds peer sightings to onDeviceFound, running only
+// while broadcast has owners: zeroconf's tickers break zero-idle state.
 func (l *Listener) RunMdnsDiscovery(ctx context.Context) {
 	entries := make(chan *zeroconf.ServiceEntry)
 	go func(results <-chan *zeroconf.ServiceEntry) {

@@ -86,9 +86,8 @@ func (d *Device) RemoteIP() net.IP {
 	return nil
 }
 
-// LastIP returns the IP address from the most recent successful connection.
-// Unlike RemoteIP, this persists after the connection drops — safe to use
-// from an OnDisconnect callback for auto-reconnect dialling.
+// LastIP returns the most recent connection's IP, persisting after drops:
+// unlike RemoteIP, safe to use from OnDisconnect for redialling.
 func (d *Device) LastIP() net.IP {
 	d.mu.RLock()
 	defer d.mu.RUnlock()

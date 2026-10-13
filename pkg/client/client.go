@@ -19,11 +19,9 @@ type Client struct {
 	// PairListenTimeout is the client's deadline for a pair_listen call.
 	// Set it above the daemon's pairing.listen_timeout; zero defaults to 70s.
 	PairListenTimeout time.Duration
-	// SftpTimeout is the client's deadline for the calls that block waiting for
-	// the phone's SFTP response (mount_local, browse). Must exceed the daemon's
-	// sftp.credentials_timeout_secs, or the socket deadline fires first and the
-	// user is told the connection timed out instead of being told the phone did
-	// not answer. Zero defaults to 60s.
+	// SftpTimeout covers the calls waiting on the phone and must exceed the
+	// daemon's own deadline, or failures misreport as connection timeouts.
+	// Zero defaults to 60s.
 	SftpTimeout time.Duration
 }
 

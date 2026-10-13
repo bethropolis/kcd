@@ -29,15 +29,12 @@ import (
 // Defaults to "dev" for local builds without ldflags.
 var Version = "dev"
 
-// shutdownUnmountBudget bounds how long shutdown waits for SFTP mounts to be
-// released. Each Unmount can take up to 13s on its own (3s waiting for sshfs to
-// exit, then a 10s fusermount bound), so the budget -- not the per-mount cost --
-// is what keeps shutdown inside the unit's TimeoutStopSec=10.
+// shutdownUnmountBudget bounds total shutdown unmount wait: per-mount cost
+// can hit 13s, so the budget — not the cost — fits TimeoutStopSec.
 const shutdownUnmountBudget = 5 * time.Second
 
-// syncReconnectBroadcast starts UDP broadcast (reconnect owner) while any
-// paired device is offline, and withdraws it otherwise. Pure state, no
-// timers — callers invoke it from event handlers and startup.
+// syncReconnectBroadcast runs UDP broadcast (reconnect owner) while any pair
+// is offline, else withdraws it. Pure state, no timers; callers drive it.
 func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController) {
 	for _, dev := range devices.List() {
 		if dev.State() == device.StatePaired && !dev.IsConnected() {
@@ -82,17 +79,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			if info.State == device.StateUnknown {
 				info.State = device.StateUnpaired
 			}
-			// Migrate pre-fix names: some senders transmit decimal byte
-			// escapes (e.g. "Caf\\195\\169"); decode to real UTF-8.
-			// (SanitizeDeviceName already decodes; don't double-decode.)
+			// Migrate pre-fix names: decode decimal byte escapes to real UTF-8
+			// (SanitizeDeviceName already decodes; don't double-decode).
 			info.Name = protocol.SanitizeDeviceName(info.Name)
 			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
 			dev.SetState(info.State)
 			dev.CertFP = info.CertFP
 			dev.SetLastSeen(info.LastSeen)
-			// Restore the dial target so paired auto-dial works immediately
-			// after a restart (validation inside DialTarget — the file is
-			// user-editable).
+			// Restore the dial target so auto-dial works immediately after a
+			// restart (validation lives inside DialTarget).
 			if ip, port := info.DialTarget(); ip != nil {
 				dev.SetLastIP(ip)
 				dev.SetLastPort(port)
@@ -151,17 +146,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 
-	// mDNS advertisement is always on: unlike UDP broadcast it is
-	// responder-only (zero idle timers), so phones keep a standing
-	// discovery path even while UDP broadcast is stopped.
+	// mDNS advertisement is always on: responder-only means zero idle timers,
+	// so phones keep a standing path while UDP broadcast is stopped.
 	go discovery.AdvertiseMDNS(ctx, identity, logger)
 
-	// Advertise over UDP while a paired device is offline so it can find
-	// us back (DHCP roam, restart, mutual loss). Fully stopped otherwise —
-	// connected steady state keeps zero timers. Ownership is tracked, so
-	// this neither starts pairing broadcasts nor stops `kcd pair`'s. The
-	// subscription is channel-driven (no polling); the initial sync covers
-	// restarts with offline pairs.
+	// Advertise over UDP while a pair is offline so it can find us back;
+	// fully stopped otherwise. Ownership tracking keeps pairing broadcasts
+	// independent.
 	go func() {
 		sub := bus.Subscribe(0, events.TypeDeviceConnected, events.TypeDeviceDisconnected)
 		defer sub.Close()
@@ -178,10 +169,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
 
-	// Explicit `kcd pair <id>` dials on demand (background auto-dial no
-	// longer touches unpaired devices). Marks a one-shot dial flag so the
-	// next discovery announcement connects, and kicks an immediate dial if
-	// we already know where the device was last seen.
+	// Explicit `kcd pair <id>` dials on demand: background dial never touches
+	// strangers, so arm a one-shot flag and dial now if last-seen is known.
 	handler.SetPairDialHook(func(deviceID string) error {
 		dev, ok := devices.Get(deviceID)
 		if !ok {
@@ -206,11 +195,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 				logger.Warn("on-demand pair dial failed", log.String("device_id", deviceID))
 				return
 			}
-			// The immediate dial succeeded: consume the one-shot trigger so
-			// the next discovery announcement doesn't spawn a duplicate
-			// dial. The keep-alive intent (PairDialActive) stays armed until
-			// pairing starts, ends, or expires. On failure the trigger is
-			// left for the next sighting to retry.
+			// A successful immediate dial consumes the one-shot trigger; on
+			// failure it stays for the next sighting. PairDialActive outlives it.
 			dev.ConsumePairDial()
 			if dev.State() == device.StatePairRequestedByPeer {
 				if err := pairPlugin.AcceptPairing(dev); err != nil {
@@ -295,10 +281,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	logger.Info("kcd daemon shutting down")
 
-	// Release SFTP mounts before returning. OnDisconnect only fires on a
-	// dropped connection, so a graceful stop must unmount explicitly or every
-	// mount stays live. Bounded well under the unit's TimeoutStopSec so
-	// systemd does not SIGKILL us part-way through and strand one.
+	// Release SFTP mounts before returning: graceful stops skip OnDisconnect,
+	// so mounts would stay live. Bounded well under TimeoutStopSec.
 	if pl, ok := plugins.GetByName("SFTP"); ok {
 		unmountCtx, unmountCancel := context.WithTimeout(context.Background(), shutdownUnmountBudget)
 		pl.(*sftp.SftpPlugin).UnmountAll(unmountCtx)

@@ -18,11 +18,9 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-// shouldEphemeralClose reports whether an active connection that exists
-// only for the discovery handshake should be closed on a fresh sighting.
-// Connections are kept when pairing mode is active, when the device is
-// paired, when a pair request is in flight either way, or when the user
-// explicitly asked to pair with the device.
+// shouldEphemeralClose reports whether a discovery-only connection should
+// close on a fresh sighting: pairing mode, paired state, in-flight pair
+// traffic, and explicit pair intents all keep it.
 func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	if pairingMode {
 		return false
@@ -41,9 +39,8 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 	return true
 }
 
-// discoveryDialMinInterval rate-limits ephemeral dials triggered by UDP
-// sightings of unknown devices: at most one dial per device per interval.
-// Without it a chatty announcer would spawn a dial storm.
+// discoveryDialMinInterval rate-limits ephemeral dials per unknown device:
+// without it a chatty announcer spawns a dial storm.
 const discoveryDialMinInterval = 2 * time.Second
 
 func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
@@ -56,19 +53,9 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	defer tcpListener.Close()
 	tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
 
-	// Broadcast is off by default — controlled via `kcd pair` or IPC, and the
-	// controller starts in the stopped state.
-
-	// Discovery is event-driven with no timers or polling. Paired devices,
-	// pairing mode (`kcd pair` listen) and explicit `kcd pair <id>` intent dial
-	// and keep the connection; an unpaired stranger gets exactly one ephemeral
-	// dial per unpaired era so both sides can list each other, and the next
-	// sighting closes that socket again.
-	//
-	// Stranger dials are throttled globally (1/s) and per announcer IP (1/5s):
-	// a hostile or buggy peer minting fresh device IDs per broadcast could
-	// otherwise spawn an unbounded dial per announcement. Paired and
-	// explicit-intent dials bypass this.
+	// Discovery runs timer-free. Stranger dials are throttled (1/s global,
+	// 1/5s per IP) against ID-minting peers; paired and intent dials bypass.
+	// Strangers get one ephemeral dial per unpaired era to list each other.
 	var dialMu sync.Mutex
 	lastEphemeralGlobal := time.Now().Add(-time.Minute)
 	lastEphemeralByIP := map[string]time.Time{}
@@ -129,28 +116,15 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		}
 
 		if known && dev.State() == device.StatePaired {
-			// A paired sighting proves the peer is alive at the sighted address,
-			// so redial (rate-limited) when disconnected or when the sighted IP
-			// differs — a live socket at a new address is a half-open zombie.
-			//
-			// A same-IP sighting on a live socket is ignored, as upstream does.
-			// Phone traffic is event-driven with long quiet gaps, so read-idle
-			// cannot tell a zombie from a healthy session, and redialling churns
-			// duplicates the peer RSTs. Same-IP roam repair arrives instead via
-			// phone-initiated inbound, which replaces the connection outright.
-			// Whoever answers must present the paired certificate (CN + pinned
-			// fingerprint, verified in handleNewConnection) or setup fails.
+			// A paired sighting proves the peer is alive here: redial when
+			// disconnected or roamed, ignore same-IP (read-idle cannot tell
+			// zombies from healthy sessions). Setup re-verifies the cert.
 			dev.SetLastSeen(time.Now())
 			if dev.NoteSighting(ip) {
 				dev.ResetReconnectAttempt()
 			}
-			// Instant dial only when the peer is somewhere new: the
-			// backoff loop already covers the last-known address, and the
-			// phone redials inbound on its own within a second of a drop.
-			// Racing either with a second outbound breeds crossing
-			// duplicates the peer RSTs (flap war that latches its UI to
-			// "not reachable"). A sighting at a new address is a genuine
-			// roam the backoff can't reach — dial it now.
+			// Instant dial only somewhere new: backoff covers last-known and the
+			// phone redials inbound itself, so a second outbound breeds RSTs.
 			if lastIP := dev.LastIP(); lastIP == nil || !lastIP.Equal(ip) {
 				if dev.ShouldDiscoveryDial(discoveryDialMinInterval) {
 					// Prefer the peer's last authenticated listening port
@@ -175,14 +149,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				}
 			}
 			if opts.Reconnect.SightingDriven {
-				// Wake a parked reconnect loop (peer provably alive at
-				// this address), or respawn one that gave up past the
-				// stale horizon. TryReconnect single-flights: exactly one
-				// loop per device. The sighting is recorded as the freshest
-				// known address (the parked loop reloads it every lap, so a
-				// roam survives a failed one-shot dial), and the attempt
-				// counter restarts: the peer is provably back, so the
-				// escalated backoff does not apply.
+				// Wake or respawn the parked reconnect loop: the peer is provably
+				// back, so the attempt counter restarts and backoff does not apply.
 				dev.PokeReconnect()
 				if !dev.IsConnected() && dev.TryReconnect() {
 					dev.ResetReconnectAttempt()
@@ -220,15 +188,13 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 		}
-		// Otherwise the device already had its ephemeral dial for this
-		// unpaired era: stay silent instead of redialling on every
-		// announcement. Pairing mode and explicit `kcd pair <id>` bypass.
+		// Already got its ephemeral dial this era: stay silent on further
+		// announcements. Pairing mode and explicit pair bypass.
 	}
 
 	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
-	// Active discovery shares the broadcast ownership lifetime: mDNS
-	// browsing (periodic probes) runs only while pairing or reconnect
-	// owners hold the controller, never at connected steady state.
+	// Active discovery shares the broadcast ownership lifetime: mDNS browsing
+	// runs only while pairing or reconnect owners hold it, never steady state.
 	if bc != nil {
 		bc.SetBrowseStarter(udpListener.RunMdnsDiscovery)
 	}
@@ -257,17 +223,13 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				if err != nil {
 					return
 				}
-				// Refuse duplicate bursts pre-TLS: a device that completed a
-				// handshake inside the cooldown already has a live session;
-				// letting this one through would churn both ends' duplicate
-				// resolution. Pairing traffic always passes (strangers have
-				// no cooldown entry anyway).
+				// Refuse duplicate bursts inside the cooldown: the peer already
+				// has a live session. Pairing traffic always passes through.
 				var preBody protocol.IdentityBody
 				if err := json.Unmarshal(preTlsPkt.Body, &preBody); err == nil {
 					if preBody.TargetDeviceID != "" && preBody.TargetDeviceID != localDeviceID {
-						// Log-only: a stale cached ID on the peer (e.g. after
-						// our reinstall minted a new device ID) must not kill
-						// an otherwise legitimate inbound.
+						// Log-only: a stale cached ID on the peer (e.g. our reinstall
+						// minted a new one) must not kill a legitimate inbound.
 						logger.Debug("inbound addressed to another device",
 							log.String("device_id", preBody.DeviceID),
 							log.String("target_device_id", preBody.TargetDeviceID))

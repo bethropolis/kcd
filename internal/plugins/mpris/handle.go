@@ -38,17 +38,13 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	if body.RequestPlayerList {
-		// The phone asks for current truth: heal any signal drift first
-		// (async — the answer below goes out from the current map and the
-		// reconcile follow-up broadcasts corrections). Handle stays
-		// non-blocking per the plugin contract.
+		// The phone asks for truth: heal drift async first (the answer goes
+		// from the current map), keeping Handle non-blocking per contract.
 		p.requestReconcile()
 		return p.sendPlayerList(dev)
 	}
 
-	// Incoming playerList from remote device — prune players that no longer
-	// exist (their media session was destroyed) and request fresh status for
-	// the ones still around.
+	// Incoming playerList: prune destroyed sessions, refresh the survivors.
 	if body.PlayerList != nil {
 		p.logger.Debug("mpris: received player list from remote", log.Strings("players", body.PlayerList))
 		pruned := false
@@ -139,9 +135,8 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		p.remoteStateTimes[dev.ID()] = time.Now()
 		p.mu.Unlock()
 
-		// Request art bytes from the phone when the advertsed album art is
-		// a kdeconnect:// URI we have not cached yet. Resolve any already
-		// cached art before publishing so watch clients get a loadable URL.
+		// Request art bytes for uncached kdeconnect:// URIs, resolving cached
+		// art before publishing so watch clients get a loadable URL.
 		if p.artCache != nil && p.artCache.Resolve(state.AlbumArtUrl) == "" {
 			go p.requestAlbumArt(dev, state.Player, state.AlbumArtUrl)
 		}
@@ -151,9 +146,8 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				if resolved := p.artCache.Resolve(pub.AlbumArtUrl); resolved != "" {
 					pub.AlbumArtUrl = resolved
 				} else if pub.AlbumArtUrl != "" && strings.HasPrefix(pub.AlbumArtUrl, "kdeconnect:") {
-					// Art still downloading: publish an empty URL with the
-					// pending flag instead of an unloadable kdeconnect:/
-					// URI. The arrival re-publish carries file://.
+					// Art still downloading: publish empty URL with the pending
+					// flag; the arrival re-publish carries file://.
 					pub.AlbumArtUrl = ""
 					pub.ArtPending = true
 				}

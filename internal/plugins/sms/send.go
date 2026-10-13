@@ -12,9 +12,8 @@ import (
 // --- SMS sending -----------------------------------------------------------
 
 func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) error {
-	// v2 schema: the phone reads only messageBody, with addresses as the
-	// primary recipient list (phoneNumber stays as a legacy fallback for
-	// older peers). Without addresses/version the phone sends a blank SMS.
+	// v2 schema: the phone reads only messageBody with addresses as recipients
+	// (phoneNumber is legacy fallback); without them it sends a blank SMS.
 	body := map[string]any{
 		"version":     2,
 		"addresses":   []map[string]string{{"address": phoneNumber}},
@@ -30,9 +29,8 @@ func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) erro
 
 // --- Conversation browsing ------------------------------------------------
 
-// RequestConversations asks the phone for a summary of all conversations.
-// Bodyless requests use an empty object (never null) on the wire; see
-// contacts.RequestSync for why explicit null is dangerous.
+// RequestConversations asks the phone for a summary of all conversations;
+// bodyless means {} (never null — see contacts.RequestSync for why).
 func (p *SMSPlugin) RequestConversations(dev device.Sender) error {
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequestConvs, map[string]any{})
 	if err != nil {
@@ -75,9 +73,8 @@ func (p *SMSPlugin) RequestAttachment(dev device.Sender, partID int64, uniqueIde
 
 // --- Arming ------------------------------------------------------------------
 
-// armed reports whether the phone should be streaming new SMS to us. The
-// phone suppresses every push until it has been asked once, so this is the
-// single gate. It is off by default: an armed phone cannot be un-armed.
+// armed reports whether the phone should be streaming SMS: it suppresses
+// every push until asked once, so this gate defaults off and cannot unlatch.
 func (p *SMSPlugin) armed() bool {
 	if p.cfg.AlwaysArm {
 		return true
@@ -85,11 +82,8 @@ func (p *SMSPlugin) armed() bool {
 	return p.bus != nil && p.bus.HasSubscribers(events.TypeSMSIncoming)
 }
 
-// syncArming arms every connected device that is not armed yet. It runs
-// from the bus subscriber-change hook, which must return quickly, so the
-// device sends happen in a goroutine: dev.Send blocks for up to its write
-// timeout when the peer's send channel is full, and a hook that blocked
-// would stall bus.Subscribe for every caller.
+// syncArming arms every connected device not yet armed, from the subscriber
+// hook in a goroutine: dev.Send can block, and a slow hook stalls Subscribe.
 func (p *SMSPlugin) syncArming() {
 	if !p.armed() {
 		return
@@ -131,9 +125,8 @@ func (p *SMSPlugin) syncArming() {
 
 // --- Lifecycle ---------------------------------------------------------------
 
-// OnConnect tracks the device and re-arms it. The phone's arm flag survives
-// a reconnect, but not a restart of its own app, so re-arming per connection
-// is the only recovery available over this protocol.
+// OnConnect tracks the device and re-arms it: the phone's arm flag survives
+// reconnects but not app restarts, so per-connection arming is the only recovery.
 func (p *SMSPlugin) OnConnect(dev device.Sender) {
 	p.mu.Lock()
 	p.devices[dev.ID()] = dev

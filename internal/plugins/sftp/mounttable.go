@@ -6,39 +6,22 @@ import (
 	"strings"
 )
 
-// mountTablePath is the kernel's view of what is actually mounted. /proc is
-// read directly rather than shelling out to findmnt, matching findSSHFSPID, so
-// there is no external dependency and no PATH lookup to fail.
-//
-// It is a var so tests can point it at a fixture.
+// mountTablePath reads /proc directly instead of shelling out, so there is
+// no external dependency to fail. It is a var so tests can fixture it.
 var mountTablePath = "/proc/mounts"
 
-// liveMountPoint reports the mount point the kernel still has for a device, or
-// ("", false) if there is none.
-//
-// This exists because mountPoints is in-memory. After a daemon restart the
-// FUSE mount is still live, but the daemon has forgotten it: unmount would
-// claim the device was never mounted while the mount sat there holding an
-// sshfs process, and a later mount would try to run sshfs over it. Treating
-// the kernel as the source of truth and the map as a cache makes that
-// recoverable without persisting anything -- which is what we want, since a
-// persisted entry would go stale after a crash and need reconciling anyway.
+// liveMountPoint asks the kernel, not the map: in-memory state forgets
+// live FUSE mounts across restarts, and persisting would go stale on crash.
 
-// mountExists reports whether the kernel currently has a FUSE mount at this
-// exact path. Unmount uses it to tell "nothing is mounted" apart from "the
-// release failed", which are very different outcomes for a caller.
+// mountExists reports whether the kernel holds a FUSE mount here, telling
+// "nothing mounted" apart from "release failed" for Unmount's callers.
 func mountExists(path string) bool {
 	_, found := eachMount(func(mountPoint string) bool { return mountPoint == path })
 	return found
 }
 
-// eachMount returns the first FUSE mount for which match reports true, and
-// whether any matched.
-//
-// FUSE-only on purpose: the daemon only ever creates `kcd-sftp-<deviceID>`
-// mounts via sshfs, so adopting an unrelated mount that happens to share the
-// name — and later running fusermount against it — would be worse than not
-// adopting it.
+// eachMount returns the first matching FUSE mount. FUSE-only on purpose:
+// adopting an unrelated same-named mount risks fusermount against it.
 func eachMount(match func(mountPoint string) bool) (string, bool) {
 	f, err := os.Open(mountTablePath)
 	if err != nil {
@@ -60,9 +43,8 @@ func eachMount(match func(mountPoint string) bool) (string, bool) {
 	return "", false
 }
 
-// unescapeMountPath reverses the octal escaping the kernel applies to a
-// mountpoint containing whitespace ("/mnt/my\040disk" -> "/mnt/my disk").
-// Getwd-style escapes are limited to space, tab, newline and backslash.
+// unescapeMountPath reverses the kernel's octal escaping of whitespace in
+// mountpoints (Getwd-style: space, tab, newline, backslash only).
 func unescapeMountPath(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s

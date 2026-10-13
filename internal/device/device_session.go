@@ -12,18 +12,12 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-// reconnectCooldown refuses new handshakes this long after a completed
-// one, so post-roam bursts can't complete near-simultaneously and churn
-// the peer's duplicate resolution. Reference stacks rate-limit the same
-// way (desktop 500ms, Android MILLIS_DELAY_BETWEEN_CONNECTIONS_TO_SAME_DEVICE
-// 1000ms); 1s matches upstream Android.
+// reconnectCooldown refuses new handshakes this long after one completes,
+// so post-roam bursts can't churn duplicate resolution. 1s matches Android.
 const reconnectCooldown = 1 * time.Second
 
-// Connect establishes a connection for the device and starts the reader and writer loops.
-// A new authenticated connection immediately replaces any existing one
-// (matching LanDeviceLink::reset / LanLink.reset). The old socket is
-// closed; its readLoop will exit and disconnectConn will ignore it
-// because d.conn no longer points at it.
+// Connect establishes the device connection, replacing any existing one:
+// the old socket closes, its readLoop exits, and disconnectConn ignores it.
 func (d *Device) Connect(ctx context.Context, conn *transport.Conn, dispatch func(context.Context, *Device, *protocol.Packet) bool, onConnect func(*Device), onDisconnect func(*Device)) {
 	d.mu.Lock()
 	d.pluginDispatch = dispatch
@@ -134,11 +128,8 @@ func (d *Device) IsConnected() bool {
 	return d.conn != nil
 }
 
-// disconnectConn handles a session's death. If the conn that died is no
-// longer the current d.conn (it was superseded by a newer authenticated
-// connection via Connect), the event is ignored silently — matching
-// LanDeviceLink::reset's `if (m_socket == socket)` guard. Only the
-// current preferred session's death triggers the full disconnect.
+// disconnectConn handles a session's death, ignoring conns superseded by a
+// newer authenticated one; only the current session triggers disconnect.
 func (d *Device) disconnectConn(conn *transport.Conn) {
 	d.mu.Lock()
 

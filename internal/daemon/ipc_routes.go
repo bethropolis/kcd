@@ -72,9 +72,8 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			if err != nil {
 				return
 			}
-			// No target ID: the peer is whoever answers at this address.
-			// An empty target omits targetDeviceId from the pre-TLS
-			// identity; stock peers drop dials addressed to anyone else.
+			// No target ID: the peer is whoever answers here. Empty omits
+			// targetDeviceId; stock peers drop misaddressed identities.
 			DialDevice(ctx, addr, cfg.TCPPort, "", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
 		}()
 
@@ -87,10 +86,8 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 	})
 	handler.Register(ipc.CmdBroadcastStop, func(req ipc.Request) ipc.Response {
 		bc.Stop()
-		// Pairing window closed: drop discovery connections that never led
-		// to pairing so strangers don't linger. Paired devices, pair
-		// requests in flight, and explicit pair intents (kept alive until
-		// pairing starts, ends, or expires) are left alone.
+		// Pairing window closed: drop discovery connections that never paired
+		// so strangers don't linger; pairs, in-flight requests, intents stay.
 		for _, dev := range devices.List() {
 			if !dev.IsConnected() || dev.State() != device.StateUnpaired || dev.PairDialActive() {
 				continue

@@ -16,10 +16,8 @@ var actionFlags = []cli.Flag{
 	&cli.StringFlag{Name: "player", Aliases: []string{"p"}, Usage: "Player name"},
 }
 
-// actionDeviceID returns the device for an mpris action subcommand. A
-// positional argument wins so `kcd mpris next <id>` matches every other
-// command in the CLI; --device stays as the fallback. (volume and seek
-// deliberately do not use this: their positional is the value.)
+// actionDeviceID returns the device for an mpris action: positional wins,
+// --device is the fallback. (volume and seek take values positionally.)
 func actionDeviceID(c *cli.Context) string {
 	if c.NArg() >= 1 {
 		return c.Args().First()
@@ -37,11 +35,8 @@ func actionCmd(action string) cli.ActionFunc {
 	}
 }
 
-// skipCmd builds the next/previous actions. Some phone MPRIS
-// implementations stop after a skip, so the new track is nudged with
-// Play — but only when something was actually playing. Skipping a paused
-// player must leave it paused; unpausing it would start audio the user
-// never asked for.
+// skipCmd builds next/previous, nudging with Play only when playing: some
+// phones stop after a skip, but waking a paused player starts unasked audio.
 func skipCmd(action string) cli.ActionFunc {
 	return func(c *cli.Context) error {
 		cl, err := getClient(c)
@@ -62,13 +57,8 @@ func skipCmd(action string) cli.ActionFunc {
 	}
 }
 
-// remotePlayerPlaying reports whether the target player is currently
-// playing. An empty player name means the device's only/first player.
-//
-// State the daemon cannot report — the query failed, the device is
-// unknown, or no player matches — returns true, preserving the old
-// always-nudge behavior for the phones that need it rather than
-// silently dropping the workaround.
+// remotePlayerPlaying reports whether the player is playing (empty: the
+// only/first). Unanswerable queries return true to preserve the nudge.
 func remotePlayerPlaying(cl *client.Client, deviceID, player string) bool {
 	remote, err := cl.MprisRemote()
 	if err != nil {

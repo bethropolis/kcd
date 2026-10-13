@@ -64,10 +64,14 @@ These structural constraints must hold at all times:
 - Change narration (`used to`, `is now`, `no longer`) — git history owns that. Keep the conclusion, drop the archaeology.
 - Dev-process references (`Phase 2`, planning-artifact numbering). They mean nothing to a reader of the repo.
 - Prose duplicating this file or `docs/`.
+- Justifying the approach (`cleaner`, `zero-cost`, `race-free`). The code speaks.
+
+**Hard limit: 2 lines per block.** If it needs more, the code is unclear —
+rename, extract, or restructure instead. The one exception is
+security/protocol rationale that cannot fit: it may run long, but the
+reason goes in the first 2 lines so a reader can stop there.
 
 **Godoc stays** on exported identifiers: one line, starting with the identifier, even where thin. That is the API contract, not noise. Use `// Name does X.` even when `X` is obvious.
-
-**A comment block over 8 lines is usually two comments** — a contract and a history. Keep the contract, drop the history, and split the remainder.
 
 When trimming a block, any comment touching validation, TLS, key handling, timeouts, or the KDE Connect wire format must keep its reason somewhere in the block, even if the wording changes.
 

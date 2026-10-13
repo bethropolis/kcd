@@ -28,9 +28,7 @@ func runCommandLabel(payload map[string]any) string {
 	return fmt.Sprintf("#%v", payload["id"])
 }
 
-// runCommandDetail renders one runcommand event body. A batch carries separate
-// stdout/stderr line lists; the lifecycle events carry a single `output`
-// transcript. Branching on status rather than probing for `success` matters:
+// runCommandDetail renders one runcommand event body, branching on status:
 // an absent boolean would otherwise make a start look like a failure.
 func runCommandDetail(payload map[string]any) string {
 	if lines, ok := payload["stdout"].([]any); ok {
@@ -78,9 +76,8 @@ func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// volumeSuffix renders the optional volume an event was mounted for. The
-// daemon omits the key when the phone picked the volume itself, so an absent
-// key has to render as nothing rather than as a stray separator.
+// volumeSuffix renders the event's optional volume: absent (phone picked it)
+// renders as nothing, never a stray separator.
 func volumeSuffix(payload map[string]any) string {
 	if v, ok := payload["volume"].(string); ok && v != "" {
 		return " (" + v + ")"
@@ -88,10 +85,8 @@ func volumeSuffix(payload map[string]any) string {
 	return ""
 }
 
-// decodePayload re-decodes an event payload into a concrete type. The daemon
-// hands the CLI generic JSON, so a payload that was published as a struct
-// arrives as an untyped map and has to be round-tripped to reuse the same
-// formatter the dedicated commands use.
+// decodePayload re-decodes a payload into a concrete type: daemon JSON arrives
+// untyped, and round-tripping reuses the dedicated commands' formatter.
 func decodePayload(payload any, out any) bool {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -105,9 +100,8 @@ func str(payload map[string]any, key string) string {
 	return s
 }
 
-// num reads a numeric payload field. Values normally arrive as float64 from the
-// JSON stream, but the same event can be produced in-process, so accept the
-// other integer widths rather than silently reading zero.
+// num reads a numeric payload field. Values arrive as float64 from JSON but
+// may be integers in-process: accept all widths rather than reading zero.
 func num(payload map[string]any, key string) (int, bool) {
 	switch v := payload[key].(type) {
 	case float64:
@@ -124,10 +118,8 @@ func num(payload map[string]any, key string) (int, bool) {
 	}
 }
 
-// formatEvent renders one event as a human-readable line, including its
-// trailing newline (or leading carriage return, for the in-place transfer
-// progress line). The trailing newline is part of the return value so callers
-// can print without adding one.
+// formatEvent renders one event human-readable, newline included (or leading
+// carriage return for in-place progress), so callers print without adding one.
 func formatEvent(ev events.Event) string {
 	// A nil or non-map payload still renders for the types below that read
 	// nothing; the map assertion simply yields nil and lookups return "".
@@ -288,10 +280,8 @@ func formatEvent(ev events.Event) string {
 		return fmt.Sprintf("[%s] device.connected: %s (%s)\n", ev.DeviceID, oneLine(truncate(name, 32)), typeName)
 
 	default:
-		// state.snapshot deliberately lands here: the IPC layer writes it
-		// straight to the socket with a full device+plugin dump as payload,
-		// so rendering it would flood the terminal. ring.received,
-		// device.removed and device.disconnected carry no payload.
+		// state.snapshot is written straight to the socket by IPC; rendering
+		// it would flood the terminal. The rest here carry no payload.
 		return fmt.Sprintf("[%s] %s\n", ev.DeviceID, ev.Type)
 	}
 
@@ -313,9 +303,8 @@ func callerLabel(body *telephony.TelephonyBody) string {
 	return ""
 }
 
-// telephonyLabel names the call event in plain language. It deliberately
-// mirrors the wording telephony.go puts in the desktop notification so the two
-// do not describe the same event differently.
+// telephonyLabel names the call event in the notification's plain wording,
+// so CLI and desktop never describe the same event differently.
 func telephonyLabel(typ events.EventType) string {
 	switch typ {
 	case events.TypeTelephonyRinging:
@@ -364,9 +353,8 @@ func contactDelta(payload map[string]any) string {
 	return strings.Join(parts, ", ")
 }
 
-// sinkSummary renders a sink list as "Speaker 42%, Headset 80%". Raw %v on the
-// slice would print Go slice syntax, which is not something a person should
-// have to read.
+// sinkSummary renders a sink list as "Speaker 42%, Headset 80%": raw %v would
+// print Go slice syntax no person should have to read.
 func sinkSummary(raw any) string {
 	var sinks []remotesystemvolume.SinkInfo
 	if !decodePayload(raw, &sinks) {

@@ -5,14 +5,8 @@ import (
 	"time"
 )
 
-// NetworkConfig controls connection setup deadlines, not transfer size limits.
-// TransferIdleTimeout bounds streaming silence on side-channel transfers:
-// any read/write gap longer than it aborts the transfer.
-// KeepAliveIdle is the TCP keepalive first-probe delay (kernel timers, not
-// application wakeups): larger values send fewer probes on idle
-// connections but detect dead peers more slowly. Never zero — idle
-// sockets without probes become undetectable zombies (the per-write
-// deadline guards writers only, not idle sockets).
+// NetworkConfig sets deadlines and liveness: TransferIdleTimeout bounds
+// streaming silence, and KeepAliveIdle guards idle sockets (never zero).
 type NetworkConfig struct {
 	DialTimeout         string `toml:"dial_timeout"`
 	HandshakeTimeout    string `toml:"handshake_timeout"`
@@ -26,10 +20,8 @@ type ReconnectConfig struct {
 	InitialBackoff string `toml:"initial_backoff"`
 	MaxBackoff     string `toml:"max_backoff"`
 	FlapThreshold  string `toml:"flap_threshold"`
-	// SightingDriven parks the redial timer on discovery sightings: while
-	// set, the loop dials immediately on sighting and otherwise waits up
-	// to FallbackMax, giving up entirely past StaleAfter. False restores
-	// the legacy pure-timer loop capped at MaxBackoff.
+	// SightingDriven parks redial on sightings (immediate dial, else wait to
+	// FallbackMax, give up past StaleAfter); false restores the pure-timer loop.
 	SightingDriven bool   `toml:"sighting_driven"`
 	FallbackMax    string `toml:"fallback_max"`
 	StaleAfter     string `toml:"stale_after"`

@@ -15,17 +15,13 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// PacketTypeOutput carries command execution results to the phone's in-app
-// output card. Its presence is what makes the daemon advertise the streaming
-// path rather than relying on a desktop notification, which Android's
-// ReceiveNotificationsPlugin ignores unless the user explicitly enables it.
+// PacketTypeOutput carries results to the phone's output card, advertising
+// the streaming path: Android ignores the notification fallback by default.
 const PacketTypeOutput = "kdeconnect.runcommand.output"
 
 const (
-	// streamFlushInterval bounds how long a line waits before the phone sees
-	// it. It is the only knob trading latency against packet count: a chatty
-	// command emitting thousands of lines would otherwise produce one packet
-	// per line.
+	// streamFlushInterval bounds how long a line waits: the only knob trading
+	// latency against packet count for chatty commands.
 	streamFlushInterval = 250 * time.Millisecond
 
 	// streamMaxLines caps a single execution's output. The phone keeps every
@@ -48,9 +44,8 @@ const (
 	streamNotifMaxBytes = 4000
 )
 
-// outputStream accumulates one execution's output and emits it as batched
-// packets. Both stdout and stderr are sent on every batch, even when one is
-// empty: the phone's handler iterates both lists without a null check.
+// outputStream batches one execution's output, sending both lists every time:
+// the phone's handler iterates them without a null check.
 type outputStream struct {
 	mu      sync.Mutex
 	dev     device.Sender
@@ -162,15 +157,8 @@ func (s *outputStream) send(stdout, stderr []string, dropped bool) {
 	}
 }
 
-// flush sends a batch only when lines are buffered, so an idle command does not
-// generate traffic.
-//
-// The bus copy is gated on subscribers. A chatty command would otherwise
-// publish four events a second to nobody, and the bus drops events (with a
-// warning) once a slow subscriber fills its channel -- so an unfiltered feed
-// would both waste work and make the drop warnings fire for output nobody
-// asked for. The lifecycle events are unconditional, so a client can still
-// learn the result of a command it was not watching line by line.
+// flush emits buffered lines to subscribers only (idle/unwatched commands
+// stay silent); lifecycle events stay unconditional so outcomes still land.
 func (s *outputStream) flush() {
 	if !s.pending() {
 		return
@@ -210,13 +198,8 @@ type line struct {
 	isStderr bool
 }
 
-// streamOutput runs cmd and reports its output to the phone as it arrives.
-// The three packet types must be sent in order -- started, then output, then
-// finished -- because the phone keys its output rows off the id registered by
-// commandStarted; a finished packet for an unknown id only flips its spinner.
-//
-// sendFinished is deferred so every exit path, including a panic, still
-// releases the phone's running indicator.
+// streamOutput reports output in started/output/finished order (the phone
+// keys rows off the started id), deferring finish so panics still release it.
 func (p *RunCommandPlugin) streamOutput(
 	ctx context.Context,
 	dev device.Sender,
@@ -246,9 +229,8 @@ func (p *RunCommandPlugin) streamOutput(
 		p.finishOutput(dev, id, success)
 	}()
 
-	// Built before the pipes exist so the deferred finish can still find it on
-	// the early-return paths; announced stays false until the process is
-	// actually running, so a failed start publishes neither half.
+	// Built before the pipes exist so deferred finish finds it on early
+	// returns; announced stays false until running, so failed starts publish nothing.
 	stream = &outputStream{dev: dev, logger: p.logger, bus: p.bus, id: id, command: key}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -268,12 +250,8 @@ func (p *RunCommandPlugin) streamOutput(
 	stream.announced = true
 	stream.publishLifecycle("started", nil)
 
-	// exec.CommandContext kills only the direct child. If the shell forks
-	// rather than execs, the orphan keeps the write end of the pipes open, so
-	// the scanners would never see EOF and Wait would never be reached --
-	// cancelling would hang instead of stopping. Closing our read ends when
-	// the context ends makes that unblock deterministically, whatever the
-	// shell does.
+	// exec kills only the direct child: a forking shell's orphan would hold
+	// the pipes open forever, so close our read ends when the context ends.
 	scanDone := make(chan struct{})
 	defer close(scanDone)
 	go func() {
@@ -298,11 +276,8 @@ func (p *RunCommandPlugin) streamOutput(
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
 
-	// The loop runs until both pipes hit EOF rather than returning on ctx.
-	// Cancelling the context kills the process, which closes the pipes, which
-	// ends the scanners. Tailing the channel to completion keeps the scanner
-	// goroutines from blocking forever on a send nobody is reading, and lets
-	// the final flush carry whatever output arrived before the kill.
+	// Run until both pipes EOF rather than returning on ctx: scanners would
+	// otherwise block forever on a send nobody reads after cancellation.
 	for {
 		closed := drainLines(lines, stream)
 		stream.flush()
@@ -332,9 +307,8 @@ func (p *RunCommandPlugin) streamOutput(
 	return summary
 }
 
-// drainLines consumes everything currently buffered and reports whether the
-// channel has closed and gone empty. Draining first is what collapses a burst
-// into one packet instead of one packet per line.
+// drainLines consumes the buffer, reporting closed-and-empty; draining first
+// collapses a burst into one packet instead of one per line.
 func drainLines(lines <-chan line, s *outputStream) (closed bool) {
 	for {
 		select {
@@ -349,9 +323,8 @@ func drainLines(lines <-chan line, s *outputStream) (closed bool) {
 	}
 }
 
-// scanInto splits a pipe into lines. Sends block so a slow consumer applies
-// backpressure to the command rather than silently discarding output; the
-// line cap in add is the authoritative bound.
+// scanInto splits a pipe into lines with blocking sends, so a slow consumer
+// backpressures the command; the line cap in add is the bound.
 func scanInto(out chan<- line, r io.Reader, isStderr bool, logger log.Logger) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), streamMaxScanBuffer)
@@ -363,9 +336,8 @@ func scanInto(out chan<- line, r io.Reader, isStderr bool, logger log.Logger) {
 	}
 }
 
-// finishOutput emits commandFinished and clears the cancel registration.
-// The phone uses this to turn the command line green or red, so it must be
-// sent exactly once per started execution.
+// finishOutput emits commandFinished and clears the registration; the phone
+// colors the line off it, so exactly once per started execution.
 func (p *RunCommandPlugin) finishOutput(dev device.Sender, id int32, success bool) {
 	p.Mu.Lock()
 	if byID, ok := p.running[dev.ID()]; ok {
@@ -391,9 +363,8 @@ func (p *RunCommandPlugin) finishOutput(dev device.Sender, id int32, success boo
 	}
 }
 
-// nextExecID hands out execution ids. They must fit a Java int because the
-// phone reads them with getInt; a nanosecond timestamp does not, so this is a
-// plain counter.
+// nextExecID hands out execution ids as a counter: the phone's getInt would
+// overflow on nanosecond timestamps.
 func (p *RunCommandPlugin) nextExecID() int32 {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()

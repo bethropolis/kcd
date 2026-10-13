@@ -12,11 +12,8 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 )
 
-// SidechannelOptions bounds the connection establishment phase — TCP dial
-// plus TLS handshake plus pin verification — with a single overall timeout
-// (default 15s). IdleTimeout optionally bounds streaming silence: every
-// read or write pushes the deadline forward, so stalled transfers fail
-// while slow-but-alive ones run unbounded in total. Zero disables it.
+// SidechannelOptions bounds establishment with a single overall timeout;
+// IdleTimeout bounds streaming silence, letting slow transfers run unbounded.
 type SidechannelOptions struct {
 	Timeout     time.Duration
 	IdleTimeout time.Duration
@@ -29,10 +26,8 @@ type SidechannelOptions struct {
 // handshake) when the caller passes no explicit timeout.
 const defaultSetupTimeout = 15 * time.Second
 
-// DialSidechannel connects as a TLS client and verifies the paired certificate
-// before returning any payload bytes. The caller owns and must close the result.
-// Once established, payload streaming carries no absolute deadline — only the
-// optional idle bound from SidechannelOptions applies.
+// DialSidechannel connects as a TLS client, verifying the paired cert. The
+// caller owns closing; streaming has no absolute deadline, only idle bound.
 func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Config, expectedFP string, logger log.Logger, options ...SidechannelOptions) (net.Conn, error) {
 	if ip == nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("side-channel: invalid peer address")
@@ -71,11 +66,7 @@ func DialSidechannel(ctx context.Context, ip net.IP, port int, tlsConfig *tls.Co
 		conn.Close()
 		return nil, fmt.Errorf("side-channel: peer verification failed: %w", err)
 	}
-	// The caller's context governs connection establishment only. Once the
-	// handshake is done, cancellation has no effect on payload I/O — the
-	// pre-helper plugins dialed with the request context but streamed
-	// unbounded, and download goroutines may legitimately outlive the
-	// packet-handler context. Callers own the returned conn and close it
-	// when streaming finishes.
+	// The caller's context governs establishment only: payload I/O streams
+	// unbounded after the handshake, and the caller owns closing the conn.
 	return WithIdleTimeout(conn, opts.IdleTimeout), nil
 }

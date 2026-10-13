@@ -82,10 +82,8 @@ type PairListenResult struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
-// PairResult is returned by CmdPair on success. VerificationKey is the
-// out-of-band code the peer shows for the user to compare; it is empty
-// when no request was sent (already paired, or a pending peer request
-// that this accepted instead).
+// PairResult is returned by CmdPair. VerificationKey is the peer-displayed
+// code; empty when nothing was requested (paired, or accepted peer request).
 type PairResult struct {
 	VerificationKey string `json:"verificationKey,omitempty"`
 }
@@ -179,18 +177,15 @@ type StatusResponse struct {
 	Devices        []StatusDevice `json:"devices,omitempty"`
 }
 
-// SftpInfoPayload is used for CmdSftpInfo.
-//
-// ShowPassword is opt-in because the response carries a live credential for
-// the phone's SFTP server; without it the daemon omits the password entirely.
+// SftpInfoPayload is used for CmdSftpInfo. ShowPassword is opt-in because
+// the response carries a live credential; without it the password is omitted.
 type SftpInfoPayload struct {
 	DeviceID     string `json:"deviceId"`
 	ShowPassword bool   `json:"showPassword,omitempty"`
 }
 
-// SftpInfoResponse carries cached SFTP connection details returned by CmdSftpInfo.
-//
-// Password is omitted unless the request set ShowPassword.
+// SftpInfoResponse carries cached SFTP details from CmdSftpInfo; Password is
+// omitted unless the request set ShowPassword.
 type SftpInfoResponse struct {
 	IP       string                  `json:"ip"`
 	Port     json.Number             `json:"port"`
@@ -209,12 +204,8 @@ type StorageVolumeResponse struct {
 	Path string `json:"path"`
 }
 
-// SftpMountPayload is used for CmdSftpMount and CmdSftpMountLocal.
-//
-// ReadOnly overrides the [sftp] read_only default for this one mount. It has
-// to be a pointer so an absent field is distinguishable from an explicit
-// false, letting the daemon fall back to config rather than silently forcing
-// a writable mount.
+// SftpMountPayload is used for CmdSftpMount and CmdSftpMountLocal. ReadOnly
+// is a pointer so absent falls back to config instead of forcing writable.
 type SftpMountPayload struct {
 	DeviceID string `json:"deviceId"`
 	ReadOnly *bool  `json:"readOnly,omitempty"`

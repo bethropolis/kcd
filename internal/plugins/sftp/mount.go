@@ -20,22 +20,18 @@ import (
 	"github.com/bethropolis/kcd/internal/plugin"
 )
 
-// sshUserPattern allows the generated Android SFTP usernames (alphanumerics,
-// underscore, dot, hyphen) while rejecting anything starting with '-' —
-// sshfs would parse that as an option flag (e.g. -oProxyCommand=...),
+// sshUserPattern allows generated Android SFTP usernames while rejecting
+// anything starting with '-': sshfs would parse that as an option flag,
 // yielding local command execution.
 var sshUserPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 
-// sshHostPattern allows IPs (validated separately) and plain hostnames
-// (.local, LAN names). Anything else — flags, spaces, shell metachars,
-// userinfo (@) — is rejected.
+// sshHostPattern allows IPs (validated separately) and plain hostnames;
+// flags, spaces, metachars, and userinfo are rejected.
 var sshHostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 
-// buildSSHFSArgs validates the phone-provided (or IPC-provided) remote
-// parameters and constructs the sshfs argv. Validation (not a "--"
-// separator — unsupported by older sshfs 2.x) is what prevents option
-// injection: no validated value can begin with '-', so sshfs/fuse option
-// parsing can never reinterpret remoteRoot as a flag like -oProxyCommand.
+// buildSSHFSArgs validates remote parameters into sshfs argv. No validated
+// value begins with '-', which is what keeps option parsing from reading
+// remote input as flags on sshfs versions without "--" support.
 func buildSSHFSArgs(body SftpBody, remotePath, mountPoint string, uid, gid int, keepaliveInterval, keepaliveCount int, extraOpts []string, readOnly bool) ([]string, error) {
 	if !sshUserPattern.MatchString(body.User) || len(body.User) > 64 {
 		return nil, fmt.Errorf("sftp: refusing suspicious ssh user %q", body.User)
@@ -88,13 +84,8 @@ func buildSSHFSArgs(body SftpBody, remotePath, mountPoint string, uid, gid int, 
 	return args, nil
 }
 
-// sshfsHint maps an sshfs failure message to an actionable hint, or "" when
-// the cause is not one we can advise about.
-//
-// The FUSE hint deliberately matches specific causes, not the mention of
-// "fusermount" anywhere in the message. A duplicate mount onto an already live
-// mountpoint names fusermount3 but is not a /etc/fuse.conf problem, and
-// telling a user to edit that file sends them down a dead end.
+// sshfsHint maps a failure message to an actionable hint, matching specific
+// causes: a duplicate mount names fusermount3 without it being a config issue.
 func sshfsHint(msg string) string {
 	switch {
 	case strings.Contains(msg, "Operation not permitted"),
@@ -109,29 +100,23 @@ func sshfsHint(msg string) string {
 	}
 }
 
-// mountWithBody performs the sshfs mount and returns the local browse path.
-// volumePath specifies which storage volume to mount. If empty, the first
-// available volume is selected automatically.
+// mountWithBody performs the sshfs mount, defaulting to the first volume;
+// returns the local browse path.
 func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body SftpBody, volumePath string, readOnly bool) (string, error) {
 	mountPoint := p.mountPointFor(deviceID)
-	// Warned before the reuse check as well as after it: a user who already
-	// has a mount at a hazardous location still needs telling, and it is
-	// logged once per location, so hoisting it costs nothing.
+	// Warn before the reuse check too: an existing mount at a hazardous spot
+	// still needs telling, once per location.
 	p.warnIfInBulkDeletableDir(mountPoint)
 
-	// Idempotent. Re-running sshfs onto a live mountpoint fails with
-	// "fusermount3: failed to access mountpoint ... Permission denied", which
-	// reads like a FUSE permissions problem and is not one. Returning the
-	// existing mount point also makes a repeated request a cheap way to
-	// re-open the file manager.
+	// Idempotent: re-running sshfs onto a live mountpoint fails misleadingly,
+	// so return the existing mount point (also a cheap file-manager reopen).
 	if existing := p.MountedPath(deviceID); existing != "" {
 		p.logger.Info("SFTP already mounted, reusing mount point",
 			log.String("device_id", deviceID),
 			log.String("mount_point", existing),
 		)
-		// Mounting is idempotent, so a mode request cannot be applied to an
-		// existing mount. Say what the mount actually is rather than appearing
-		// to honour the flag.
+		// Mounting is idempotent, so a mode flag can't apply to an existing
+		// mount: report what it actually is instead of pretending.
 		if existingRO := p.mountIsReadOnly(deviceID); existingRO != readOnly {
 			p.logger.Info("read-only mode differs from the existing mount and cannot be changed in place; unmount first",
 				log.String("device_id", deviceID),
@@ -147,10 +132,8 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		return "", fmt.Errorf("create mount point %s: %w", mountPoint, err)
 	}
 
-	// Never mount "/" itself. The Android SFTP server exposes the real
-	// filesystem there, but listing it over sshfs fails on its
-	// permission-denied entries (/proc, /sys). Mount a storage volume
-	// (e.g. /storage/emulated/0) instead, which is guaranteed browsable.
+	// Never mount "/" itself: the real filesystem's permission-denied entries
+	// fail listing; mount a storage volume, guaranteed browsable, instead.
 	remotePath := volumePath
 	if remotePath == "" {
 		if len(body.MultiPaths) > 0 {
@@ -229,9 +212,8 @@ func (p *SftpPlugin) publishUnmounted(deviceID, mountPoint string) {
 	p.bus.Publish(events.TypeSftpUnmounted, deviceID, map[string]any{"mountPoint": mountPoint})
 }
 
-// autoOpen opens a browse path in the configured file manager, best effort.
-// It runs the spawn in a goroutine so a slow or hung file manager never
-// blocks the caller's mount or unmount path.
+// autoOpen opens a browse path in the file manager, best effort, in a
+// goroutine: a hung manager must never block the mount path.
 func (p *SftpPlugin) autoOpen(browsePath string) {
 	if !p.cfg.AutoOpen {
 		return
@@ -279,25 +261,15 @@ func (p *SftpPlugin) mountIsReadOnly(deviceID string) bool {
 	return p.mountReadOnly[deviceID]
 }
 
-// Unmount cleanly unmounts a previously mounted SFTP filesystem.
-// It first attempts a graceful shutdown of the sshfs process (SIGTERM → wait → SIGKILL),
-// then uses fusermount to ensure the mount point is released.
-//
-// Errors distinguish the three cases a client has to react to differently:
-// not mounted at all, a mount that exists but could not be released, and a
-// clean unmount. Tracked state is dropped only once the mount is actually
-// released, so a failed unmount can be retried instead of leaving the daemon
-// believing the device is unmounted while the FUSE mount is still live.
+// Unmount releases a mounted filesystem. Tracked state drops only on actual
+// release (failures stay retryable); errors separate never-mounted from stuck.
 func (p *SftpPlugin) Unmount(deviceID string) error {
-	// Resolved rather than read from the map directly: a mount made before a
-	// daemon restart is absent from the cache but still live, and reporting
-	// "not mounted" there would leave it holding an sshfs process with no way
-	// to clear it.
+	// Resolved, not read from the map: a pre-restart mount is absent from
+	// cache but live, and "not mounted" would strand its sshfs process.
 	mountPoint := p.MountedPath(deviceID)
 	if mountPoint == "" {
-		// Nothing mounted. A leftover directory can still be sitting there
-		// from a mount whose release already succeeded, so clear it and report
-		// the state the caller asked for rather than an error.
+		// Nothing mounted, but a released mount may leave its directory: clear
+		// it and report the asked-for state, not an error.
 		if leftover := p.mountPointFor(deviceID); p.removeLeftoverDir(deviceID, leftover) {
 			p.logger.Info("removed leftover SFTP mount directory",
 				log.String("device_id", deviceID),
@@ -307,11 +279,8 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 		return fmt.Errorf("not mounted: no SFTP mount for device %s", deviceID)
 	}
 
-	// The kernel is the source of truth. A mount that has already gone -- the
-	// FUSE connection died, or it was released by hand -- has nothing to
-	// release, and fusermount will fail on it forever. Treating that as an
-	// error while keeping the cached state would wedge the device permanently
-	// in "mounted", unable to mount or unmount again.
+	// The kernel is the source of truth: releasing an already-gone mount
+	// fails forever, so erroring there would wedge the device as "mounted".
 	if !mountExists(mountPoint) {
 		p.logger.Info("SFTP mount already released, clearing stale state",
 			log.String("device_id", deviceID),
@@ -327,9 +296,8 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 
 	p.logger.Info("unmounting SFTP share", log.String("mount_point", mountPoint))
 
-	// Graceful shutdown: SIGTERM → wait → SIGKILL. A mount adopted from the
-	// kernel has no tracked PID, so look one up rather than skipping the
-	// graceful step.
+	// Graceful shutdown first (SIGTERM, wait, SIGKILL); kernel-adopted mounts
+	// carry no tracked PID, so look one up instead of skipping the step.
 	hasPID := pid != 0
 	if !hasPID {
 		if found, err := findSSHFSPID(mountPoint); err == nil {
@@ -383,10 +351,8 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 		return nil
 	}
 
-	// Still present but not responding: a dead FUSE connection refuses a
-	// normal unmount ("Transport endpoint is not connected"). A lazy unmount
-	// detaches it anyway, and any process still inside will see ENOTCONN
-	// rather than hang, which is the state a crashed mount is in regardless.
+	// Still present but dead: a normal unmount refuses it ("Transport endpoint
+	// is not connected"), so detach lazily — insiders see ENOTCONN, not a hang.
 	if strings.Contains(detail, "Transport endpoint is not connected") {
 		lazyOut, lazyErr := plugin.RunCommandSync(unmountCtx, tool, "-uz", mountPoint)
 		if lazyErr == nil {
@@ -475,28 +441,11 @@ func findSSHFSPID(mountPoint string) (int, error) {
 	return 0, fmt.Errorf("no sshfs process found for mount point %s", mountPoint)
 }
 
-// UnmountAll releases every mount the plugin is tracking. It returns once they
-// are all released or ctx is done.
-//
-// ctx bounds how long *this call* waits, not the work itself: on expiry it
-// returns and the in-flight unmounts carry on in the background, each still
-// bounded by its own timeouts. That trade is only sound because the sole caller
-// is shutdown, where the process exits immediately afterwards and systemd would
-// SIGKILL the stragglers regardless. A caller that intends to keep running must
-// not treat an early return as "unmounted".
+// UnmountAll releases every tracked mount, returning on completion or ctx
+// expiry — which is not "unmounted"; sound only because shutdown is the caller.
 func (p *SftpPlugin) UnmountAll(ctx context.Context) {
-	// Shutdown has to unmount explicitly: OnDisconnect only fires on a dropped
-	// connection. In the no-session fallback the mount directory sits under
-	// $XDG_STATE_HOME, where `uninstall.sh --purge`'s `rm -rf` would descend into
-	// a live mount and delete the phone's files.
-	//
-	// Tracked devices are the list source rather than the device registry: this
-	// is the plugin's own record of what it believes is mounted, including
-	// mounts adopted from the kernel earlier in the session.
-	//
-	// Unmounts run concurrently because each can take up to 13s (3s waiting for
-	// sshfs to exit, then a 10s fusermount bound) and a serial loop over several
-	// devices would overrun the unit's TimeoutStopSec.
+	// Shutdown unmounts explicitly (OnDisconnect skips graceful stops) and
+	// concurrently: rm -rf would otherwise descend into a live mount.
 	p.mu.RLock()
 	ids := make([]string, 0, len(p.mountPoints))
 	for id := range p.mountPoints {

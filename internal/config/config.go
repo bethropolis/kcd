@@ -1,6 +1,5 @@
-// Package config handles loading and validating the kcd daemon configuration.
-// It imports only github.com/BurntSushi/toml and internal/protocol
-// (stdlib-only, so no import cycle is possible).
+// Package config loads and validates daemon configuration. It imports only
+// BurntSushi/toml and stdlib-only protocol, so no import cycle is possible.
 package config
 
 import (

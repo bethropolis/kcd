@@ -55,11 +55,8 @@ var devicesCmd = &cli.Command{
 	},
 }
 
-// filterDevices applies the --paired/--connected flags. --paired keeps
-// every paired device (offline ones included, liveness stays in the
-// CONNECTED column); --connected additionally requires a live connection.
-// Unpaired strangers never pass either filter even while holding a raw
-// TCP connection.
+// filterDevices applies --paired (all paired, offline included) and
+// --connected (paired plus live); strangers never pass either filter.
 func filterDevices(devices []device.DeviceInfo, pairedOnly, connectedOnly bool) []device.DeviceInfo {
 	if !pairedOnly && !connectedOnly {
 		return devices

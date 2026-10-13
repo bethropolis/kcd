@@ -30,17 +30,14 @@ func CanonicalAction(action string) string {
 	return action
 }
 
-// SendAction sends a control request to a remote player, on both
-// kdeconnect.mpris (Android's old MprisPlugin) and kdeconnect.mpris.request
-// (MprisReceiverPlugin). A relative seek becomes a SetPosition, which needs a
-// tracked position and errors without one.
+// SendAction sends a control request on both mpris packet types (old and
+// receiver plugins); relative seeks resolve to SetPosition or error out.
 func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek, setPosition *int64, volume *int) error {
 	if setPosition == nil && seek != nil {
 		state := p.RemoteState(dev.ID())
 		if state == nil {
-			// Phones ignore Seek, so without a tracked position there is
-			// nothing to resolve against. Sending it would report success
-			// while doing nothing.
+			// Phones ignore Seek: without a tracked position there is nothing
+			// to resolve, and sending it would report false success.
 			return fmt.Errorf(
 				"cannot apply a relative seek for %s: no playback position known yet (the phone has not reported one, or it was cleared by a disconnect); retry, or pass an absolute setPosition",
 				player)
@@ -115,9 +112,8 @@ func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
 	return p.requestPlayerStatus(dev, player)
 }
 
-// markArtPending empties unloadable kdeconnect:/ art URIs and flags them,
-// so serving paths (status, snapshot, summaries) agree with published
-// events: art is either a loadable URL or "" with ArtPending set.
+// markArtPending empties unloadable kdeconnect:/ art URIs and flags them, so
+// serving paths agree with events: a URL or "" with ArtPending set.
 func markArtPending(np *NowPlaying) {
 	if np.AlbumArtUrl != "" && strings.HasPrefix(np.AlbumArtUrl, "kdeconnect:") {
 		np.AlbumArtUrl = ""
@@ -232,12 +228,8 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 	p.requestPlayerList(dev)
 }
 
-// syncRemotePoller starts the remote-state poller when at least one
-// subscriber listens for mpris.update and stops it when the audience
-// drains. Invoked from the bus subscriber-change hook (which runs without
-// the bus lock) and once at construction. The hook only manages the
-// ticker lifecycle; pollRemoteStates keeps its own guard so a racing
-// unsubscribe between ticks still sends nothing.
+// syncRemotePoller runs the remote-state poller only while mpris.update has
+// an audience; pollRemoteStates keeps its own guard against racing unsubscribes.
 func (p *MPRISPlugin) syncRemotePoller() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -255,15 +247,8 @@ func (p *MPRISPlugin) syncRemotePoller() {
 	}
 }
 
-// runRemoteStatePoller periodically re-requests now-playing from every
-// connected device that has a known active player, but only while somebody
-// listens: the ticker itself exists only with mpris.update subscribers
-// (see syncRemotePoller), and pollRemoteStates stays silent with zero
-// subscribers even if a tick races an unsubscribe.
-// The responses flow back through Handle, where shouldPublishRemoteState
-// dedupes them, so an mpris.update is only republished when the state
-// actually changes — not on every poll. This closes the "watch client
-// misses mid-track state" gap from the initial dump's 10s freshness gate.
+// runRemoteStatePoller re-requests now-playing while watched; responses
+// republish only on real change, catching clients that mount mid-track.
 func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
 	ticker := time.NewTicker(remoteStatePollInterval)
 	defer ticker.Stop()
@@ -277,15 +262,8 @@ func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
 	}
 }
 
-// pollRemoteStates requests a now-playing refresh from devices that have a
-// cached, actively-playing player. Devices without a cached state (never
-// reported a player) or whose player is stopped/paused are skipped — stopped
-// players are intentionally left to go stale instead of keeping a ghost track
-// perpetually fresh.
-//
-// The poller is demand-driven: with no subscriber for mpris.update (no
-// `kcd watch` listening for media), answers would be consumed by nobody, so
-// no requests go out. Subscribing re-arms the refresh within one interval.
+// pollRemoteStates refreshes cached, actively-playing players; stopped ones
+// go stale by design, and nothing is requested with no subscribers listening.
 func (p *MPRISPlugin) pollRemoteStates() {
 	if !p.bus.HasSubscribers(events.TypeMprisUpdate) {
 		return

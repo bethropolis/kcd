@@ -37,9 +37,8 @@ func runBattery(c *cli.Context, cl *client.Client) error {
 		return err
 	}
 	if c.Bool("json") {
-		// The resolved ID, not the raw positional: with no argument the
-		// positional is empty while the query still ran against the
-		// auto-selected device.
+		// The resolved ID, not the raw positional, which is empty when
+		// the device was auto-selected.
 		out, _ := json.Marshal(map[string]interface{}{
 			"deviceId": deviceID,
 			"charge":   charge,

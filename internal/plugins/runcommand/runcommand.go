@@ -23,13 +23,11 @@ type RunCommandPlugin struct {
 	// pendingLists holds one buffered waiter per device awaiting that
 	// device's command-list reply, keyed by device ID.
 	pendingLists map[string]chan []Command
-	// running holds the cancel func of every live execution, keyed by device
-	// ID then execution id, so the phone's stop button can reach it. Entries
-	// are removed when the execution finishes.
+	// running holds every live execution's cancel func (device, then id) so
+	// the phone's stop button reaches it; entries drop on finish.
 	running map[string]map[int32]context.CancelFunc
-	// execSeq hands out execution ids. It is a counter rather than a
-	// timestamp because the phone reads the id with getInt, which would
-	// overflow on a nanosecond value.
+	// execSeq hands out execution ids as a counter: the phone reads the id
+	// with getInt, which would overflow on nanoseconds.
 	execSeq int32
 	bus     *events.Bus
 	logger  log.Logger
@@ -66,16 +64,14 @@ func (p *RunCommandPlugin) Name() string { return "RunCommand" }
 // Timeout returns the timeout.
 func (p *RunCommandPlugin) Timeout() time.Duration { return 5 * time.Second }
 
-// IncomingTypes returns the packet types this plugin handles. The bare
-// kdeconnect.runcommand type carries the phone's reply to a command-list
-// request; without it the reply is dropped as unhandled.
+// IncomingTypes returns the packet types handled here. The bare runcommand
+// type carries the list reply; without it the reply drops as unhandled.
 func (p *RunCommandPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.runcommand.request", "kdeconnect.runcommand"}
 }
 
-// OutgoingTypes returns the packet types this plugin may send. The output type
-// is what tells the phone it can render results in its in-app output card
-// rather than relying on a notification it ignores by default.
+// OutgoingTypes returns the packet types this plugin may send. The output
+// type advertises the streaming path Android notifications can't carry.
 func (p *RunCommandPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.runcommand", PacketTypeOutput, "kdeconnect.notification"}
 }
@@ -143,9 +139,8 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 			return nil
 		}
 
-		// Handlers must not block. Spawning goroutine to run the command,
-		// stream its output to the phone's output card, and fall back to a
-		// notification for users who have not enabled the output card.
+		// Handlers must not block: run in a goroutine, streaming to the output
+		// card with a notification fallback for users without it enabled.
 		execID := p.nextExecID()
 		p.wg.Add(1)
 		go func() {
@@ -182,9 +177,8 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 				text = text[:4000] + "\n...[output truncated]"
 			}
 
-			// Sent back to the phone as a notification.
-			// The Android app uses 'appName' as the title and 'ticker' as the body.
-			// It ignores 'title' and 'text'.
+			// Sent as a notification: Android uses appName/ticker as title/body,
+			// ignoring title and text.
 			notifBody := map[string]interface{}{
 				"id":      fmt.Sprintf("%d", time.Now().UnixNano()),
 				"appName": fmt.Sprintf("Run: %s", body.Key),

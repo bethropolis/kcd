@@ -10,12 +10,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// resolveDeviceID returns the device a command should act on.
-//
-// An explicit argument always wins. Otherwise the sole paired, connected
-// device is selected, so the common single-phone setup needs no ID. With
-// several candidates it is an error naming them rather than a silent
-// coin flip against the wrong phone.
+// resolveDeviceID returns the device to act on: an explicit argument, the
+// sole paired connected device, or an error naming the candidates.
 func resolveDeviceID(c *cli.Context, cl *client.Client) (string, error) {
 	if c.NArg() >= 1 {
 		return c.Args().First(), nil

@@ -43,18 +43,14 @@ type NotificationPluginConfig struct {
 	MaxBodyLength    int    `toml:"max_body_length"`
 	ExpireMS         int    `toml:"expire_ms"`
 	SkipNonClearable bool   `toml:"skip_non_clearable"`
-	// ReplaceNotifications replaces the previous desktop popup when the phone
-	// re-posts a notification with the same id (e.g. media/scrobble updates),
-	// instead of creating a new popup each time. On by default.
+	// ReplaceNotifications replaces the popup on same-id re-posts instead of
+	// stacking a new one each time. On by default.
 	ReplaceNotifications bool `toml:"replace_notifications"`
-	// ShowIcons shows the app icon on desktop popups. Off by default —
-	// kcd notifications render without an icon. When enabled, the phone's
-	// icon is downloaded (subject to FetchIcons) and reused across re-posts.
+	// ShowIcons renders the app icon on popups (off by default); enabled, the
+	// phone's icon downloads once (subject to FetchIcons) and reuses re-posts.
 	ShowIcons bool `toml:"show_icons"`
-	// CancelGraceMS defers closing the desktop popup after the phone cancels
-	// a notification. If the same notification is re-posted within the window
-	// (e.g. media now-playing toggling play/pause), the popup is updated in
-	// place instead of closing and re-opening. 0 closes immediately.
+	// CancelGraceMS holds a cancelled popup briefly so a same-id re-post
+	// updates it in place; 0 closes immediately.
 	CancelGraceMS int `toml:"cancel_grace_ms"`
 }
 

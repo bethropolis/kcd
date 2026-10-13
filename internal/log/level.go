@@ -5,14 +5,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// New builds the daemon logger for a config level name: "debug",
-// "info", "warn", "error" (or "quiet"). Unknown names fall back to
-// info. Debug selects the development encoder; anything else uses
-// production. The returned Logger carries an atomic level so SetLevel
-// can adjust verbosity at runtime without restarting.
-//
-// AddCallerSkip keeps the "caller" field pointing at the real call
-// site instead of this wrapper; With and Named inherit it.
+// New builds the daemon logger for a config level name. Unknown names fall
+// back to info; AddCallerSkip keeps "caller" pointing at the real call site.
 func New(level string) (Logger, error) {
 	atomic := zap.NewAtomicLevel()
 	setAtomicLevel(atomic, level)

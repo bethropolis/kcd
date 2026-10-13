@@ -29,10 +29,8 @@ func NewBroadcaster(identity *protocol.Packet, port int, interval time.Duration,
 	}
 }
 
-// Run periodically sends the identity packet to 255.255.255.255:<port>.
-// If shouldReduce is provided and returns true, the broadcast frequency
-// is reduced to 60 seconds to save CPU and network resources while idle.
-// (mDNS advertisement is no longer tied to this loop — see AdvertiseMDNS.)
+// Run sends identity to broadcast; shouldReduce drops frequency to 60s when
+// idle. mDNS advertisement runs separately (see AdvertiseMDNS).
 func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 	normalInterval := b.interval
 	reducedInterval := b.idleInterval

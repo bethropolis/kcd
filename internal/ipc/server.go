@@ -30,11 +30,8 @@ func NewServer(path string, handler *Handler, logger log.Logger) *Server {
 	}
 }
 
-// activatedListener adopts a Unix listener passed by systemd socket
-// activation (fd 3+), or returns nil when not running socket-activated.
-// Stdlib only: LISTEN_PID must match our pid and LISTEN_FDS must offer at
-// least one socket. The adopted fd is dup'd by net.FileListener, so the
-// *os.File wrapper is not retained.
+// activatedListener adopts a systemd-passed Unix listener (fd 3+), or nil
+// when not socket-activated. The fd is dup'd, so the *os.File is dropped.
 func activatedListener() net.Listener {
 	if os.Getenv("LISTEN_PID") != strconv.Itoa(os.Getpid()) {
 		return nil
@@ -56,9 +53,8 @@ func activatedListener() net.Listener {
 	return l
 }
 
-// Listen starts listening on the Unix socket and processes incoming connections.
-// When running under systemd socket activation with the default socket path,
-// the passed listener is adopted instead of binding cfg.SocketPath.
+// Listen serves the Unix socket, adopting the systemd-passed listener when
+// socket-activated instead of binding cfg.SocketPath.
 func (s *Server) Listen(ctx context.Context) error {
 	if s.path == config.DefaultSocketPath() {
 		if l := activatedListener(); l != nil {
@@ -80,9 +76,8 @@ func (s *Server) Listen(ctx context.Context) error {
 		return err
 	}
 
-	// The socket defaults to the process umask, which is world-writable under a
-	// permissive umask. Pin it to 0600 so only the current user can drive the
-	// daemon -- the CLI has no other authentication layer.
+	// Pin the socket to 0600: the process umask may be world-writable, and
+	// the CLI has no other authentication layer.
 	if err := os.Chmod(s.path, 0600); err != nil {
 		l.Close()
 		return fmt.Errorf("failed to chmod ipc socket: %w", err)

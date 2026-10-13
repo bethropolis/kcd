@@ -24,10 +24,8 @@ func (d *Device) DiscoveryAddr() (net.IP, int) {
 // a connection while pairing hasn't started yet.
 const pairDialIntentTTL = 5 * time.Minute
 
-// RequestPairDial marks the device for a one-shot outbound dial on its next
-// discovery announcement and arms the keep-alive intent until pairing starts,
-// is rejected, succeeds, or the TTL expires. Used when the user explicitly
-// runs `kcd pair <id>` for a device with no active connection.
+// RequestPairDial arms a one-shot dial on next announcement plus keep-alive
+// until pairing starts, ends, or TTL expires. For explicit `kcd pair <id>`.
 func (d *Device) RequestPairDial(intentTTL ...time.Duration) {
 	ttl := pairDialIntentTTL
 	if len(intentTTL) > 0 && intentTTL[0] > 0 {
@@ -48,10 +46,8 @@ func (d *Device) PairDialPending() bool {
 	return d.pairDialRequested.Load()
 }
 
-// PairDialActive reports whether an explicit pair intent is still keeping
-// the connection alive: requested and neither cleared nor expired. Unlike
-// PairDialPending (the one-shot dial trigger, consumed on first sighting),
-// this survives dial/connect cycles until pairing starts or ends.
+// PairDialActive reports whether an explicit pair intent still holds the
+// connection: requested, neither cleared nor expired, surviving dial cycles.
 func (d *Device) PairDialActive() bool {
 	return d.pairIntentUntil.Load() > time.Now().UnixNano()
 }
@@ -87,9 +83,8 @@ func (d *Device) SetLastIP(ip net.IP) {
 	d.lastIP = ip
 }
 
-// ShouldDiscoveryDial reports whether enough time has passed since the last
-// discovery-triggered dial for this device, and marks this dial if so. It
-// bounds redial storms to a stale LastIP (DHCP roam) or spoofed sightings.
+// ShouldDiscoveryDial rate-limits discovery-triggered dials per device,
+// bounding redial storms to stale or spoofed sightings.
 func (d *Device) ShouldDiscoveryDial(minInterval time.Duration) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -131,9 +126,8 @@ func (d *Device) InCooldown() bool {
 	return !d.lastConnect.IsZero() && time.Since(d.lastConnect) < reconnectCooldown
 }
 
-// NoteSighting records a discovery sighting while disconnected, reporting
-// whether it confirms a genuine roam: same new address twice running.
-// Single sightings prove nothing (IPv4/IPv6 alternation, AP flicker).
+// NoteSighting records a disconnected sighting, reporting genuine roam only
+// on the same new address twice; singles prove nothing (alternation, flicker).
 func (d *Device) NoteSighting(sighted net.IP) (roamed bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -144,21 +138,16 @@ func (d *Device) NoteSighting(sighted net.IP) (roamed bool) {
 	return false
 }
 
-// LastSightedIP returns the most recent discovery sighting address, or
-// nil if the peer has never announced itself in this process. Unlike
-// LastIP (the last *authenticated* address), this tracks where the peer
-// provably is right now — the parked reconnect loop prefers it over its
-// spawn-time target so fallback attempts follow roams instead of
-// redialling a stale address after a failed one-shot dial.
+// LastSightedIP returns the latest discovery address (nil if never sighted),
+// unlike LastIP: where the peer provably is now, which reconnect prefers.
 func (d *Device) LastSightedIP() net.IP {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.lastSightedIP
 }
 
-// TryReconnect attempts to mark the device as reconnecting.
-// Returns true if this goroutine should proceed; false if another
-// reconnect goroutine is already running.
+// TryReconnect marks the device reconnecting: true if this goroutine proceeds,
+// false if another reconnect loop already runs.
 func (d *Device) TryReconnect() bool {
 	return d.reconnecting.CompareAndSwap(false, true)
 }
@@ -176,9 +165,8 @@ func (d *Device) ReconnectAttempt() int {
 	return d.reconnectAttempt
 }
 
-// SetReconnectAttempt stores the auto-reconnect backoff counter so the next
-// reconnect cycle (spawned when this connection drops) continues backing off
-// instead of resetting to the initial floor.
+// SetReconnectAttempt stores the backoff counter so the next cycle (spawned
+// on drop) continues backing off instead of resetting to the floor.
 func (d *Device) SetReconnectAttempt(n int) {
 	d.mu.Lock()
 	d.reconnectAttempt = n

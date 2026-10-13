@@ -25,9 +25,8 @@ func (r *Registry) Add(d *Device) {
 	d.SetBus(r.bus)
 	r.devices.Store(d.ID(), d)
 	if r.bus != nil {
-		// The full device view, not just the name: a client receiving this
-		// has nothing else to go on and would otherwise invent a state and a
-		// connected flag, then wait for the next snapshot to be corrected.
+		// The full device view, not just the name: receivers would otherwise
+		// invent state and wait for the next snapshot to be corrected.
 		r.bus.Publish(events.TypeDeviceAdded, d.ID(), d.Info())
 	}
 }
@@ -93,9 +92,8 @@ func (r *Registry) AllPairedDevicesConnected() bool {
 	return hasPaired && allConnected
 }
 
-// Prune removes devices that are stale (unpaired, disconnected, past threshold).
-// It skips Paired and Connected devices. Returns the number of removed devices.
-// Silent — no events are published.
+// Prune removes stale devices (unpaired, disconnected, past threshold),
+// skipping paired and connected ones. Silent; returns the removal count.
 func (r *Registry) Prune(threshold time.Duration) int {
 	if threshold <= 0 {
 		return 0

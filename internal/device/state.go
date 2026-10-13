@@ -82,9 +82,8 @@ type DeviceInfo struct {
 	CertFP    string       `json:"cert_fp"`
 	LastSeen  time.Time    `json:"last_seen"`
 	Connected bool         `json:"connected"`
-	// LastIP/LastPort is the dial target from the most recent successful
-	// connection, so paired auto-dial survives daemon restarts. Both are
-	// validated on load (the file is user-editable); garbage is dropped.
+	// LastIP/LastPort is the dial target from the last good connection, so
+	// auto-dial survives restarts. Validated on load; garbage is dropped.
 	LastIP   string `json:"last_ip,omitempty"`
 	LastPort int    `json:"last_port,omitempty"`
 }
@@ -109,10 +108,8 @@ func (d *Device) Info() DeviceInfo {
 	return info
 }
 
-// DialTarget returns the persisted dial target for auto-dial after a
-// restart. A garbage IP yields nil (no target); an out-of-range port
-// yields 0 and callers fall back to the default port. The state file is
-// user-editable, so nothing here is trusted blindly.
+// DialTarget returns the persisted auto-dial target; garbage yields nil/0
+// with default-port fallback. The state file is user-editable: trust nothing.
 func (info DeviceInfo) DialTarget() (net.IP, int) {
 	ip := net.ParseIP(info.LastIP)
 	if ip == nil {

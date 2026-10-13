@@ -56,9 +56,8 @@ type NowPlaying struct {
 	Url         string `json:"url,omitempty"`
 	Length      int64  `json:"length"`
 	Pos         int64  `json:"pos,omitempty"`
-	// PosAnchorMs is the wall-clock time (Unix millis) at which Pos was
-	// sampled. Clients compute the live position drift-free as
-	// Pos + (nowMs - PosAnchorMs) * (isPlaying ? 1 : 0).
+	// PosAnchorMs is the Unix-millis wall time of the Pos sample; live position
+	// is Pos + (nowMs - PosAnchorMs) while playing, frozen otherwise.
 	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
 	IsPlaying      bool   `json:"isPlaying"`
 	Volume         int    `json:"volume,omitempty"`
@@ -73,9 +72,8 @@ type NowPlaying struct {
 	LoopStatus     string `json:"loopStatus,omitempty"`
 }
 
-// DeepCopy returns a fully independent copy of NowPlaying.
-// Pointer fields (Shuffle) are deep-copied to prevent shared-memory races
-// between the cached state and callers.
+// DeepCopy returns a fully independent copy of NowPlaying; pointer fields
+// are deep-copied to prevent shared-memory races with the cache.
 func (p *NowPlaying) DeepCopy() *NowPlaying {
 	if p == nil {
 		return nil
@@ -119,8 +117,6 @@ type DebugStatus struct {
 	PlayerMappings map[string]string `json:"playerMappings"`
 }
 
-// remoteStatePollInterval is how often the daemon re-requests now-playing
-// from devices with an active remote player. Clients are then pure-push:
-// fresh state arrives within one interval of connect, and position stays
-// current without any client-side polling.
+// remoteStatePollInterval paces now-playing re-requests so clients stay
+// pure-push: fresh state within one interval, no client-side polling.
 const remoteStatePollInterval = 5 * time.Second

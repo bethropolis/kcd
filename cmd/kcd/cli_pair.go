@@ -179,9 +179,8 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 	},
 }
 
-// checkAdvertiseOnly rejects flag combinations that contradict the mode's one
-// guarantee: that it never accepts. Refusing is safer than silently ignoring
-// the other flag, since the caller is a program trusting these semantics.
+// checkAdvertiseOnly rejects flag combinations that contradict the mode's
+// one guarantee: it never accepts, so --yes and device IDs are refused.
 func checkAdvertiseOnly(c *cli.Context) error {
 	if c.NArg() >= 1 {
 		return fmt.Errorf("pair: --advertise-only takes no device ID")
@@ -192,10 +191,8 @@ func checkAdvertiseOnly(c *cli.Context) error {
 	return nil
 }
 
-// advertiseOnly makes the daemon discoverable for pairing and then blocks,
-// without ever accepting anything. A GUI or panel cannot drive the interactive
-// prompt, so without this the only non-interactive option is --yes, which
-// trusts the first device that asks on the local network.
+// advertiseOnly makes the daemon discoverable, then blocks without ever
+// accepting anything. It exists for clients that cannot drive a prompt.
 func advertiseOnly(c *cli.Context, cl *client.Client) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -216,9 +213,8 @@ func advertiseUntil(c *cli.Context, cl *client.Client, stop <-chan struct{}) err
 	if err := cl.BroadcastStart(); err != nil {
 		return fmt.Errorf("failed to start broadcast: %w", err)
 	}
-	// Symmetric with the listen path, so an interrupted run does not leave the
-	// daemon advertising. BroadcastStop also drops the discovery connections
-	// that never led to pairing, so strangers do not linger.
+	// BroadcastStop also drops the discovery connections that never led
+	// to pairing, so an interrupted run leaves no strangers behind.
 	defer func() { _ = cl.BroadcastStop() }()
 
 	// A supervising client needs to know when the daemon is actually
@@ -282,9 +278,8 @@ func loadKnownDeviceIDs() map[string]bool {
 	return known
 }
 
-// checkPairCandidate enforces the --expected-fingerprint and --known-only
-// constraints on a pairing candidate. Fail-closed: a candidate without a
-// reported fingerprint never satisfies an expected fingerprint.
+// checkPairCandidate enforces --expected-fingerprint/--known-only, failing
+// closed: a candidate without a reported fingerprint never satisfies one.
 func checkPairCandidate(expectedFP string, knownOnly bool, result *ipc.PairListenResult, known map[string]bool) error {
 	if expectedFP != "" {
 		if got := normalizeFingerprint(result.Fingerprint); got == "" || got != normalizeFingerprint(expectedFP) {

@@ -112,15 +112,8 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	return nil
 }
 
-// shouldNotify decides whether a message deserves a desktop notification.
-//
-// Two independent gates, each closing a different hole. The arm time drops
-// the conversation-head burst the phone sends in reply to the arming
-// request, which is history rather than news. The armed check stops
-// notifications once every client has gone away, which matters because the
-// phone cannot be un-armed: it keeps pushing for the rest of its lifetime,
-// and without this a single transient `kcd watch` would silently turn into
-// a permanent notifier.
+// shouldNotify drops the arming-request's history burst and stays quiet
+// without subscribers: the phone cannot be un-armed and pushes for life.
 func (p *SMSPlugin) shouldNotify(msg SMSMessage, isArmed bool, armAtMs int64) bool {
 	if !p.cfg.NotifyIncoming || !isArmed {
 		return false

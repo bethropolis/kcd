@@ -13,9 +13,8 @@ var powerSupplyRoots = []string{
 	"/sys/devices/platform/subsystem/power_supply",
 }
 
-// readLocalBattery reads the local battery state from sysfs.
-// Returns charge (0-100), charging status, and any error.
-// If no battery is found, returns an error — callers should log and skip.
+// readLocalBattery reads local sysfs state (charge 0-100, charging, error);
+// no battery is an error — callers log and skip.
 func readLocalBattery() (int, bool, error) {
 	for _, root := range powerSupplyRoots {
 		entries, err := os.ReadDir(root)

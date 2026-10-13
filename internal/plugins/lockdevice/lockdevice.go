@@ -28,9 +28,8 @@ func NewLockDevicePlugin(logger log.Logger) *LockDevicePlugin {
 
 type LockBody struct {
 	RequestLocked bool `json:"requestLocked,omitempty"`
-	// SetLocked is always present on the wire: an absent field reads as
-	// false, which would make an unlock request indistinguishable from a
-	// malformed one to a strict peer.
+	// Always present on the wire: absent reads as false, which a strict
+	// peer cannot distinguish from a malformed unlock request.
 	SetLocked bool `json:"setLocked"`
 	IsLocked  bool `json:"isLocked,omitempty"`
 }
@@ -66,11 +65,8 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return nil
 	}
 
-	// Phone is requesting a lock/unlock action. Only an explicit lock
-	// request may act on the local session: a peer's bare state report
-	// (kdeconnect.lock with isLocked) must never lock or unlock anything.
-	// Fire and forget so Handle returns immediately; failures are logged
-	// by the seam.
+	// Only an explicit lock request acts locally; a peer's bare state
+	// report must never lock or unlock anything. Failures are logged.
 	if pkt.Type != "kdeconnect.lock.request" {
 		return nil
 	}
@@ -99,9 +95,8 @@ func (p *LockDevicePlugin) getLocked() bool {
 	return strings.TrimSpace(string(out)) == "LockedHint=yes"
 }
 
-// Lock asks the remote device to lock its own screen. The target comes from
-// the IPC caller via dev; the local session is never touched here. Local
-// locking only happens in Handle, when the phone asks for it.
+// Lock asks the remote device to lock its own screen; the local session
+// is never touched here (that happens only in Handle, on phone request).
 func (p *LockDevicePlugin) Lock(dev device.Sender) error {
 	pkt, err := protocol.NewPacket("kdeconnect.lock.request", LockBody{SetLocked: true})
 	if err != nil {

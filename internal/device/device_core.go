@@ -27,41 +27,29 @@ type Device struct {
 
 	lastSeen time.Time
 	lastIP   net.IP // cached from last successful connection; survives Disconnect
-	// lastPort pairs with lastIP as the dial target. It is the port the peer
-	// advertised over the authenticated post-TLS identity exchange, so an
-	// unauthenticated discovery packet can never redirect a paired auto-dial.
-	// Zero means unknown, and callers fall back to the configured port.
+	// lastPort pairs with lastIP as the dial target, from the authenticated
+	// exchange: unauthenticated packets can never redirect a paired auto-dial.
 	lastPort int
 
-	// discoveryIP/discoveryPort is where the device last announced itself
-	// (UDP/mDNS), even with no TCP connection ever opened to it. Used to dial
-	// on explicit user request (`kcd pair <id>`) without auto-dialing strangers.
+	// discoveryIP/discoveryPort is the last announcement source, kept without
+	// any connection so explicit pair requests can dial without auto-dial.
 	discoveryIP   net.IP
 	discoveryPort int
 
-	// pairDialRequested is the one-shot dial trigger for `kcd pair <id>`,
-	// consumed by the first discovery announcement so the request can be
-	// delivered. Contrast pairIntentUntil, which is not consumed.
+	// pairDialRequested is the one-shot dial trigger for explicit pair, consumed
+	// by the first announcement (unlike pairIntentUntil, which persists).
 	pairDialRequested atomic.Bool
 
-	// pairIntentUntil is the Unix-nano deadline until which an explicit pair
-	// intent keeps a connection alive. Unlike pairDialRequested it survives
-	// dial/connect cycles, until pairing starts, resolves, or pairDialIntentTTL
-	// expires — so a slow phone-side accept cannot downgrade into an
-	// ephemeral-close flap.
+	// pairIntentUntil keeps an explicit pair intent alive across dial/connect
+	// cycles, so a slow phone-side accept never downgrades into close flap.
 	pairIntentUntil atomic.Int64
 
-	// lastDiscoveryDial is when onDeviceFound last spawned a dial for this
-	// device. It throttles sighting-triggered redials so announcements
-	// (or a spoofed broadcast storm) can't cause a dial per packet.
+	// lastDiscoveryDial marks the last sighting-triggered dial, throttling
+	// redials so announcement storms can't dial per packet.
 	lastDiscoveryDial time.Time
 
-	// ephemeralDialed records that this device already got its one ephemeral
-	// discovery dial for the current unpaired era. Such a dial lets a stranger
-	// finish the TCP identity exchange -- so both sides list each other --
-	// without staying connected; the next sighting closes the socket again.
-	// Cleared when the device is explicitly unpaired or rejected. Paired
-	// devices and pairing mode bypass it.
+	// ephemeralDialed records the one discovery dial per unpaired era: enough
+	// for both sides to list each other, closed again on next sighting.
 	ephemeralDialed bool
 
 	conn      *transport.Conn
@@ -78,10 +66,8 @@ type Device struct {
 	BatteryCharge int
 	IsCharging    bool
 
-	// batterySeen marks that a kdeconnect.battery packet has arrived. Until
-	// then the zero values above are not measurements and must not be
-	// published, or a fresh pair reports a stable bogus 0% that no later
-	// packet corrects at steady charge.
+	// batterySeen marks arrival of a real reading: until then the zeroes are
+	// not measurements and must not publish as a bogus stable 0%.
 	batterySeen bool
 	// lastBatteryAt is when the last battery packet arrived, so clients
 	// can apply their own staleness rules (mirrors mediaAgeMs).
@@ -93,21 +79,16 @@ type Device struct {
 	// auto-reconnect goroutines for this device.
 	reconnecting atomic.Bool
 
-	// reconnectWake nudges a parked auto-reconnect loop: discovery
-	// sightings (peer provably alive) and unpair transitions. Buffered-1
-	// so pokes never block the discovery listener; coalesced bursts mean
-	// "check now", not N dials.
+	// reconnectWake nudges a parked reconnect loop, buffered-1 so pokes never
+	// block discovery; coalesced bursts mean "check now", not N dials.
 	reconnectWake chan struct{}
 
-	// reconnectAttempt persists the auto-reconnect backoff counter across
-	// disconnect cycles. A connection that flaps (drops shortly after a
-	// successful dial) keeps the counter so the backoff escalates instead of
-	// resetting to the 2s floor; a stable connection resets it on drop.
+	// reconnectAttempt persists the backoff counter across disconnects: flaps
+	// escalate it, stable connections reset it on drop.
 	reconnectAttempt int
 
-	// connectStarted is when the most recent connection was established,
-	// used to detect flaps (connections that die too quickly to count as
-	// genuinely stable).
+	// connectStarted marks the latest connection, detecting flaps (deaths too
+	// quick to count as stable).
 	connectStarted time.Time
 
 	// pluginDispatch routes incoming packets to registered plugins
@@ -129,9 +110,8 @@ func NewDevice(id, name, dtype string, logger log.Logger) *Device {
 		state:    StateUnpaired,
 		sendChan: make(chan *protocol.Packet, 32),
 		done:     make(chan struct{}),
-		// A send on a nil channel blocks forever, so the select always takes
-		// the default branch — which is what makes this nil-safe and what
-		// lets tests use a zero-value Device.
+		// A send on a nil channel blocks forever, so the select takes default:
+		// nil-safe, and zero-value Devices work in tests.
 		reconnectWake: make(chan struct{}, 1),
 		logger:        logger.With(log.String("device_id", id)),
 	}
@@ -165,17 +145,15 @@ func (d *Device) SetState(s PairingState) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.state = s
-	// Wake a parked reconnect loop so unpair takes effect immediately
-	// instead of at the next timer fire (or never, past the stale
-	// horizon). The loop re-checks state on wake and exits.
+	// Wake a parked reconnect loop so unpair takes effect now, not at the
+	// next timer (or never, past the stale horizon); it re-checks and exits.
 	if s == StateUnpaired {
 		d.PokeReconnect()
 	}
 }
 
-// PokeReconnect nudges the auto-reconnect loop to re-check now (sighting
-// arrived, or state changed). Non-blocking and nil-safe: bursts coalesce
-// into a single wakeup.
+// PokeReconnect wakes the reconnect loop to re-check now; non-blocking and
+// nil-safe, with bursts coalescing into a single wakeup.
 func (d *Device) PokeReconnect() {
 	select {
 	case d.reconnectWake <- struct{}{}:

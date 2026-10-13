@@ -33,24 +33,18 @@ type MPRISPlugin struct {
 	watching        bool
 	telephonyCancel context.CancelFunc
 
-	// mprisCfg gates the position poller: with PollWhilePlaying the
-	// ticker exists only while at least one local player IsPlaying.
-	// pollCancel stops it; nil means no poller is running. pollGen
-	// identifies the current poller so a self-stopping one does not
-	// clear its successor's handle. The poller is armed purely by
-	// observed D-Bus signals, so a paused desktop holds no timers.
+	// mprisCfg gates the position poller, which exists only while a local
+	// player IsPlaying; pollGen keeps a self-stopping poller from clearing
+	// its successor's handle.
 	mprisCfg   config.MPRISConfig
 	pollCancel context.CancelFunc
 	pollGen    uint64
 
-	// remotePollCancel stops the remote-state poller; nil means it is
-	// not running. The poller is demand-driven (see syncRemotePoller):
-	// no mpris.update subscribers, no ticker — zero idle timers.
+	// remotePollCancel stops the remote-state poller; nil means not running.
 	remotePollCancel context.CancelFunc
 
-	// reconcileCh nudges the D-Bus watcher loop to re-list player names
-	// and heal drift. Buffered size 1 so bursts of triggers coalesce;
-	// sends are non-blocking. Event-driven only — no timers.
+	// reconcileCh nudges re-listing to heal drift, buffered-1 and non-blocking
+	// so bursts coalesce. Event-driven only, no timers.
 	reconcileCh chan struct{}
 
 	players          map[string]*trackedPlayer
@@ -112,9 +106,8 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mpr
 	p.watchCancel = cancel
 	p.watching = true
 	p.startWatcher(watchCtx)
-	// The remote-state poller follows the audience: the bus hook starts
-	// it on the first mpris.update subscriber and stops it on the last
-	// unsubscribe, so the 5s ticker never runs unobserved.
+	// The remote poller follows the audience: started on first subscriber,
+	// stopped on last unsubscribe, so the ticker never runs unobserved.
 	p.bus.OnSubscriberChange(p.syncRemotePoller)
 	p.syncRemotePoller()
 
