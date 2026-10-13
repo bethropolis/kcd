@@ -66,8 +66,14 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return nil
 	}
 
-	// Phone is requesting a lock/unlock action. Fire and forget so Handle
-	// returns immediately; failures are logged by the seam.
+	// Phone is requesting a lock/unlock action. Only an explicit lock
+	// request may act on the local session: a peer's bare state report
+	// (kdeconnect.lock with isLocked) must never lock or unlock anything.
+	// Fire and forget so Handle returns immediately; failures are logged
+	// by the seam.
+	if pkt.Type != "kdeconnect.lock.request" {
+		return nil
+	}
 	if body.SetLocked {
 		plugin.RunCommandAsync(p.logger, "loginctl", "lock-session")
 	} else {

@@ -739,6 +739,9 @@ kcd unlock [device-id]
 
 These send the KDE Connect lock packet to the **remote** device — they do not lock this PC. The reverse direction is separate: when a paired device sends a lock request, the daemon runs `loginctl lock-session` / `loginctl unlock-session` on this desktop.
 
+> Peer support varies: Plasma desktops and other `kcd` instances honour
+> the request, but the Android app ships no lock plugin and ignores it.
+
 ---
 
 ## sftp
