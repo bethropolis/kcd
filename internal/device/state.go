@@ -138,7 +138,8 @@ func LoadDevices(path string) ([]DeviceInfo, error) {
 	return devices, nil
 }
 
-// SaveDevices writes the list of known devices to the given JSON file path.
+// SaveDevices writes known devices to path, renaming a temp file into place
+// so a crash leaves the old list or the new one, never a truncation.
 func SaveDevices(path string, devices []DeviceInfo) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -150,14 +151,26 @@ func SaveDevices(path string, devices []DeviceInfo) error {
 		return fmt.Errorf("device: marshal devices: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("device: open %s: %w", path, err)
+		return fmt.Errorf("device: temp %s: %w", path, err)
 	}
-	defer f.Close()
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
 
-	if _, err := f.Write(data); err != nil {
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("device: write %s: %w", path, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("device: sync %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("device: close %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("device: rename %s: %w", path, err)
 	}
 	return nil
 }

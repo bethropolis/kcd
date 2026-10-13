@@ -46,6 +46,12 @@ func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *d
 }
 
 // Run starts the core daemon lifecycle.
+// buildIdentity assembles the daemon's advertised identity from config,
+// including the configured device type rather than a hardcoded one.
+func buildIdentity(cfg *config.Config, incoming, outgoing []string) (*protocol.Packet, error) {
+	return protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, cfg.DeviceType, cfg.TCPPort, incoming, outgoing)
+}
+
 func Run(ctx context.Context, cfg *config.Config) error {
 	startedAt := time.Now()
 
@@ -139,7 +145,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()
-	identity, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", cfg.TCPPort, incomingCaps, outgoingCaps)
+	identity, err := buildIdentity(cfg, incomingCaps, outgoingCaps)
 	if err != nil {
 		return err
 	}

@@ -33,21 +33,35 @@ func (c *Config) EnsureDeviceID(configPath string) error {
 }
 
 // Save writes the config to a TOML file, creating parent directories as needed.
+// The write goes to a temp file renamed into place, so a crash mid-write
+// leaves either the old config or the new one, never a truncation.
 func (c *Config) Save(path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("config: create dir %s: %w", dir, err)
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("config: open %s: %w", path, err)
+		return fmt.Errorf("config: temp %s: %w", path, err)
 	}
-	defer f.Close()
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
 
-	enc := toml.NewEncoder(f)
+	enc := toml.NewEncoder(tmp)
 	if err := enc.Encode(c); err != nil {
+		tmp.Close()
 		return fmt.Errorf("config: encode: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: sync %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config: close %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("config: rename %s: %w", path, err)
 	}
 	return nil
 }
