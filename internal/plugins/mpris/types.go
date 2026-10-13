@@ -60,7 +60,7 @@ type NowPlaying struct {
 	// is Pos + (nowMs - PosAnchorMs) while playing, frozen otherwise.
 	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
 	IsPlaying      bool   `json:"isPlaying"`
-	Volume         int    `json:"volume,omitempty"`
+	Volume         int    `json:"volume"`
 	CanControl     bool   `json:"canControl"`
 	CanGoNext      bool   `json:"canGoNext"`
 	CanGoPrevious  bool   `json:"canGoPrevious"`
