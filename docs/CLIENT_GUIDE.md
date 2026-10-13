@@ -828,6 +828,7 @@ refer to the upstream protocol spec at
 <https://github.com/KDE/kdeconnect-meta/blob/work/protocol-schemas/protocol.md>.
 
 ### Getting Help
+- **Ask questions or Issues**: feel free to ask questions in kcd discussion page  or file an issue that you may find, also if something can better be done upstream than in client do a feature request through issues
 - **Protocol questions:** The IPC protocol reference in
   [`IPC_PROTOCOL.md`](IPC_PROTOCOL.md) is the source of truth.
 - **API stability:** The IPC protocol is considered stable within a major
