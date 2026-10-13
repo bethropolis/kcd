@@ -179,7 +179,8 @@ kcd devices [--json]
 |---|---|
 | `--json` | Output as a JSON array |
 | `--watch`, `-w` | Stream device changes live (clears screen on each change) |
-| `--connected` | Only show paired devices, including offline ones (unpaired strangers are hidden; check the `CONNECTED` column for liveness) |
+| `--connected` | Only show paired devices that are currently connected |
+| `--paired` | Only show paired devices, including offline ones (unpaired strangers are hidden; check the `CONNECTED` column for liveness) |
 
 **Example output**
 

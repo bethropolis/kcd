@@ -12,7 +12,7 @@
     "exec": "~/.config/waybar/scripts/kcd-waybar.sh",
     "return-type": "json",
     "format": "{}",
-    "on-click": "kcd ping $(kcd devices --connected --json | jq -r '.[0].id')",
-    "on-click-right": "foot -e kcd devices --connected",
+    "on-click": "id=$(kcd devices --connected --json | jq -r '.[0].id // empty'); [ -n \"$id\" ] && kcd ping \"$id\"",
+    "on-click-right": "foot -e kcd devices --paired",
     "restart-interval": 0
   },
