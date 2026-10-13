@@ -59,9 +59,8 @@ func cleanDisplayValue(s string) string {
 	return s
 }
 
-// parseVCard extracts display fields from vCard 3.0 text with a stdlib
-// line scan: unfold continuations, split Name:Value, drop parameters
-// (TEL;TYPE=CELL:...). Returns the first FN and all TEL/EMAIL values.
+// parseVCard extracts display fields from vCard 3.0 text: unfold lines, drop
+// parameters, return the first FN and all TEL/EMAIL values.
 func parseVCard(vcard string) (name string, phones, emails []string) {
 	// Normalize newlines, fuse QP soft breaks with folding, unfold continuations.
 	raw := strings.ReplaceAll(vcard, "\r\n", "\n")

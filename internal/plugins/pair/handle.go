@@ -44,9 +44,7 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		p.logger.Debug("ignoring duplicate pair request", log.String("device_id", dev.ID()))
 
 	case device.StatePaired:
-		// Already paired - this is normal behavior in KDE Connect.
-		// The peer sends pair:true as confirmation/keep-alive.
-		// Just acknowledge by sending pair:true back.
+		// Already paired — the peer's pair:true is confirmation; ack it back.
 		p.logger.Debug("received pair confirmation from already paired device", log.String("device_id", dev.ID()))
 		pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
 		dev.Send(pkt)

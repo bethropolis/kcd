@@ -72,10 +72,8 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 	return nil
 }
 
-// receiveAttachment connects to the phone's side-channel port and downloads
-// the attachment file over TLS. The stream is capped at the declared
-// payload size (itself bounded by maxSMSAttachmentBytes) so a malicious
-// peer can't fill the disk with an unbounded stream.
+// receiveAttachment downloads the file over TLS, capped at the declared
+// payload size (itself bounded) so a malicious peer can't fill the disk.
 func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, size int64, destPath string, expectedFP string) error {
 	if size <= 0 || size > maxSMSAttachmentBytes {
 		return fmt.Errorf("sms: refusing attachment with invalid size %d (limit %d)", size, maxSMSAttachmentBytes)
@@ -104,9 +102,8 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 // maxFilenameLength caps attachment filenames to keep them manageable.
 const maxFilenameLength = 128
 
-// cleanFilename strips path components to prevent directory traversal in
-// attachment file paths. Backslashes are normalized first (Windows-style
-// paths), control characters dropped, and overlong names truncated.
+// cleanFilename hardens attachment paths: normalize backslashes, drop
+// controls, strip components (traversal), truncate overlong names.
 func cleanFilename(name string) string {
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = filepath.Base(name)

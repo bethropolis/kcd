@@ -24,9 +24,8 @@ type MediaState struct {
 	MediaAgeMs int64 `json:"mediaAgeMs"`
 }
 
-// DeviceSummary enriches DeviceInfo with cached sub-states for clients.
-// It is IPC-only: DeviceInfo stays the on-disk shape, so persisted state
-// never grows these fields. All sub-states are omitempty.
+// DeviceSummary enriches DeviceInfo with cached sub-states for clients only;
+// DeviceInfo stays the on-disk shape so persisted state never grows them.
 type DeviceSummary struct {
 	device.DeviceInfo
 	Battery *BatteryStatus                 `json:"battery,omitempty"`
@@ -45,10 +44,8 @@ type SftpMountState struct {
 // SummarizeDevice builds the enriched view of one device. Absent plugins
 // or missing caches simply omit their section.
 func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary {
-	// A connected device is seen right now by definition: last_seen is only
-	// stamped at connect time and on discovery sightings (which skip
-	// connected devices), so without this it goes stale for the whole
-	// session and clients show "Xm ago" for a live phone.
+	// Connected implies seen now: last_seen stamps only at connect and on
+	// sightings (which skip connected devices), or live phones read "Xm ago".
 	lastSeen := dev.LastSeen()
 	if dev.IsConnected() {
 		lastSeen = time.Now()
@@ -93,9 +90,8 @@ func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary
 			sum.Signal = &r
 		}
 	}
-	// Only report a mount that exists. A device with no SFTP credentials
-	// cached and nothing mounted stays omitted rather than advertising a
-	// permanent "not mounted" the client has to special-case.
+	// Report mounts only when they exist: advertising a permanent "not
+	// mounted" would force clients to special-case it.
 	if pl, ok := plugins.GetByName("SFTP"); ok {
 		if mp := pl.(*sftp.SftpPlugin).MountedPath(dev.ID()); mp != "" {
 			sum.Sftp = &SftpMountState{Mounted: true, MountPoint: mp}
@@ -104,9 +100,8 @@ func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary
 	return sum
 }
 
-// SnapshotPayload is the state.snapshot event payload: every known device
-// (online and offline) with its cached sub-states, so clients boot with
-// full state from a single watch connection.
+// SnapshotPayload is the state.snapshot payload: every known device with
+// cached sub-states, so clients boot complete from one watch connection.
 type SnapshotPayload struct {
 	Devices []DeviceSummary `json:"devices"`
 }

@@ -69,16 +69,8 @@ func (p *MPRISPlugin) sendPlayerListBroadcast() {
 }
 
 func (p *MPRISPlugin) broadcast(state *NowPlaying) {
-	// Stamp the position anchor at send time: Pos was sampled by the
-	// caller (signal-time query or poller GetAll) immediately before
-	// this broadcast, so receivers can extrapolate the live position as
-	// Pos + (nowMs - PosAnchorMs) while IsPlaying.
-	//
-	// The stamp takes p.mu, and the packet is marshalled from a snapshot
-	// taken under the same hold: state aliases the pointer cached in
-	// lastStates, and DebugStatus reads its anchor under RLock from the
-	// IPC path. Stamping without the mutex races those reads, and
-	// marshalling the live pointer races a concurrent broadcast's stamp.
+	// Stamp under p.mu from a snapshot: state aliases the cached pointer,
+	// so stamping or marshalling it live races concurrent broadcasts.
 	p.mu.Lock()
 	state.PosAnchorMs = time.Now().UnixMilli()
 	snapshot := *state
@@ -179,9 +171,8 @@ func (p *MPRISPlugin) DebugStatus() *DebugStatus {
 			info.CanGoPrevious = state.CanGoPrevious
 			info.CanPlay = state.CanPlay
 			info.CanPause = state.CanPause
-			// Anchor from the last broadcast, not this query: DebugStatus
-			// re-reads D-Bus live, but clients extrapolate from the
-			// cached anchor stamped at send time.
+			// Anchor from the last broadcast, not this query: clients
+			// extrapolate from the stamped anchor, not live reads.
 			p.mu.RLock()
 			if cached := p.lastStates[pl.displayName]; cached != nil {
 				info.PosAnchorMs = cached.PosAnchorMs

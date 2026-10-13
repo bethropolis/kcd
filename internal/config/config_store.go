@@ -67,18 +67,9 @@ func StatePath() string {
 	return filepath.Join(StateDir(), "devices.json")
 }
 
-// DefaultMountDir returns the directory SFTP mounts are created under.
-//
-// XDG_RUNTIME_DIR, because location is a safety property here, not a
-// convenience one. A mount makes the phone's storage reachable through the
-// filesystem, so where it lives decides what can destroy it: `rm` crosses
-// filesystem boundaries by default, backup tools archive $HOME, and file
-// managers offer an empty-folder gesture. $XDG_RUNTIME_DIR is what GNOME's own
-// remote file access uses, it is a tmpfs, and nothing routinely deletes it.
-//
-// The state directory is only a fallback for when there is no user session
-// (a system unit, or a container without XDG_RUNTIME_DIR set). MountWarning
-// covers the difference for anyone who ends up there.
+// DefaultMountDir puts mounts where nothing routinely deletes them: mounts
+// expose the phone's storage to rm, backups, and cleaners, so the tmpfs
+// runtime dir wins and the state dir is only a session-less fallback.
 func DefaultMountDir() string {
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
 		return filepath.Join(runtimeDir, "kcd", "mnt")

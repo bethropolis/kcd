@@ -15,10 +15,8 @@ type PairBody struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 }
 
-// NewPairPacket creates a pairing packet. Only the initial pair request
-// carries a timestamp; accept, reject and unpair packets omit it. The
-// verification code on both sides derives from the request's timestamp, so
-// sending a fresh one on accept would desynchronize the displayed codes.
+// NewPairPacket creates a pairing packet. Only the initial request carries
+// a timestamp: both codes derive from it, so a fresh one would desync them.
 func NewPairPacket(pair bool, timestamp int64) (*Packet, error) {
 	return NewPacket(TypePair, PairBody{
 		Pair:      pair,

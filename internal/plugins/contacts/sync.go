@@ -10,9 +10,8 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 )
 
-// coerceTimestamp parses Android's string-encoded timestamps as well as
-// plain JSON numbers (the header doc shows ints). Garbage yields 0, which
-// forces a re-fetch — the safe direction, never a false "unchanged".
+// coerceTimestamp parses Android's string timestamps as well as numbers;
+// garbage yields 0, forcing re-fetch (safe) over false "unchanged".
 func coerceTimestamp(raw json.RawMessage) int64 {
 	var asAny any
 	if err := json.Unmarshal(raw, &asAny); err != nil {
@@ -35,9 +34,8 @@ func coerceTimestamp(raw json.RawMessage) int64 {
 	}
 }
 
-// handleUIDsResponse diffs the phone's UID/timestamp list against the local
-// cache, deletes stale entries, and requests vCards for new/changed ones.
-// dev is the live sender (device.Send is channel-safe across goroutines).
+// handleUIDsResponse diffs the phone's list against cache: delete stale,
+// request new/changed vCards. dev.Send is channel-safe across goroutines.
 func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 	deviceID := dev.ID()
 
@@ -98,9 +96,8 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 			idx[uid] = entry
 		}
 
-		// Delete locally-known contacts the phone no longer reports — but
-		// never on an empty list: a buggy/empty response must not wipe
-		// the cache.
+		// Delete contacts the phone dropped — but never on an empty list, or
+		// one buggy response wipes the cache.
 		var deleted int
 		if len(uids) > 0 {
 			for uid := range idx {

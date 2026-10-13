@@ -29,10 +29,8 @@ func SanitizeFilename(name string) string {
 	return name
 }
 
-// isOpenableURL reports whether a phone-shared URL may be handed to
-// xdg-open. Only http(s) with a host qualifies: other schemes (file://,
-// smb:, mailto:, custom app handlers) would dispatch phone-influenced input
-// to unrelated local programs.
+// isOpenableURL reports whether a phone-shared URL may reach xdg-open: only
+// http(s) with a host, since schemes dispatch to unrelated local programs.
 func isOpenableURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -44,9 +42,8 @@ func isOpenableURL(raw string) bool {
 	return u.Host != ""
 }
 
-// blockedAutoOpenExts are file types that must never be auto-opened after
-// download. Handing them to the desktop handler can execute code (notably
-// .desktop files, which most environments treat as launchers).
+// blockedAutoOpenExts are file types never auto-opened after download:
+// handing them to the desktop handler can execute code (.desktop files).
 var blockedAutoOpenExts = map[string]struct{}{
 	".desktop": {}, ".sh": {}, ".bin": {}, ".run": {}, ".jar": {},
 	".py": {}, ".pl": {}, ".rb": {}, ".php": {}, ".js": {},

@@ -29,11 +29,8 @@ func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
 	return nil
 }
 
-// RequestPairing initiates a pairing request to a device and returns the
-// out-of-band verification code the peer displays for the user to compare.
-// The code is empty when nothing needed requesting: an already-paired
-// device, or a pending request from the peer that this accepts instead
-// (the peer owns the code in that direction).
+// RequestPairing initiates pairing and returns the peer-displayed code;
+// empty when already paired or accepting the peer's pending request.
 func (p *PairPlugin) RequestPairing(dev *device.Device) (string, error) {
 	if dev.State() == device.StatePaired {
 		p.logger.Warn("device already paired", log.String("device_id", dev.ID()))

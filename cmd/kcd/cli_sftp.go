@@ -7,10 +7,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// readOnlyOverride maps the --ro/--no-ro flags onto the pointer the client
-// expects. Both flags absent leaves it nil, which means "use the daemon's
-// configured default" -- distinguishable from an explicit false, so an old
-// client cannot quietly turn a read-only default back into a writable mount.
+// readOnlyOverride maps --ro/--no-ro onto the client pointer; both absent
+// stays nil (daemon default), never a quiet flip back to writable.
 func readOnlyOverride(c *cli.Context) *bool {
 	switch {
 	case c.Bool("ro"):

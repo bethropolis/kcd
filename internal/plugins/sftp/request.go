@@ -23,9 +23,8 @@ func (p *SftpPlugin) RequestMount(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-// RequestAndMount sends the SFTP request, waits for the Android device to
-// respond with credentials (up to 20 s), mounts the filesystem via sshfs,
-// and returns the local path the user should open.
+// RequestAndMount requests credentials, mounts via sshfs, and returns the
+// local path to open.
 func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender, readOnly bool) (string, error) {
 	if p.bus == nil {
 		return "", fmt.Errorf("event bus not available")
@@ -68,10 +67,8 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender, rea
 	}
 }
 
-// RequestAndMountVolume sends the SFTP request, waits for credentials, then
-// mounts the specified volume. If volumePath is empty, the available volumes
-// are returned without mounting (list mode). The caller is responsible for
-// closing the returned closer when done with the mounted path.
+// RequestAndMountVolume requests credentials and mounts the volume (empty
+// volumePath lists instead). The caller closes the returned closer when done.
 func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Sender, volumePath string, readOnly bool) (mountPath string, volumes []StorageVolume, err error) {
 	if p.bus == nil {
 		return "", nil, fmt.Errorf("event bus not available")
@@ -136,17 +133,9 @@ func (p *SftpPlugin) MountLocally(ctx context.Context, deviceID string, readOnly
 	return p.mountWithBody(ctx, deviceID, body, "", readOnly)
 }
 
-// Info returns the cached SFTP connection details for a device.
-//
-// includePassword gates the credential: it is a working password for the
-// phone's SFTP server, and `kcd sftp info` is an informational command whose
-// output routinely lands in scrollback, logs and $(...) captures. Callers that
-// genuinely need it (mounting) get credentials from the sftp.mount event
-// instead, which is unaffected by this gate.
-//
-// Returns nil if no credentials have been received yet, even for a device that
-// is still mounted -- mount state outlives the credential cache, which is
-// cleared on disconnect.
+// Info returns cached SFTP details, password only on request: it is a
+// working credential that would otherwise land in scrollback and logs.
+// Nil means uncached credentials, even while still mounted.
 func (p *SftpPlugin) Info(deviceID string, includePassword bool) *SftpInfo {
 	p.mu.RLock()
 	body, ok := p.lastBody[deviceID]
@@ -204,10 +193,8 @@ func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
 	return p.buildVolumes(body)
 }
 
-// MountedPath returns the local mount point for a device, or "" if not mounted.
-//
-// Reconciles against the kernel mount table on a cache miss, so a mount made
-// before a daemon restart is still reported as mounted.
+// MountedPath returns the local mount point, or "" if not mounted. Misses
+// reconcile against the kernel table, so pre-restart mounts still report.
 func (p *SftpPlugin) MountedPath(deviceID string) string {
 	p.mu.RLock()
 	mountPoint, cached := p.mountPoints[deviceID]
@@ -216,9 +203,8 @@ func (p *SftpPlugin) MountedPath(deviceID string) string {
 		return mountPoint
 	}
 
-	// The kernel is the source of truth. The configured location first, then
-	// the location that preceded it as the default, so a mount made before
-	// the default moved is still found rather than orphaned.
+	// The kernel is the source of truth: configured location first, then the
+	// previous default, so pre-move mounts are found, not orphaned.
 	if mountPoint = p.adoptIfMounted(deviceID, p.mountPointFor(deviceID)); mountPoint != "" {
 		return mountPoint
 	}
@@ -255,9 +241,8 @@ func (p *SftpPlugin) IsMounted(deviceID string) bool {
 	return p.MountedPath(deviceID) != ""
 }
 
-// credentialsTimeout is how long to wait for the phone's SFTP response. The
-// CLI derives its own socket deadline from the same configured value, so the
-// daemon reports the timeout rather than the client reporting a dead socket.
+// credentialsTimeout bounds the wait for the phone's SFTP response; the CLI
+// derives its own deadline from it so the daemon reports the timeout.
 func (p *SftpPlugin) credentialsTimeout() time.Duration {
 	if p.cfg.CredentialsTimeoutSecs <= 0 {
 		return 20 * time.Second

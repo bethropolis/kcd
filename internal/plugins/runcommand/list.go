@@ -12,10 +12,8 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// listTimeout bounds the wait for the phone's command-list reply. The
-// phone answers from a packet handler, so a prompt reply is the norm;
-// the deadline only exists so a closed app surfaces as an error instead
-// of hanging the CLI.
+// listTimeout bounds the wait for the command-list reply; the phone answers
+// from a handler, so this only fires for a closed app instead of hanging.
 const listTimeout = 10 * time.Second
 
 // Command is one remote-executable entry as advertised by the phone.
@@ -30,12 +28,9 @@ type commandEntry struct {
 	Command string `json:"command"`
 }
 
-// RequestList asks the device for its command list and waits for the
-// reply. The waiter is registered before the request is sent so a fast
-// phone cannot answer into a void.
-//
-// It fails if the device is disconnected, the send fails, or the phone
-// does not answer within listTimeout.
+// RequestList asks the device for its command list, registering the waiter
+// first so a fast phone cannot answer into a void. Fails on disconnect,
+// send error, or listTimeout.
 func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) ([]Command, error) {
 	waiter := make(chan []Command, 1)
 
@@ -81,9 +76,8 @@ func (p *RunCommandPlugin) clearListWaiter(deviceID string) {
 	delete(p.pendingLists, deviceID)
 }
 
-// deliverCommandList hands a decoded reply to the waiter for deviceID.
-// The send is non-blocking: a reply with no waiter (the user gave up, or
-// the phone volunteered a list) must not stall the device's read loop.
+// deliverCommandList hands a decoded reply to the waiter, non-blocking: a
+// waiterless reply must not stall the device's read loop.
 func (p *RunCommandPlugin) deliverCommandList(deviceID string, commands []Command) {
 	p.Mu.RLock()
 	waiter := p.pendingLists[deviceID]
@@ -101,9 +95,8 @@ func (p *RunCommandPlugin) deliverCommandList(deviceID string, commands []Comman
 	}
 }
 
-// parseCommandList decodes the commandList field of a runcommand reply.
-// The phone sends a JSON object of label -> {name, command}; malformed
-// entries are skipped rather than failing the whole list.
+// parseCommandList decodes the label -> {name, command} reply object,
+// skipping malformed entries rather than failing the whole list.
 func parseCommandList(raw string) ([]Command, error) {
 	if raw == "" {
 		return nil, nil

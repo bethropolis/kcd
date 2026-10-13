@@ -85,9 +85,8 @@ func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *t
 	return nil, 0, fmt.Errorf("no available ports in range %d-%d", cfg.PortMin, cfg.PortMax)
 }
 
-// AcceptAndSend waits for the phone to connect, performs the TLS handshake, and streams the file.
-// Optional SidechannelOptions bound streaming silence the same way as the dial path.
-// portMin/portMax are the configured side-channel range, used only for firewall hints.
+// AcceptAndSend waits for the phone, handshakes over TLS, and streams the file.
+// SidechannelOptions bound streaming silence; portMin/Max are firewall hints only.
 func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger log.Logger, portMin, portMax int, options ...transport.SidechannelOptions) error {
 	defer ln.Close()
 
@@ -148,9 +147,8 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 		)
 		return fmt.Errorf("share: client presented no certificate (expected device %s)", expectedDeviceID)
 	}
-	// Android KDE Connect stores device IDs with hyphens in the cert CN
-	// (e.g. "9a5c23ea-7195-4da1-b766-282b7256a02d") but sends them with
-	// underscores in identity packets. Normalise before comparing.
+	// Android mints cert CNs with hyphens but sends underscores in identity
+	// packets: normalize before comparing.
 	certCN := state.PeerCertificates[0].Subject.CommonName
 	normCN := strings.ReplaceAll(certCN, "-", "_")
 	if normCN != expectedDeviceID {
@@ -160,9 +158,8 @@ func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expe
 		)
 		return fmt.Errorf("share: cert CN mismatch: expected device %s, got %s", expectedDeviceID, certCN)
 	}
-	// The CN check above only confirms the device ID claim; pin the actual
-	// paired certificate fingerprint so a holder of a different cert minted
-	// with the same CN can't pull the file.
+	// The CN check only confirms the ID claim: pin the paired fingerprint so
+	// a different cert minted with the same CN can't pull the file.
 	if expectedFP == "" {
 		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
 			log.String("expected_device", expectedDeviceID))

@@ -27,10 +27,8 @@ type Handler struct {
 	routes            map[string]func(Request) Response
 	pruneThreshold    time.Duration
 	pairListenTimeout time.Duration
-	// pairDialHook, when set, dials a disconnected device on explicit user
-	// pair request (`kcd pair <id>`). The daemon wires this to DialDevice
-	// using the device's last-seen discovery address, so pairing an unpaired
-	// device doesn't depend on background auto-dial.
+	// pairDialHook dials a disconnected device on explicit pair request via
+	// its last-seen address, independent of background auto-dial.
 	pairDialHook func(deviceID string) error
 }
 
@@ -135,10 +133,8 @@ func (h *Handler) handlePair(payload []byte) Response {
 		return Response{OK: false, Error: "device not found"}
 	}
 
-	// Pairing needs an active connection (pair packets go over TLS).
-	// Background auto-dial never connects to unpaired strangers, so an
-	// explicit `kcd pair <id>` triggers the on-demand dial hook when one is
-	// wired (the daemon always sets it). Without a hook, fall through to the
+	// Pairing needs a live TLS connection, which background dial never opens
+	// to strangers: an explicit pair triggers the on-demand hook, else the
 	// legacy paths below.
 	if !dev.IsConnected() && h.pairDialHook != nil {
 		if err := h.pairDialHook(dev.ID()); err != nil {
@@ -154,9 +150,8 @@ func (h *Handler) handlePair(payload []byte) Response {
 				return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
 			}
 		} else {
-			// Initiate new pairing request. The code lets the CLI show the
-			// user what to compare against the phone's prompt; without it
-			// the out-of-band check is impossible from this side.
+			// Initiate a new pairing request; the code lets the CLI show what
+			// to compare against the phone's prompt (else no out-of-band check).
 			verificationKey, err := h.pairPlugin.RequestPairing(dev)
 			if err != nil {
 				return Response{OK: false, Error: "failed to request pairing: " + err.Error()}
@@ -237,11 +232,8 @@ func (h *Handler) handlePairListen() Response {
 	if timeout <= 0 {
 		timeout = defaultPairListenTimeout
 	}
-	// Report any device already in StatePairRequestedByPeer WITHOUT
-	// accepting it. The caller (CLI / GUI / script) inspects the candidate
-	// and decides: accept via CmdPair, reject via CmdUnpair. Auto-accepting
-	// here would pair with stale requests (e.g. leftovers from tests)
-	// before the user ever sees a prompt.
+	// Report candidates in StatePairRequestedByPeer WITHOUT accepting: the
+	// caller decides (CmdPair/CmdUnpair); auto-accept would pair stale ones.
 	for _, dev := range h.devices.List() {
 		if dev.State() == device.StatePairRequestedByPeer {
 			return h.pairListenResult(dev, "")
@@ -276,9 +268,8 @@ func (h *Handler) handlePairListen() Response {
 	}
 }
 
-// pairListenResult returns the candidate device info without accepting it.
-// The caller (CLI / GUI / script) decides whether to accept via CmdPair or
-// reject via CmdUnpair.
+// pairListenResult returns the candidate without accepting it; the caller
+// decides via CmdPair or CmdUnpair.
 func (h *Handler) pairListenResult(dev *device.Device, vKey string) Response {
 	data, _ := json.Marshal(PairListenResult{
 		DeviceID:        dev.ID(),

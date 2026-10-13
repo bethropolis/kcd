@@ -11,10 +11,8 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 )
 
-// readOnlyFor resolves a per-request override against the [sftp] default.
-// Absent means "use the configured default", which is why the field is a
-// pointer: a literal false has to be expressible, or --ro-less requests from
-// an older client would quietly flip a read-only default back to writable.
+// readOnlyFor resolves a per-request override against the default; the field
+// is a pointer so absent never flips a read-only default back to writable.
 func readOnlyFor(pl plugin.Plugin, override *bool) bool {
 	if override != nil {
 		return *override

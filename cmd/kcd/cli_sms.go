@@ -98,11 +98,8 @@ var smsCmd = &cli.Command{
 	},
 }
 
-// runSmsConversation requests one thread, with an optional window. The range
-// flags map to the IPC fields 1:1; when unset the fields stay out of the
-// packet and the phone returns the whole thread. IsSet (not a zero default)
-// decides, because the phone reads an explicit 0 as "older than the epoch"
-// or "zero messages" and returns nothing.
+// runSmsConversation requests one thread with an optional window. IsSet
+// (not a zero default) decides: the phone answers an explicit 0 with nothing.
 func runSmsConversation(c *cli.Context, cl *client.Client) error {
 	if c.NArg() < 2 {
 		return fmt.Errorf("missing device ID or thread ID")

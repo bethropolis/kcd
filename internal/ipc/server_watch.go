@@ -26,10 +26,8 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 
 	s.writeResponse(conn, Response{OK: true})
 
-	// Full-state snapshot first: every known device (online AND offline)
-	// with cached battery/media/signal, so clients boot with complete
-	// state from this single connection — no auxiliary bootstrap calls,
-	// no hydration races. Sent regardless of event filters.
+	// Full-state snapshot first so clients boot complete from this connection
+	// alone — no bootstrap calls, no hydration races. Sent despite filters.
 	snapEv := map[string]interface{}{
 		"type":      events.TypeStateSnapshot,
 		"timestamp": time.Now().UTC(),
@@ -63,10 +61,8 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			return
 		}
 
-		// Only when the daemon actually has a reading. Emitting zero
-		// values for a fresh pair would
-		// publish a bogus stable 0% (see Device.HasBattery) — same
-		// skip-if-absent rule as connectivity below.
+		// Only with an actual reading: a fresh pair would otherwise publish
+		// a bogus stable 0%. Same skip-if-absent rule as connectivity.
 		if dev.HasBattery() {
 			charge, charging := dev.GetBattery()
 			batEv := map[string]interface{}{
@@ -86,9 +82,8 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			}
 		}
 
-		// Send initial connectivity state if the device already reported.
-		// Unlike battery there is no meaningful zero value, so devices
-		// without a report are skipped instead of emitting empty data.
+		// Send initial connectivity only if reported: unlike battery it has
+		// no meaningful zero, so absence skips instead of emitting empty.
 		if pl, ok := s.handler.plugins.GetByName("Connectivity"); ok {
 			if report, ok := pl.(*connectivity.ConnectivityPlugin).Report(dev.ID()); ok {
 				connEv := map[string]interface{}{
@@ -105,10 +100,8 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			}
 		}
 
-		// Send initial mpris state if recently updated.
-		// If the last update was more than 10 seconds ago the state is
-		// likely stale — the phone probably stopped playing — so we skip it
-		// to avoid showing a ghost "now playing" in Waybar/CLI after reconnect.
+		// Send initial mpris state only if fresh (10s): older means playback
+		// likely stopped, and stale state shows a ghost "now playing".
 		if pl, ok := s.handler.plugins.GetByName("MPRIS"); ok {
 			mp := pl.(*mpris.MPRISPlugin)
 			if mp.RemoteStateAge(dev.ID()) < 10*time.Second {

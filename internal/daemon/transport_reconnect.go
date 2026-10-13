@@ -13,26 +13,12 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// reconnectTriggerMinGap is the minimum spacing between sighting-triggered
-// dials. Announcements can arrive in bursts (IPv4/IPv6 alternation, AP
-// flicker); the gap keeps a burst to a single dial while the fallback
-// timer keeps spacing untriggered attempts.
+// reconnectTriggerMinGap spaces sighting-triggered dials: announcements
+// arrive in bursts, and a burst must dial only once.
 const reconnectTriggerMinGap = 5 * time.Second
 
-// reconnectWithBackoff dials a paired device after it disconnects, using
-// exponential backoff between attempts. It stops as soon as:
-//   - the device reconnects (IsConnected becomes true), or
-//   - the daemon context is cancelled, or
-//   - the device is unpaired.
-//
-// With sighting-driven mode (reconnect.sighting_driven, the default) the
-// loop parks instead of spinning a timer per backoff step: a discovery
-// sighting (the peer provably alive at an address) dials immediately, and
-// the fallback timer escalates to fallback_max (default 1h) for the silent
-// case. Past stale_after (default 24h) without any sighting the loop gives
-// up entirely — a future sighting respawns it from the discovery path.
-// A fresh connection coming in from the phone side (inbound TCP) will set
-// IsConnected, causing the loop to exit cleanly without a duplicate dial.
+// reconnectWithBackoff redials a disconnected pair, escalating to fallback_max
+// and stopping past stale_after (a later sighting respawns it) or on reconnect.
 func reconnectWithBackoff(
 	ctx context.Context,
 	dev *device.Device,
@@ -87,9 +73,8 @@ func reconnectWithBackoff(
 			return
 		}
 
-		// Stop if the peer has been silent past the horizon: no sighting
-		// for a day means it is gone, not roaming. Zero timers until a
-		// future sighting respawns this loop from the discovery path.
+		// Stop past the silent horizon: a day without sightings means gone, not
+		// roaming. Zero timers until a future sighting respawns this loop.
 		if sightingDriven && time.Since(dev.LastSeen()) > staleAfter {
 			logger.Info("auto-reconnect: device stale, giving up until next sighting",
 				log.String("device_id", dev.ID()),
@@ -131,10 +116,8 @@ func reconnectWithBackoff(
 			continue
 		}
 
-		// Reload the dial target every lap: a sighting while parked
-		// records a fresher address (roam) than this loop's spawn-time
-		// target, and the one-shot discovery dial may have failed. The
-		// spawn address stays the fallback when nothing was ever sighted.
+		// Reload the dial target every lap: parked sightings record fresher
+		// (roamed) addresses; the spawn address stays the never-sighted fallback.
 		dialIP := ip
 		if sighted := dev.LastSightedIP(); sighted != nil {
 			dialIP = sighted
@@ -147,9 +130,8 @@ func reconnectWithBackoff(
 			log.Bool("sighting_triggered", triggered),
 		)
 
-		// Prefer the peer's last advertised listening port over the
-		// default: the identity may carry a non-standard port (or none
-		// at all, in which case LastPort is 0 and we fall back).
+		// Prefer the peer's advertised listening port over the default; zero
+		// (absent) falls back.
 		port := reconnectPort(dev, opts.TCPPort)
 		DialDevice(ctx, dialIP, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
 		lastDial = time.Now()
@@ -159,10 +141,8 @@ func reconnectWithBackoff(
 				log.String("device_id", dev.ID()),
 				log.Int("attempts", attempt+1),
 			)
-			// Persist the counter before returning: if this connection flaps,
-			// the next reconnect cycle continues backing off rather than
-			// resetting to the 2s floor. onDisconnect resets it if the
-			// connection proved stable.
+			// Persist the counter: a flap continues backing off next cycle;
+			// onDisconnect resets it for connections that proved stable.
 			dev.SetReconnectAttempt(attempt + 1)
 			return
 		}

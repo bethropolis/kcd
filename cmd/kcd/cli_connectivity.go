@@ -51,11 +51,8 @@ var connectivityCmd = &cli.Command{
 	},
 }
 
-// signalDots renders signal level 0-4 as a four-position dot bar. The range is
-// clamped so a bogus level from the phone still produces a parseable bar, and
-// four positions means the maximum level reads as genuinely full.
-// These are text-presentation geometric shapes (single cell width), not
-// pictographs, so they align like the block-element bar they replace.
+// signalDots renders level 0-4 as a four-position bar, clamped so bogus
+// phone levels still parse; shapes are single-cell, not pictographs.
 func signalDots(level int) string {
 	if level < 0 {
 		level = 0

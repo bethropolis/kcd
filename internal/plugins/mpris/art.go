@@ -99,9 +99,8 @@ func (p *MPRISPlugin) requestAlbumArt(dev device.Sender, player, artUrl string) 
 	}
 }
 
-// receiveAlbumArt streams an inbound album art payload into the cache
-// and re-publishes the device state with a resolved file:// URL so watch
-// clients and kcd mpris status surface the loadable location.
+// receiveAlbumArt streams an inbound art payload into the cache and
+// re-publishes state with the resolved file:// URL for watchers.
 func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, player, artUrl string, size int64, port int) {
 	remoteIP := dev.RemoteIP()
 	if remoteIP == nil {
@@ -143,12 +142,8 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	p.stampAlbumArt(dev.ID(), player, artUrl, fileURL)
 }
 
-// stampAlbumArt publishes a resolved file:// URL for a completed album-art
-// fetch — but only if the device's current track still wants exactly this
-// art. The side-channel download can take up to 30s, during which the track
-// (or the active player) may have changed; stamping blindly would show the
-// old track's cover on the new track. On mismatch the bytes stay in the art
-// cache and the new track's own art request fulfills it.
+// stampAlbumArt publishes a resolved art URL only if the current track still
+// wants exactly this art; the download may outlive the track that asked.
 func (p *MPRISPlugin) stampAlbumArt(deviceID, player, artUrl, fileURL string) {
 	p.mu.Lock()
 	state := p.remoteStates[deviceID]

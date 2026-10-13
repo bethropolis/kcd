@@ -179,7 +179,8 @@ kcd devices [--json]
 |---|---|
 | `--json` | Output as a JSON array |
 | `--watch`, `-w` | Stream device changes live (clears screen on each change) |
-| `--connected` | Only show paired devices, including offline ones (unpaired strangers are hidden; check the `CONNECTED` column for liveness) |
+| `--connected` | Only show paired devices that are currently connected |
+| `--paired` | Only show paired devices, including offline ones (unpaired strangers are hidden; check the `CONNECTED` column for liveness) |
 
 **Example output**
 
@@ -737,6 +738,9 @@ kcd unlock [device-id]
 ```
 
 These send the KDE Connect lock packet to the **remote** device — they do not lock this PC. The reverse direction is separate: when a paired device sends a lock request, the daemon runs `loginctl lock-session` / `loginctl unlock-session` on this desktop.
+
+> Peer support varies: Plasma desktops and other `kcd` instances honour
+> the request, but the Android app ships no lock plugin and ignores it.
 
 ---
 

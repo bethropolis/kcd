@@ -1,8 +1,7 @@
 package ipc
 
-// GetDeviceID methods let route helpers treat every device-addressed
-// payload uniformly. Each method is a one-line accessor over the
-// payload's deviceId field; the JSON shapes are unchanged.
+// GetDeviceID methods let route helpers treat device-addressed payloads
+// uniformly; each is a one-line accessor, JSON shapes unchanged.
 func (p DevicePayload) GetDeviceID() string        { return p.DeviceID }
 func (p SftpMountPayload) GetDeviceID() string     { return p.DeviceID }
 func (p SharePayload) GetDeviceID() string         { return p.DeviceID }

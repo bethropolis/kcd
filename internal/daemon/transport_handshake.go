@@ -66,9 +66,8 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		dev.CertFP = certFP
 	}
 
-	// Remember the peer's listening port from the authenticated exchange so
-	// paired auto-dials use a known-good target instead of trusting future
-	// (unauthenticated) discovery announcements.
+	// Remember the peer's listening port from the authenticated exchange, so
+	// paired auto-dials use it instead of trusting later announcements.
 	if validDialPort(peerBody.TCPPort) {
 		dev.SetLastPort(peerBody.TCPPort)
 	}
@@ -100,11 +99,8 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		if lastIP == nil {
 			return
 		}
-		// A connection that lasted long enough was genuinely stable, so the
-		// next drop should start the backoff over. A flap (connection dies
-		// shortly after a successful dial, e.g. a dying peer) keeps the
-		// counter so the backoff keeps escalating instead of hammering at the
-		// 2s floor forever.
+		// A connection that lived long enough resets the backoff; a quick
+		// flap keeps the counter so it escalates instead of hammering.
 		if sender.ConnectionAge() >= config.Duration(opts.Reconnect.FlapThreshold) {
 			sender.ResetReconnectAttempt()
 		}

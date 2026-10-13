@@ -43,9 +43,8 @@ type ContactSummary struct {
 	Timestamp int64    `json:"timestamp"`
 }
 
-// indexEntry is the persisted per-contact record (index.json sidecar, so
-// listing never reparses hundreds of vCards). Fetched marks that the vCard
-// round completed; entries with only a timestamp are pending fetch.
+// indexEntry is the persisted per-contact record (sidecar, so listing never
+// reparses vCards); Fetched marks a completed vCard round, else pending.
 type indexEntry struct {
 	Timestamp int64    `json:"timestamp"`
 	Fetched   bool     `json:"fetched"`
@@ -54,9 +53,8 @@ type indexEntry struct {
 	Emails    []string `json:"emails,omitempty"`
 }
 
-// ContactsPlugin syncs the phone address book: it requests UID/timestamp
-// lists, fetches vCards for new or changed contacts, caches them per
-// device, and deletes stale entries.
+// ContactsPlugin syncs the phone address book: UID/timestamp lists, vCard
+// fetches for new or changed contacts, per-device cache, stale deletion.
 type ContactsPlugin struct {
 	bus     *events.Bus
 	logger  log.Logger

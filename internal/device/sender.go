@@ -7,9 +7,8 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// Sender represents a KDE Connect device capable of receiving packets.
-// This interface allows plugins to interact with a device without knowing
-// its internal implementation details.
+// Sender is a KDE Connect device that can receive packets, letting plugins
+// interact without knowing device internals.
 type Sender interface {
 	ID() string
 	Name() string

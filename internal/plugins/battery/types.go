@@ -37,9 +37,8 @@ func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logg
 	}
 }
 
-// BatteryBody represents the body of a kdeconnect.battery packet.
-// A body carrying only Request asks the peer to report its state; it is
-// not a state update and must never touch the stored charge.
+// BatteryBody represents a kdeconnect.battery body. Request-only asks the peer
+// to report; it is not a state update and must never touch stored charge.
 type BatteryBody struct {
 	CurrentCharge  int  `json:"currentCharge"`
 	IsCharging     bool `json:"isCharging"`

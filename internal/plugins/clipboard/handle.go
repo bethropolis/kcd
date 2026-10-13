@@ -58,10 +58,8 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	go func() {
 		switch backend, _ := p.getBackend(); backend {
 		case backendWayland:
-			// -n: wl-copy appends a trailing newline by default. Without it the
-			// local selection becomes content+"\n", which differs from the
-			// inbound lastContent guard and makes --watch echo the phone's own
-			// clipboard straight back to it.
+			// -n: wl-copy's trailing newline would differ from the guard and
+			// make --watch echo the phone's clipboard straight back to it.
 			if err := p.runCopy(context.Background(), p.clipboardCmd("wl-copy", "-n"), strings.NewReader(body.Content)); err != nil {
 				p.logger.Warn("clipboard: failed to set clipboard", log.Error(err))
 			}

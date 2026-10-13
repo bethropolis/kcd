@@ -71,9 +71,8 @@ func saveIndex(dir string, idx map[string]indexEntry) error {
 	return os.WriteFile(filepath.Join(dir, "index.json"), data, 0600)
 }
 
-// List returns cached contact summaries sorted by name. Entries whose
-// vCard hasn't arrived yet are skipped; empty when never synced — absent
-// means unknown, never a fabricated entry.
+// List returns cached summaries sorted by name, skipping pending fetches;
+// empty means never synced (unknown), never zero contacts.
 func (p *ContactsPlugin) List(deviceID string) []ContactSummary {
 	p.mu.Lock()
 	defer p.mu.Unlock()

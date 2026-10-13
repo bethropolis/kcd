@@ -25,10 +25,8 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 			key := p.notifKey(dev.ID(), body.ID)
 			if desktopID, ok := p.notifIDs.Load(key); ok {
 				if p.cfg.CancelGraceMS > 0 {
-					// Cancel-grace: hold the popup open so a same-id re-post
-					// (media now-playing toggling play/pause) updates it in
-					// place instead of closing and re-opening. If no re-post
-					// arrives, close after the grace window.
+					// Hold the popup through the cancel grace so a same-id re-post
+					// updates it in place; close when the window passes with none.
 					if t, ok := p.pendingCloses.Load(key); ok {
 						t.(*time.Timer).Stop()
 					}

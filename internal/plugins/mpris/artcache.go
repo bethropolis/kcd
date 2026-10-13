@@ -21,9 +21,8 @@ const maxAlbumArtBytes = 5 * 1024 * 1024
 // directory, mirroring the reference implementation's startup purge.
 const maxArtCacheFiles = 500
 
-// ArtCache resolves kdeconnect:/artUri album art URIs to local file://
-// URLs. Bytes fetched from the phone are streamed to
-// $XDG_CACHE_HOME/kcd/art/<kdeArtHash>.<ext>.
+// ArtCache resolves kdeconnect:/ art URIs to local file:// URLs, streaming
+// phone bytes into $XDG_CACHE_HOME/kcd/art/.
 type ArtCache struct {
 	dir      string
 	mu       sync.RWMutex
@@ -74,9 +73,8 @@ func (c *ArtCache) Dir() string {
 	return c.dir
 }
 
-// Key derives the cache filename stem for an album art URI: the
-// kdeArtHash query parameter when present, otherwise an FNV-1a hash of
-// the full URI (matching the reference qHash-based naming).
+// Key derives the cache filename stem: the kdeArtHash parameter when present,
+// otherwise FNV-1a of the full URI.
 func (c *ArtCache) Key(rawURL string) string {
 	if u, err := url.Parse(rawURL); err == nil {
 		if h := u.Query().Get("kdeArtHash"); h != "" {

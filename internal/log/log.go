@@ -1,10 +1,5 @@
-// Package log is kcd's single logging seam.
-//
-// Every package logs through this wrapper instead of importing
-// go.uber.org/zap directly (enforced by depguard). zap remains the
-// backend; the wrapper exists so backend-wide concerns — caller
-// attribution, level names, dev/prod encoding, test helpers — live in
-// exactly one place and a future backend swap touches one package.
+// Package log is kcd's single logging seam: every package logs through it
+// instead of zap directly, so backend concerns live in exactly one place.
 package log
 
 import "go.uber.org/zap"

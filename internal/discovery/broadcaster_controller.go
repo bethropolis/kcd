@@ -9,9 +9,8 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// Broadcast ownership: pairing mode (`kcd pair`) and the reconnect
-// watcher share one loop but must not cancel each other, so starts are
-// reference-counted per owner. The loop runs while any owner holds it.
+// Broadcast ownership: pairing and reconnect share one loop without cancelling
+// each other, so starts are reference-counted; it runs while any owner holds it.
 const (
 	OwnerPairing   = "pairing"
 	OwnerReconnect = "reconnect"
@@ -30,21 +29,17 @@ type BroadcasterController struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
-	// ownedCtx is the context the owned loop (and its browse companion)
-	// runs under. Retained so a late-registered browse starter can
-	// attach to an already-running owner instead of waiting for the
-	// next ownership cycle.
+	// ownedCtx runs the owned loop, retained so a late browse starter can
+	// attach to a running owner instead of waiting out the cycle.
 	ownedCtx context.Context
 	owners   map[string]struct{}
-	// browseStarter, when set, launches mDNS browsing on the same owned
-	// context as the broadcast loop: active discovery (both directions)
-	// shares one lifetime — pairing/reconnect only, never steady state.
+	// browseStarter launches mDNS browsing on the owned context: both discovery
+	// directions share one lifetime — pairing/reconnect only, never steady state.
 	browseStarter func(ctx context.Context)
 }
 
-// defaultIdleInterval is the broadcast period while idle (all pairs
-// connected, no pairing owner): quiet enough to sip battery, frequent
-// enough that a roamed phone finds us back within a minute.
+// defaultIdleInterval is the broadcast period with everything connected:
+// quiet on battery, frequent enough that a roamed phone finds us in a minute.
 const defaultIdleInterval = 60 * time.Second
 
 // NewBroadcasterController creates a controller that starts in stopped state.
@@ -77,11 +72,8 @@ func (bc *BroadcasterController) Stop() {
 	bc.StopOwned(OwnerPairing)
 }
 
-// SetBrowseStarter registers the mDNS browse function to run alongside
-// the owned broadcast loop. Called once at startup; if an owner already
-// holds the loop (startup reconnect ownership racing transport setup),
-// the starter launches immediately on the owned context instead of
-// waiting for the next ownership cycle.
+// SetBrowseStarter registers the mDNS browse to run with the owned loop,
+// launching immediately if an owner already holds it (startup race).
 func (bc *BroadcasterController) SetBrowseStarter(starter func(ctx context.Context)) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()

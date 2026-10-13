@@ -42,10 +42,8 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 
 	entries, err := listPlayersDBus(p.dbus)
 	if err != nil {
-		// Not fatal: the watcher keeps running so NameOwnerChanged can
-		// still pick players up as they appear. Logged because an
-		// unlogged failure here presents as an empty tracker with no
-		// clue why.
+		// Not fatal: the watcher keeps running so players appearing later are
+		// still picked up. Logged, since silence would present as empty tracker.
 		p.logger.Warn("mpris: initial player listing failed", log.Error(err))
 	}
 	for _, e := range entries {
@@ -70,10 +68,8 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		}
 	}
 
-	// Watch every name change and filter to MPRIS in the handler. D-Bus
-	// match rules have no string-prefix key, and the non-MPRIS signals
-	// this lets through are cheap — the handler rejects them on a prefix
-	// check before any blocking work.
+	// Watch every name change; match rules lack prefix keys, and non-MPRIS
+	// signals are cheaply rejected on a prefix check before blocking work.
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),

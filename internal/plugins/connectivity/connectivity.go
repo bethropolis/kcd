@@ -83,18 +83,12 @@ func connectivityEqual(a, b ConnectivityBody) bool {
 	return true
 }
 
-// OnConnect intentionally sends nothing. The phone's ConnectivityReportPlugin
-// declares supportedPacketTypes = emptyArray() and its onPacketReceived returns
-// false unconditionally, so kdeconnect.connectivity_report.request can never be
-// processed on Android. It pushes reports on its own whenever its telephony
-// state listener fires, so the only thing a connect-time request accomplished
-// was a discarded packet.
+// OnConnect intentionally sends nothing: Android's plugin declares empty
+// supportedPacketTypes and drops every request, pushing reports on its own.
 func (p *ConnectivityPlugin) OnConnect(_ device.Sender) {}
 
-// Report returns the last connectivity report received from a device.
-// The second return value is false when the device never reported (or the
-// entry was cleared on disconnect). Used for watch initial-state dumps and
-// on-demand CLI queries.
+// Report returns the last connectivity report; false means never reported
+// (or cleared on disconnect). Feeds watch dumps and on-demand queries.
 func (p *ConnectivityPlugin) Report(deviceID string) (ConnectivityBody, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

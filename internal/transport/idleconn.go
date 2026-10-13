@@ -5,11 +5,8 @@ import (
 	"time"
 )
 
-// IdleTimeoutConn bounds silence, not size: every Read or Write pushes its
-// deadline forward by the idle interval, so slow-but-alive transfers run as
-// long as they need while a stalled socket (walked-out-of-range phone,
-// half-open zombie) fails promptly instead of hanging on TCP keepalive.
-// Wrap with WithIdleTimeout; a non-positive interval returns conn unchanged.
+// IdleTimeoutConn bounds silence, not size: reads/writes push the deadline
+// forward, so stalled sockets fail instead of hanging on TCP keepalive.
 type IdleTimeoutConn struct {
 	net.Conn
 	idle time.Duration

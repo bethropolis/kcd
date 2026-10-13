@@ -34,9 +34,8 @@ func (p *MPRISPlugin) handleTelephonyEvent(ev events.Event) {
 	}
 }
 
-// pauseAllPlayers pauses every currently-playing local MPRIS player.
-// It only acts once per call — repeated ringing/talking events are no-ops
-// while callPausedPlayers is non-empty.
+// pauseAllPlayers pauses every currently-playing local player, once per call:
+// repeats are no-ops while callPausedPlayers is non-empty.
 func (p *MPRISPlugin) pauseAllPlayers() {
 	p.mu.Lock()
 	defer p.mu.Unlock()

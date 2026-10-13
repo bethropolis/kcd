@@ -41,9 +41,8 @@ type RemoteCommand struct {
 	Command string `json:"command"`
 }
 
-// RunList asks the remote device for its command list and returns it. The
-// daemon holds the request open until the device replies, so this blocks
-// for the reply or fails on timeout.
+// RunList returns the remote command list, blocking until the device replies
+// (the daemon holds the request open) or the call times out.
 func (c *Client) RunList(deviceID string) ([]RemoteCommand, error) {
 	resp, err := c.Call(ipc.CmdRunList, ipc.DevicePayload{DeviceID: deviceID})
 	if err != nil {

@@ -15,17 +15,14 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-// validDialPort reports whether a discovery-advertised TCP port is usable.
-// Port 0 and out-of-range values come from malformed or hostile packets and
-// must never reach the dialer (port 0 would dial ":0").
+// validDialPort reports whether an advertised TCP port is dialable; 0 and
+// out-of-range come from malformed or hostile packets (":0" must never dial).
 func validDialPort(port int) bool {
 	return port > 0 && port <= 65535
 }
 
-// DialDevice connects to a device at IP:port. Unless force is set, dials
-// inside reconnectCooldown are skipped so post-roam bursts can't complete
-// near-simultaneously and churn the peer's duplicate resolution.
-// Explicit user actions (pair intent, manual connect) pass force=true.
+// DialDevice connects to a device at IP:port, skipping dials inside the
+// cooldown unless forced; explicit user actions pass force=true.
 func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID string, targetProto int, identity *protocol.Packet, cfg *tls.Config, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, force bool, opts *config.Config) {
 	if targetIP == nil || !validDialPort(targetPort) {
 		logger.Debug("refusing to dial invalid target",
@@ -62,9 +59,8 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 	if targetProto <= 0 || targetProto > protocol.ProtocolVersion {
 		targetProto = protocol.ProtocolVersion
 	}
-	// TargetDeviceID stays empty (and thus absent on the wire) when the
-	// target is unknown, e.g. an explicit connect-by-IP: stock peers
-	// close pre-TLS identities addressed to any other device ID.
+	// TargetDeviceID stays empty when the target is unknown (connect-by-IP):
+	// stock peers close pre-TLS identities addressed to anyone else.
 	preTlsId := protocol.IdentityBody{
 		DeviceID:              myID.DeviceID,
 		DeviceName:            myID.DeviceName,

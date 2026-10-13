@@ -48,10 +48,8 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
-		// xdg-open dispatches on URI scheme to arbitrary desktop handlers,
-		// so only http(s) may reach it: file://, smb:, mailto: and custom
-		// app schemes would hand phone-influenced input to unrelated local
-		// handlers. The URL event above still reaches clients either way.
+		// Only http(s) may reach xdg-open (other schemes hit unrelated
+		// handlers); the URL event still emits either way.
 		if isOpenableURL(body.Url) {
 			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
 		} else {
@@ -122,9 +120,8 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 				})
 			}
 			if p.cfg.AutoOpen {
-				// Never auto-open executable content: handing .desktop files
-				// (or scripts) to the desktop handler can execute code. The
-				// file itself is still saved and announced — open it manually.
+				// Never auto-open executable content (code execution); the file
+				// is still saved and announced for manual opening.
 				if autoOpenBlocked(destPath) {
 					p.Logger.Warn("share: refusing to auto-open executable file",
 						log.String("file", destPath))

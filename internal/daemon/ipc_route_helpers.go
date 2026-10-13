@@ -15,11 +15,8 @@ type hasDeviceID interface {
 	GetDeviceID() string
 }
 
-// deviceRoute handles the standard decode → plugin → device preamble
-// shared by most IPC handlers. An empty pluginName skips the plugin
-// lookup (pl is nil) for device-only routes. Error strings match
-// docs/IPC_PROTOCOL.md byte-for-byte; the disabled-plugin message is
-// derived from the registry name, which keeps every route consistent.
+// deviceRoute handles the decode → plugin → device preamble shared by most
+// IPC handlers. Error strings match docs/IPC_PROTOCOL.md byte-for-byte.
 func deviceRoute[P hasDeviceID](req ipc.Request, payload P, devices *device.Registry, plugins *plugin.Registry, pluginName string, action func(dev *device.Device, pl plugin.Plugin) ipc.Response) ipc.Response {
 	if err := json.Unmarshal(req.Payload, payload); err != nil {
 		return ipc.Response{OK: false, Error: "invalid payload"}

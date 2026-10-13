@@ -64,10 +64,14 @@ These structural constraints must hold at all times:
 - Change narration (`used to`, `is now`, `no longer`) — git history owns that. Keep the conclusion, drop the archaeology.
 - Dev-process references (`Phase 2`, planning-artifact numbering). They mean nothing to a reader of the repo.
 - Prose duplicating this file or `docs/`.
+- Justifying the approach (`cleaner`, `zero-cost`, `race-free`). The code speaks.
+
+**Hard limit: 2 lines per block.** If it needs more, the code is unclear —
+rename, extract, or restructure instead. The one exception is
+security/protocol rationale that cannot fit: it may run long, but the
+reason goes in the first 2 lines so a reader can stop there.
 
 **Godoc stays** on exported identifiers: one line, starting with the identifier, even where thin. That is the API contract, not noise. Use `// Name does X.` even when `X` is obvious.
-
-**A comment block over 8 lines is usually two comments** — a contract and a history. Keep the contract, drop the history, and split the remainder.
 
 When trimming a block, any comment touching validation, TLS, key handling, timeouts, or the KDE Connect wire format must keep its reason somewhere in the block, even if the wording changes.
 
@@ -343,7 +347,7 @@ Device state is persisted to `devices.json` on every change. `DeviceInfo` fields
 
 | Area | Status |
 |---|---|
-| **Mousepad keyboard** special keys | Intentionally unhandled — absent from the KDE Connect spec. |
+| **Mousepad keyboard** special keys (incoming) | Handled — `specialKey` 1–32 mapped per spec (`mapSpecialKey`/`mapUinputKey`, wired in `input.go`). kcd never sends mousepad packets (no controller surface), so there is nothing to verify in the other direction. |
 | **Un-arming the phone** | Not possible. Android's `haveMessagesBeenRequested` is set by any `sms.request*` packet and nothing clears it, not even plugin teardown, so the phone pushes every new message for the life of the connection. kcd's only lever is consent: `Subscriber.matches` refuses the opt-in types for an unfiltered subscriber, so an incidental `kcd watch` neither reads the body nor arms the phone. Once armed by name, ending it needs the plugin disabled on the device. |
 
 ---

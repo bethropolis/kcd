@@ -1,7 +1,5 @@
-// Package cert handles TLS certificate generation and fingerprinting for KDE Connect.
-// KDE Connect uses self-signed certificates with long validity periods.
-// Identity is established by comparing the SHA256 fingerprint of the certificate.
-// The certificate's Common Name (CN) MUST match the device ID.
+// Package cert handles TLS generation and fingerprinting. Identity is the
+// cert's SHA256 fingerprint, and its CN must match the device ID.
 package cert
 
 import (
@@ -22,10 +20,8 @@ import (
 	"time"
 )
 
-// GenerateSelfSigned creates a new 2048-bit RSA key and a self-signed X.509
-// certificate valid for 10 years, which matches the KDE Connect reference implementation.
-// The deviceID is used as the certificate's Common Name (CN), which KDE Connect
-// verifies matches the deviceId in identity packets.
+// GenerateSelfSigned creates a 2048-bit RSA key and 10-year self-signed cert;
+// the deviceID becomes the CN, which peers verify against identity packets.
 func GenerateSelfSigned(deviceID string) (*tls.Certificate, error) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -73,9 +69,8 @@ func GenerateSelfSigned(deviceID string) (*tls.Certificate, error) {
 	return &tlsCert, nil
 }
 
-// LoadOrGenerate tries to load a TLS certificate from the given paths.
-// If the files do not exist, it generates a new self-signed certificate
-// with the given deviceID as Common Name and writes it to disk.
+// LoadOrGenerate loads a TLS certificate or generates and stores a new
+// self-signed one (CN=deviceID) when the files don't exist.
 func LoadOrGenerate(certFile, keyFile, deviceID string) (*tls.Certificate, error) {
 	tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err == nil {
@@ -131,9 +126,8 @@ func Fingerprint(cert *x509.Certificate) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// PinnedFingerprint returns the hex fingerprint of a pinned peer certificate,
-// or "" when no certificate is available (unpaired or legacy device). Callers
-// must log and proceed unverified in that case.
+// PinnedFingerprint returns the pinned peer cert's hex fingerprint, or ""
+// when unavailable (unpaired/legacy): callers log and proceed unverified.
 func PinnedFingerprint(peer *x509.Certificate) string {
 	if peer == nil {
 		return ""
@@ -141,10 +135,8 @@ func PinnedFingerprint(peer *x509.Certificate) string {
 	return Fingerprint(peer)
 }
 
-// VerifySideChannelPeer checks the certificate presented on a side-channel
-// TLS connection against the fingerprint pinned when the transfer was
-// requested. An empty expected fingerprint skips verification (the caller
-// logs a warning) so unpaired devices keep working.
+// VerifySideChannelPeer checks the side-channel cert against the pinned
+// fingerprint; empty expected skips verification so unpaired devices work.
 func VerifySideChannelPeer(state tls.ConnectionState, expectedFP string) error {
 	if len(state.PeerCertificates) == 0 {
 		return fmt.Errorf("cert: side-channel peer presented no certificate")
@@ -158,12 +150,8 @@ func VerifySideChannelPeer(state tls.ConnectionState, expectedFP string) error {
 	return nil
 }
 
-// VerificationKey generates the out-of-band pairing verification code
-// displayed to the user. It matches the reference algorithm: the DER-encoded
-// public keys are concatenated with the lexicographically larger one first,
-// followed by the initial pair request's timestamp as an ASCII decimal
-// string (protocol v8 and later; a non-positive timestamp hashes without it
-// for older peers). The code is the first 8 hex characters, uppercased.
+// VerificationKey generates the pairing code: DER keys larger-first plus the
+// request timestamp (v8+ only). First 8 hex characters, uppercased.
 func VerificationKey(localCert, remoteCert *x509.Certificate, timestampSec int64) string {
 	var localKey, remoteKey []byte
 	if localCert != nil && localCert.PublicKey != nil {

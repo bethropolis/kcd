@@ -9,10 +9,8 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 )
 
-// userDirsFile is the freedesktop file naming the user's document folders.
-// Reading it matters because those folders are relocatable: on a localized
-// desktop Downloads may be "Descargas", and a check hardcoded to $HOME would
-// miss exactly the setups where a user has customised them.
+// userDirsFile names the user's document folders, which are relocatable: a
+// hardcoded $HOME check would miss localized/customized setups like Descargas.
 var userDirsFile = func() string {
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -25,15 +23,8 @@ var userDirsFile = func() string {
 	return filepath.Join(configHome, "user-dirs.dirs")
 }()
 
-// bulkDeletableDirs are the XDG user folders whose contents a user is likely
-// to wipe in one go, with the conventional name to fall back on when
-// user-dirs.dirs has no entry.
-//
-// The category, not a single folder: the hazard is never "~/Documents", it is
-// "anywhere a user runs rm -rf to reclaim space". Music and Pictures get wiped
-// for exactly the same reason Downloads does -- someone clearing old photos is
-// as plausible as someone clearing downloads -- so a narrower list would be
-// arbitrary. This is the freedesktop set of user-content folders.
+// bulkDeletableDirs are the XDG user folders wiped in one go. The category
+// matters, not any single folder: any of them gets rm -rf'd for space.
 var bulkDeletableDirs = []struct{ key, name string }{
 	{"XDG_DOWNLOAD_DIR", "Downloads"},
 	{"XDG_DOCUMENTS_DIR", "Documents"},
@@ -74,9 +65,8 @@ func userBulkDeletableDirs() []string {
 	return out
 }
 
-// parseUserDirsLine reads one `KEY=value` line, unquoting the value and
-// expanding $HOME. Values are quoted in the file because they may contain
-// spaces, and the placeholder is literal there.
+// parseUserDirsLine reads one `KEY=value` line, unquoting values (quoted for
+// spaces) and expanding the literal $HOME placeholder.
 func parseUserDirsLine(line string) (key, value string, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
@@ -125,9 +115,8 @@ func isWithin(dir, path string) bool {
 	return rel == "." || !strings.HasPrefix(rel, "..")
 }
 
-// warnIfInBulkDeletableDir emits the mount-location warning at most once per
-// mount directory per daemon run, so a user who deliberately pinned a location
-// is told once rather than on every mount.
+// warnIfInBulkDeletableDir warns at most once per directory per run, so a
+// deliberate pin hears it once, not on every mount.
 func (p *SftpPlugin) warnIfInBulkDeletableDir(mountPoint string) {
 	owner := containingBulkDeletableDir(mountPoint)
 

@@ -79,9 +79,8 @@ const (
 	WatchSubscriberCap = 256
 )
 
-// OptInOnly lists event types a subscriber must name explicitly. An unfiltered
-// Subscribe does not match them, which is what stops a bare `kcd watch` from
-// receiving message bodies and arming the phone.
+// OptInOnly lists types a subscriber must name: unfiltered Subscribe skips
+// them, which keeps bare watch from receiving bodies and arming the phone.
 func OptInOnly() []EventType {
 	return []EventType{TypeSMSIncoming, TypeSMSAttachment}
 }
@@ -109,10 +108,9 @@ func (s *Subscriber) Close() {
 }
 
 func (s *Subscriber) matches(typ EventType) bool {
-	// An unfiltered subscriber gets everything except the opt-in types. Not
-	// doing this in the caller is what let a bare `kcd watch` receive message
-	// bodies and arm the phone: HasSubscribers arms on this same predicate, so
-	// an SMS subscriber is also permission to start the push.
+	// Unfiltered subscribers get everything except opt-in types. Enforced
+	// here (not callers) so no future path can leak bodies; HasSubscribers
+	// arms on this same predicate, making subscription the permission.
 	if len(s.filters) == 0 {
 		return !isOptInOnly(typ)
 	}
@@ -139,9 +137,8 @@ type Bus struct {
 	subscribers map[uint64]*Subscriber
 	nextID      uint64
 	logger      log.Logger
-	// changeHooks run (without the bus lock held) after every subscribe
-	// and unsubscribe, so demand-driven producers can start/stop with
-	// the audience instead of polling HasSubscribers on a timer.
+	// changeHooks run lock-free after every subscribe/unsubscribe, so producers
+	// start/stop with the audience instead of polling HasSubscribers on a timer.
 	changeHooks []func()
 }
 
@@ -153,9 +150,8 @@ func NewBus(logger log.Logger) *Bus {
 	}
 }
 
-// Subscribe returns a new subscriber that receives events matching the filters.
-// capacity sets the channel buffer size; pass 0 or DefaultSubscriberCap for the standard 64-event buffer.
-// If filters is empty, it receives everything except the opt-in types.
+// Subscribe returns a subscriber for matching events; capacity sets the buffer
+// (0 for the standard 64), and empty filters match everything but opt-in types.
 func (b *Bus) Subscribe(capacity int, filters ...EventType) *Subscriber {
 	b.mu.Lock()
 
@@ -198,10 +194,8 @@ func (b *Bus) unsubscribe(id uint64) {
 	}
 }
 
-// OnSubscriberChange registers a hook invoked after every subscribe and
-// unsubscribe. Hooks run without the bus lock held and must return
-// quickly; they typically re-check HasSubscribers and start/stop a
-// producer. Register before subscribers arrive — hooks do not replay.
+// OnSubscriberChange hooks every subscribe/unsubscribe, run lock-free and
+// quick; register before subscribers arrive, since hooks do not replay.
 func (b *Bus) OnSubscriberChange(fn func()) {
 	b.mu.Lock()
 	b.changeHooks = append(b.changeHooks, fn)
@@ -218,11 +212,8 @@ func (b *Bus) notifyChange() {
 	}
 }
 
-// HasSubscribers reports whether at least one live subscriber would
-// receive events of the given type. Subscribers with no filters match
-// everything. Scanned on demand under RLock — subscriber counts are tiny
-// and callers tick at most every few seconds, so no counter state to keep
-// in sync on the unsubscribe path.
+// HasSubscribers reports whether a live subscriber would receive the type
+// (bare subscribers match everything). Scanned on demand; counts are tiny.
 func (b *Bus) HasSubscribers(typ EventType) bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

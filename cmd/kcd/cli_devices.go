@@ -25,6 +25,10 @@ var devicesCmd = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "connected",
+			Usage: "Only show paired devices that are currently connected",
+		},
+		&cli.BoolFlag{
+			Name:  "paired",
 			Usage: "Only show paired devices (including offline ones)",
 		},
 	},
@@ -40,18 +44,7 @@ var devicesCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
-		if c.Bool("connected") {
-			filtered := make([]device.DeviceInfo, 0, len(devices))
-			for _, d := range devices {
-				// Paired devices show even when offline — the CONNECTED
-				// column carries liveness. Unpaired strangers (which may
-				// briefly hold a raw TCP connection) are hidden.
-				if d.State == device.StatePaired {
-					filtered = append(filtered, d)
-				}
-			}
-			devices = filtered
-		}
+		devices = filterDevices(devices, c.Bool("paired"), c.Bool("connected"))
 		if c.Bool("json") {
 			data, _ := json.MarshalIndent(devices, "", "  ")
 			fmt.Println(string(data))
@@ -60,6 +53,25 @@ var devicesCmd = &cli.Command{
 		printDeviceTable(devices)
 		return nil
 	},
+}
+
+// filterDevices applies --paired (all paired, offline included) and
+// --connected (paired plus live); strangers never pass either filter.
+func filterDevices(devices []device.DeviceInfo, pairedOnly, connectedOnly bool) []device.DeviceInfo {
+	if !pairedOnly && !connectedOnly {
+		return devices
+	}
+	filtered := make([]device.DeviceInfo, 0, len(devices))
+	for _, d := range devices {
+		if d.State != device.StatePaired {
+			continue
+		}
+		if connectedOnly && !d.Connected {
+			continue
+		}
+		filtered = append(filtered, d)
+	}
+	return filtered
 }
 
 func printDeviceTable(devices []device.DeviceInfo) {

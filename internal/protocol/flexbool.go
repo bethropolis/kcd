@@ -6,10 +6,8 @@ import (
 	"strings"
 )
 
-// FlexBool is a bool that tolerates the loose encodings stock clients
-// emit: JSON booleans, 0/1 numbers, and "true"/"false"/"1"/"0" strings
-// (Android sends SMS read flags as 0/1 and telephony cancel flags as
-// the string "true"). It marshals back as a plain JSON boolean.
+// FlexBool tolerates the loose encodings stock clients emit (bools, 0/1,
+// "true"/"false" strings); it marshals back as a plain JSON boolean.
 type FlexBool bool
 
 // UnmarshalJSON accepts booleans, numbers, and strings.

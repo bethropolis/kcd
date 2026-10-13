@@ -43,10 +43,8 @@ func (c *Conn) Close() error {
 	return c.tlsConn.Close()
 }
 
-// SetWriteDeadline bounds the next WritePacket call. A half-open socket
-// with a stuck retransmit queue (Send-Q never drains) would otherwise block
-// the writer forever while TCP keepalive — which only probes idle sockets —
-// never fires. Callers clear with the zero time after the write.
+// SetWriteDeadline bounds the next WritePacket call: a stuck retransmit
+// queue would block forever, and keepalive never probes a writing socket.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return c.tlsConn.SetWriteDeadline(t)
 }

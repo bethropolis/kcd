@@ -28,8 +28,10 @@ func NewLockDevicePlugin(logger log.Logger) *LockDevicePlugin {
 
 type LockBody struct {
 	RequestLocked bool `json:"requestLocked,omitempty"`
-	SetLocked     bool `json:"setLocked,omitempty"`
-	IsLocked      bool `json:"isLocked,omitempty"`
+	// Always present on the wire: absent reads as false, which a strict
+	// peer cannot distinguish from a malformed unlock request.
+	SetLocked bool `json:"setLocked"`
+	IsLocked  bool `json:"isLocked,omitempty"`
 }
 
 func (p *LockDevicePlugin) Name() string           { return "LockDevice" }
@@ -37,7 +39,9 @@ func (p *LockDevicePlugin) Timeout() time.Duration { return 5 * time.Second }
 func (p *LockDevicePlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.lock", "kdeconnect.lock.request"}
 }
-func (p *LockDevicePlugin) OutgoingTypes() []string { return []string{"kdeconnect.lock"} }
+func (p *LockDevicePlugin) OutgoingTypes() []string {
+	return []string{"kdeconnect.lock", "kdeconnect.lock.request"}
+}
 
 func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	var body LockBody
@@ -61,8 +65,11 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return nil
 	}
 
-	// Phone is requesting a lock/unlock action. Fire and forget so Handle
-	// returns immediately; failures are logged by the seam.
+	// Only an explicit lock request acts locally; a peer's bare state
+	// report must never lock or unlock anything. Failures are logged.
+	if pkt.Type != "kdeconnect.lock.request" {
+		return nil
+	}
 	if body.SetLocked {
 		plugin.RunCommandAsync(p.logger, "loginctl", "lock-session")
 	} else {
@@ -88,22 +95,23 @@ func (p *LockDevicePlugin) getLocked() bool {
 	return strings.TrimSpace(string(out)) == "LockedHint=yes"
 }
 
-// Lock triggers an immediate session lock from the daemon/IPC side.
+// Lock asks the remote device to lock its own screen; the local session
+// is never touched here (that happens only in Handle, on phone request).
 func (p *LockDevicePlugin) Lock(dev device.Sender) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	_, err := plugin.RunCommandSync(ctx, "loginctl", "lock-session")
-	return err
+	pkt, err := protocol.NewPacket("kdeconnect.lock.request", LockBody{SetLocked: true})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
 }
 
-// Unlock triggers an immediate session unlock from the daemon/IPC side.
+// Unlock asks the remote device to unlock its own screen.
 func (p *LockDevicePlugin) Unlock(dev device.Sender) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	_, err := plugin.RunCommandSync(ctx, "loginctl", "unlock-session")
-	return err
+	pkt, err := protocol.NewPacket("kdeconnect.lock.request", LockBody{SetLocked: false})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
 }
 
 func (p *LockDevicePlugin) OnConnect(dev device.Sender)    {}

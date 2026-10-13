@@ -58,12 +58,8 @@ type seekArgs struct {
 	offset string
 }
 
-// splitSeekArgs recovers --device/--player and the offset from a raw argument
-// list, for a command running with SkipFlagParsing.
-//
-// A "-" followed by a digit is always the offset: no flag this command takes
-// has a numeric value, so nothing is ambiguous. Anything else beginning with
-// "-" is an error rather than silently ignored.
+// splitSeekArgs recovers --device/--player and the offset from raw args. A
+// "-" followed by a digit is always the offset; anything else errors out.
 func splitSeekArgs(args []string) (seekArgs, error) {
 	var out seekArgs
 	var offset string

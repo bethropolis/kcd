@@ -22,9 +22,8 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 		}
 
 		if body.Request {
-			// Stock peers ask for our state with request:true inside a
-			// regular battery packet. Answer it; an empty body would
-			// otherwise clobber the stored charge to a bogus 0%.
+			// Stock peers ask with request:true inside a regular packet: answer
+			// it, since an empty body would clobber stored charge to bogus 0%.
 			return p.sendLocalState(dev)
 		}
 
@@ -100,9 +99,8 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 
 // OnConnect requests the phone's battery and sends our local battery state.
 func (p *BatteryPlugin) OnConnect(dev device.Sender) {
-	// Ask phone for its battery. Stock peers only honor request:true
-	// inside a regular battery packet; the legacy request type is kept
-	// for backward compatibility on the inbound path.
+	// Ask via request:true inside a regular battery packet: stock peers honor
+	// only that. The legacy request type stays for inbound compat.
 	pkt, _ := protocol.NewPacket("kdeconnect.battery", map[string]any{
 		"request": true,
 	})

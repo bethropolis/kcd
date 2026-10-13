@@ -7,11 +7,8 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// diffTracked compares live bus names against tracked players.
-// tracked maps busName -> displayName. It returns entries present on the
-// bus but untracked (to add) and bus names tracked but no longer owned
-// (to drop). Pure function for testability; all D-Bus I/O stays in
-// reconcilePlayers.
+// diffTracked diffs live bus names against tracked players (additions and
+// drops); D-Bus I/O stays in reconcilePlayers.
 func diffTracked(entries []playerEntry, tracked map[string]string) (add []playerEntry, drop []string) {
 	owned := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
@@ -28,12 +25,9 @@ func diffTracked(entries []playerEntry, tracked map[string]string) (add []player
 	return add, drop
 }
 
-// reconcilePlayers heals drift between the session bus and p.players.
-// Missing players are added through the same path as the signal handler
-// (match rules + broadcast so the phone learns about them); ghosts are
-// removed. A removal only fires if the tracked entry still points at the
-// dead bus name, so a same-named live player (duplicate Identity, e.g. two
-// Firefox profiles) is never evicted by its dead twin.
+// reconcilePlayers heals bus/p.players drift through the signal path; a
+// removal fires only if the entry still points at the dead bus name, so a
+// live same-named twin is never evicted.
 func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[string]string) {
 	if p.dbus == nil || conn == nil {
 		return
@@ -54,9 +48,8 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 
 	add, drop := diffTracked(entries, tracked)
 	if len(add) == 0 && len(drop) == 0 {
-		// Names agree, but state may still be stale (a missed Play
-		// signal disarms the position poller with nothing left to
-		// correct it). Heal that too.
+		// Names agree but state may be stale (a missed Play disarms the poller
+		// with nothing left to correct it). Heal that too.
 		p.refreshTrackedStates()
 		return
 	}
@@ -110,13 +103,8 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 	p.refreshTrackedStates()
 }
 
-// refreshTrackedStates re-reads D-Bus state for every tracked player,
-// storing and broadcasting changes. Reconcile heals names; this heals
-// STATE: without it a missed or stale Play signal leaves the position
-// poller disarmed (or a pause missed leaves it armed) with no further
-// signal arriving to correct it. Triggers are rare (unknown senders,
-// explicit queries, connects), so the per-player GetAll is event-driven
-// cost — never a standing timer. Read failures change nothing.
+// refreshTrackedStates re-reads D-Bus state per tracked player, healing what
+// missed signals leave wrongly armed or disarmed with no correction coming.
 func (p *MPRISPlugin) refreshTrackedStates() {
 	if p.dbus == nil {
 		return
@@ -145,19 +133,12 @@ func (p *MPRISPlugin) refreshTrackedStates() {
 	}
 }
 
-// positionDriftToleranceMs bounds how far the phone's extrapolated
-// position may drift from the true position before a poll tick
-// re-broadcasts. Steady playback inside the tolerance stays silent (the
-// phone extrapolates Pos + (now - PosAnchorMs) itself); seeks, missed
-// signals, and clock drift beyond it refresh the anchor.
+// positionDriftToleranceMs bounds phone extrapolation drift before a poll
+// tick re-broadcasts; steady playback inside it stays silent by design.
 const positionDriftToleranceMs = 3000
 
-// localStateChanged reports whether a fresh read differs from the cached
-// state on any broadcasted field. A nil cache always counts as changed.
-// Position counts only on drift: while both reads agree the player is
-// playing, the phone extrapolates from the anchor, so a tick that merely
-// advances Pos on schedule is not a change. nowMs is the tick time the
-// extrapolation is measured against.
+// localStateChanged compares a fresh read against cache; nil always differs,
+// and position only on drift — the phone extrapolates from the anchor.
 func localStateChanged(nowMs int64, state, last *NowPlaying) bool {
 	return last == nil ||
 		state.PlaybackStatus != last.PlaybackStatus ||
@@ -170,10 +151,8 @@ func localStateChanged(nowMs int64, state, last *NowPlaying) bool {
 		positionDrifted(nowMs, state, last)
 }
 
-// positionDrifted reports whether the fresh position has moved off the
-// phone's extrapolation past the tolerance. Outside steady playback
-// (either side paused, or no anchor stamped yet) there is no
-// extrapolation, so any raw Pos difference counts.
+// positionDrifted reports movement past tolerance off the extrapolation;
+// outside steady playback any raw Pos difference counts (no extrapolation).
 func positionDrifted(nowMs int64, state, last *NowPlaying) bool {
 	if state.IsPlaying && last.IsPlaying && last.PosAnchorMs > 0 {
 		expected := last.Pos + (nowMs - last.PosAnchorMs)

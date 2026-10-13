@@ -18,9 +18,8 @@ import (
 // characters when they're embedded in icon cache paths.
 var notifIDChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
-// sanitizeNotifID strips everything but alphanumerics, dot, underscore and
-// hyphen from a notification ID so it can't escape the icon cache directory
-// via path separators. Empty results fall back to "default".
+// sanitizeNotifID strips everything but safe chars so IDs can't escape the
+// icon cache via separators; empty results fall back to "default".
 func sanitizeNotifID(id string) string {
 	if safe := notifIDChars.ReplaceAllString(id, "_"); safe != "" {
 		return safe
@@ -50,10 +49,8 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 
-	// Use the notification ID as the filename so the same app reuses the
-	// cached icon rather than downloading it on every notification.
-	// The ID comes from the phone, so restrict it to filename-safe chars
-	// (no separators) — otherwise ../ in an ID would escape the icon dir.
+	// Use the notification ID as the filename, restricted to safe chars:
+	// ../ in a phone-supplied ID would otherwise escape the icon dir.
 	safeName := nonAlphaNumeric.ReplaceAllString(appName, "_")
 	safeID := sanitizeNotifID(notifID)
 	iconPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png", safeName, safeID))
@@ -66,10 +63,8 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 
-	// Reuse the cached icon even when the phone re-posts the notification
-	// without an icon payload (Android only sends the bytes when the icon
-	// hash changes). Without this, every re-post would fall back to a theme
-	// icon name that doesn't exist, showing a placeholder image.
+	// Reuse the cached icon when re-posts carry no bytes (the phone sends them
+	// only on hash change); otherwise every re-post shows a placeholder.
 	if _, err := os.Stat(iconPath); err == nil {
 		return iconPath
 	}

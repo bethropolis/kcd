@@ -13,9 +13,8 @@ type playerEntry struct {
 	identity  string
 }
 
-// mprisBusPrefix is the well-known-name prefix every MPRIS player
-// advertises. Matching on it keeps the watcher's NameOwnerChanged
-// subscription off unrelated session-bus traffic.
+// mprisBusPrefix is the well-known-name prefix every player advertises;
+// matching on it keeps the watcher off unrelated bus traffic.
 const mprisBusPrefix = "org.mpris.MediaPlayer2."
 
 func listPlayersDBus(conn *dbus.Conn) ([]playerEntry, error) {

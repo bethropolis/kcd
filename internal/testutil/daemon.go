@@ -13,9 +13,8 @@ import (
 	"github.com/bethropolis/kcd/pkg/client"
 )
 
-// StartTestDaemon starts a kcd daemon in a goroutine with a cancellable
-// context and waits up to 3 seconds for its IPC socket to be ready.
-// It returns a cancel function (to stop the daemon) and a pre-connected client.
+// StartTestDaemon runs a kcd daemon with a cancellable context, waiting for
+// its IPC socket; returns a cancel func and a pre-connected client.
 func StartTestDaemon(t *testing.T, cfg *config.Config) (context.CancelFunc, *client.Client) {
 	t.Helper()
 

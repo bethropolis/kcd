@@ -31,9 +31,8 @@ type TransferInfo struct {
 	Port int `json:"port"`
 }
 
-// poolAcquires counts every call to AcquirePacket.
-// poolMisses counts calls where sync.Pool had no object and allocated fresh.
-// hits = acquires - misses.
+// Pool diagnostics: acquires counts AcquirePacket calls, misses count fresh
+// allocations when sync.Pool is empty (hits = acquires - misses).
 var (
 	poolAcquires atomic.Int64
 	poolMisses   atomic.Int64
@@ -55,10 +54,8 @@ func AcquirePacket() *Packet {
 	return p
 }
 
-// PoolStats returns packet pool usage counters for diagnostic logging.
-// hits = acquires - misses.
-// A miss rate above ~20% under steady load may indicate pool pressure
-// from GC eviction.
+// PoolStats returns packet pool usage counters for diagnostics; a miss rate
+// above ~20% under steady load suggests GC-eviction pool pressure.
 func PoolStats() (acquires, misses int64) {
 	return poolAcquires.Load(), poolMisses.Load()
 }
@@ -81,10 +78,8 @@ func (p *Packet) Reset() {
 	p.PayloadTransferInfo = nil
 }
 
-// NewPacket creates a new Packet with the current timestamp and given type/body.
-// A nil body is normalized to an empty object: stock implementations always
-// send `"body":{}` for bodyless requests, and explicit `"body":null` has
-// been observed to abort phone links.
+// NewPacket creates a Packet with the current timestamp. A nil body becomes
+// {}: stock implementations always send objects, and null aborts phone links.
 func NewPacket(typ string, body interface{}) (*Packet, error) {
 	if body == nil {
 		body = map[string]any{}

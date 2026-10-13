@@ -26,10 +26,8 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 
 	out, err := p.runClipboard(ctx, cmd)
 	if err != nil {
-		// An empty clipboard (fresh session, nothing copied yet) is not an
-		// error worth failing a push for — the tool exits non-zero with a
-		// "no selection"-style message. Treat it as nothing to push so the
-		// CLI and --watch don't spam errors until something is copied.
+		// Empty clipboard is not a push failure: the tool exits non-zero with
+		// "no selection", which would otherwise spam errors until first copy.
 		if isNoSelection(err) {
 			return nil
 		}
@@ -42,16 +40,8 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	}
 
 	p.mu.Lock()
-	// Skip when the content matches what we last received from the phone
-	// or last pushed outbound.
-	//
-	// lastContent guard: prevents sending the phone's own content back.
-	// lastPushedContent guard: prevents duplicate pushes when the local
-	// clipboard hasn't changed between two Push calls.
-	//
-	// Comparisons are normalized of trailing newlines so a stray \n appended
-	// by some clipboard tooling cannot silently disable the guard and cause
-	// an echo of the phone's own content back to it.
+	// Skip content matching the phone's last or our last push, compared
+	// newline-normalized: otherwise the phone's content echoes back to it.
 	if normClip(content) == normClip(p.lastContent) || normClip(content) == normClip(p.lastPushedContent) {
 		p.mu.Unlock()
 		return nil
@@ -70,9 +60,8 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 	return dev.Send(pkt)
 }
 
-// normClip strips trailing newlines so content read back from wl-copy/xclip
-// compares equal to the raw content we stored, regardless of which tool
-// appended (or not) a trailing newline.
+// normClip strips trailing newlines so read-back content compares equal
+// regardless of which tool appended one.
 func normClip(s string) string {
 	return strings.TrimRight(s, "\n")
 }

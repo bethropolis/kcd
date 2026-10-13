@@ -21,9 +21,8 @@ func (p *NotificationPlugin) closeNotification(desktopID string) {
 
 // sendDesktopNotification calls notify-send with the collected parameters.
 func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, text, iconPath string) {
-	// Dunst / mako / swaync: stack notifications from the same app so they
-	// replace each other instead of flooding the screen. Daemons that ignore
-	// this hint (e.g. Quickshell) are covered by --replace-id below.
+	// Stack same-app notifications so they replace instead of flooding; daemons
+	// ignoring the hint are covered by --replace-id below.
 	groupHint := "string:x-dunst-stack-tag:kcd-" + appName
 
 	args := []string{"-a", appName}
@@ -34,10 +33,8 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 		args = append(args, "-t", strconv.Itoa(p.cfg.ExpireMS))
 	}
 
-	// No icon by default. Pass an explicit empty icon so daemons (e.g.
-	// Quickshell) don't fall back to deriving an icon name from the app name
-	// and render a placeholder. When show_icons is enabled, pass the phone's
-	// downloaded icon, falling back to a name derived from the app.
+	// No icon by default: pass explicit empty so daemons don't derive one
+	// from the app name and render a placeholder. show_icons uses the download.
 	iconArg := ""
 	if p.cfg.ShowIcons {
 		iconArg = strings.ToLower(strings.ReplaceAll(appName, " ", "-"))
@@ -51,11 +48,8 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 	args = append(args, "-i", iconArg, "-h", groupHint)
 
 	if p.canCloseNotifs && id != "" {
-		// Android re-posts notifications on every update with a stable id
-		// (e.g. media/scrobble now-playing). Replace the existing desktop
-		// popup via D-Bus replaces_id so repeated updates collapse to one,
-		// mirroring the reference desktop's Notification::update(). Disable
-		// via `replace_notifications = false`.
+		// Android re-posts each update under a stable id; replaces_id keeps
+		// them one popup. `replace_notifications = false` disables this.
 		if p.cfg.ReplaceNotifications {
 			key := p.notifKey(devID, id)
 			// Cancel-grace: if a cancel was deferred for this key, drop it so
@@ -69,9 +63,8 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 				}
 			}
 		}
-		// "--" ends option parsing so a phone-provided title/body starting with
-		// '-' can't be misparsed as a notify-send flag (notify-send uses
-		// GOption, which honors the POSIX separator).
+		// "--" ends option parsing so a phone title/body starting with '-'
+		// isn't misparsed as a notify-send flag.
 		args = append(args, "--print-id", "--", title, text)
 	} else {
 		args = append(args, "--", title, text)
