@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/urfave/cli/v2"
 )
@@ -60,6 +61,9 @@ func clipboardWatch() error {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "clipboard watch error: %v\n", err)
+			// A failing wl-paste returns instantly; without this the loop
+			// pegs a core and floods stderr.
+			time.Sleep(2 * time.Second)
 		}
 	}
 }

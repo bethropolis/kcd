@@ -2,33 +2,17 @@ package mpris
 
 import (
 	"bytes"
+	"compress/zlib"
+	"encoding/binary"
+	"hash/crc32"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestSniffImageExt(t *testing.T) {
-	cases := []struct {
-		name string
-		data []byte
-		want string
-	}{
-		{"jpeg", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00}, ".jpg"},
-		{"png", []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, ".png"},
-		{"gif", []byte("GIF89a..."), ".gif"},
-		{"webp", []byte("RIFF\x00\x00\x00\x00WEBPVP8 "), ".webp"},
-		{"unknown-falls-back-jpg", []byte("not an image"), ".jpg"},
-		{"empty", nil, ".jpg"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := sniffImageExt(tc.data); got != tc.want {
-				t.Fatalf("sniffImageExt(%v) = %q, want %q", tc.data, got, tc.want)
-			}
-		})
-	}
-}
 
 func TestArtCacheKey(t *testing.T) {
 	c := &ArtCache{}
@@ -50,6 +34,26 @@ func TestArtCacheKey(t *testing.T) {
 	}
 }
 
+// tinyPNG encodes a real w×h image for Commit inputs.
+func tinyPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func commitFile(t *testing.T, c *ArtCache, rawURL string, data []byte) (string, error) {
+	t.Helper()
+	tmp := filepath.Join(c.dir, "tmp-art")
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return c.Commit(rawURL, tmp)
+}
+
 func TestArtCacheResolveAndCommit(t *testing.T) {
 	dir := t.TempDir()
 	c := &ArtCache{dir: dir, resolved: make(map[string]string)}
@@ -59,26 +63,21 @@ func TestArtCacheResolveAndCommit(t *testing.T) {
 		t.Fatalf("expected miss before commit, got %q", got)
 	}
 
-	// Stream a tiny JPEG into a temp file, then commit.
-	tmp := filepath.Join(dir, "tmp-art")
-	png := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00}
-	if err := os.WriteFile(tmp, png, 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	fileURL, err := c.Commit(rawURL, tmp)
+	fileURL, err := commitFile(t, c, rawURL, tinyPNG(t, 4, 4))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(fileURL, "file://") {
-		t.Fatalf("expected file:// prefix, got %q", fileURL)
-	}
 	path := strings.TrimPrefix(fileURL, "file://")
-	if !strings.HasSuffix(path, "42.png") {
-		t.Fatalf("expected extension sniffed to .png with key 42, got %q", path)
+	if !strings.HasSuffix(path, "42.jpg") {
+		t.Fatalf("expected re-encoded 42.jpg, got %q", path)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("cached file missing: %v", err)
+	// The cache holds a decodable JPEG, not the peer's PNG bytes.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(data)); err != nil {
+		t.Fatalf("cached file does not decode as JPEG: %v", err)
 	}
 
 	if got := c.Resolve(rawURL); got != fileURL {
@@ -92,22 +91,133 @@ func TestArtCacheResolveAndCommit(t *testing.T) {
 	}
 }
 
-func TestArtCacheCommitRenamesTemp(t *testing.T) {
+func TestArtCacheCommitCleansTemp(t *testing.T) {
 	dir := t.TempDir()
 	c := &ArtCache{dir: dir, resolved: make(map[string]string)}
 
-	tmp := filepath.Join(dir, "tmp-art")
-	jpeg := bytes.Repeat([]byte{0xFF, 0xD8, 0xFF}, 32)
-	if err := os.WriteFile(tmp, jpeg, 0600); err != nil {
+	if _, err := commitFile(t, c, "kdeconnect:/artUri?kdeArtHash=7", tinyPNG(t, 2, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Commit("kdeconnect:/artUri?kdeArtHash=7", tmp); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "tmp-art")); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file removed after commit, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "7.jpg")); err != nil {
 		t.Fatalf("expected cached 7.jpg: %v", err)
+	}
+}
+
+func pngChunk(dst *bytes.Buffer, typ string, data []byte) {
+	var hdr [8]byte
+	binary.BigEndian.PutUint32(hdr[:4], uint32(len(data)))
+	copy(hdr[4:], typ)
+	dst.Write(hdr[:])
+	dst.Write(data)
+	sum := crc32.Checksum(append([]byte(typ), data...), crc32.MakeTable(crc32.IEEE))
+	var tail [4]byte
+	binary.BigEndian.PutUint32(tail[:], sum)
+	dst.Write(tail[:])
+}
+
+// oversizePNG has a 4096x4096 header with no raster behind it: DecodeConfig
+// reports the dimensions, so the gate must fire before any allocation.
+func oversizePNG() []byte {
+	var b bytes.Buffer
+	b.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:4], 4096)
+	binary.BigEndian.PutUint32(ihdr[4:8], 4096)
+	ihdr[8], ihdr[9] = 8, 2
+	pngChunk(&b, "IHDR", ihdr[:])
+	pngChunk(&b, "IDAT", nil)
+	return b.Bytes()
+}
+
+func TestArtCacheRejectsOversize(t *testing.T) {
+	dir := t.TempDir()
+	c := &ArtCache{dir: dir, resolved: make(map[string]string)}
+
+	if _, err := commitFile(t, c, "kdeconnect:/artUri?kdeArtHash=9", oversizePNG()); err == nil {
+		t.Fatal("expected rejection of 4096x4096 art, got nil error")
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "9.*"))
+	if len(matches) != 0 {
+		t.Fatalf("rejected art left files behind: %v", matches)
+	}
+	if got := c.Resolve("kdeconnect:/artUri?kdeArtHash=9"); got != "" {
+		t.Fatalf("rejected art resolved to %q", got)
+	}
+}
+
+func TestArtCacheRejectsNonImage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"text", []byte("not an image")},
+		{"empty", nil},
+		{"webp", []byte("RIFF\x00\x00\x00\x00WEBPVP8 ")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			c := &ArtCache{dir: dir, resolved: make(map[string]string)}
+			if _, err := commitFile(t, c, "kdeconnect:/artUri?kdeArtHash=5", tc.data); err == nil {
+				t.Fatalf("expected rejection of %s input", tc.name)
+			}
+		})
+	}
+}
+
+// textBombPNG is a 1x1 image carrying a large compressed zTXt chunk: tiny on
+// the wire, huge once a retaining decoder inflates it. Go skips the chunk,
+// but downstream decoders may not — Commit must store the re-encode, never
+// these bytes.
+func textBombPNG(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	b.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:4], 1)
+	binary.BigEndian.PutUint32(ihdr[4:8], 1)
+	ihdr[8], ihdr[9] = 8, 2
+	pngChunk(&b, "IHDR", ihdr[:])
+
+	var zipped bytes.Buffer
+	w, _ := zlib.NewWriterLevel(&zipped, zlib.BestCompression)
+	if _, err := w.Write(bytes.Repeat([]byte("bombkeyword!"), 65536)); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	ztxt := append([]byte("bombkeyword\x00\x00"), zipped.Bytes()...)
+	pngChunk(&b, "zTXt", ztxt)
+
+	var raw bytes.Buffer
+	raw.WriteByte(0)
+	raw.Write([]byte{0x11, 0x22, 0x33})
+	var idat bytes.Buffer
+	w2, _ := zlib.NewWriterLevel(&idat, zlib.BestCompression)
+	w2.Write(raw.Bytes())
+	w2.Close()
+	pngChunk(&b, "IDAT", idat.Bytes())
+	pngChunk(&b, "IEND", nil)
+	return b.Bytes()
+}
+
+func TestArtCacheStripsAncillaryChunks(t *testing.T) {
+	dir := t.TempDir()
+	c := &ArtCache{dir: dir, resolved: make(map[string]string)}
+
+	fileURL, err := commitFile(t, c, "kdeconnect:/artUri?kdeArtHash=11", textBombPNG(t))
+	if err != nil {
+		t.Fatalf("valid-dimension bomb should re-encode, not reject: %v", err)
+	}
+	data, err := os.ReadFile(strings.TrimPrefix(fileURL, "file://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("bombkeyword")) {
+		t.Fatal("cached file still carries the peer's text chunk")
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(data)); err != nil {
+		t.Fatalf("cached file does not decode as JPEG: %v", err)
 	}
 }
