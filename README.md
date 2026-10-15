@@ -359,6 +359,8 @@ done
 - **Path sanitisation** — filenames received via the Share plugin are strictly sanitised to prevent path traversal attacks.
 - **Memory-safe transfers** — large file transfers stream directly to disk to prevent OOM conditions.
 
+See [SECURITY.md](SECURITY.md) for the threat model, what a paired device can do, hardening tips, and how to report a vulnerability privately.
+
 ---
 
 ## Performance
@@ -389,6 +391,8 @@ kcd connect 192.168.1.100
 | [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python examples) |
 | [`docs/CONTAINER.md`](docs/CONTAINER.md) | Running kcd in Docker / Podman |
 | [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup, checks, commit and PR conventions |
+| [`SECURITY.md`](SECURITY.md) | Threat model, hardening, private vulnerability reporting |
 
 ---
 

@@ -825,7 +825,7 @@ kcd watch --events=connectivity.update
 
 If you are implementing a full KDE Connect network-level client (not just IPC),
 refer to the upstream protocol spec at
-<https://github.com/KDE/kdeconnect-meta/blob/work/protocol-schemas/protocol.md>.
+<https://invent.kde.org/network/kdeconnect-meta/-/blob/master/protocol.md>.
 
 ### Getting Help
 - **Ask questions or Issues**: feel free to ask questions in kcd discussion page  or file an issue that you may find, also if something can better be done upstream than in client do a feature request through issues

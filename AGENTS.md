@@ -1,386 +1,319 @@
 # kcd — Agent Instructions
 
+Instructions for AI coding agents, and a fast orientation for human
+contributors. Human contribution process: [CONTRIBUTING.md](CONTRIBUTING.md).
+Threat model and reporting: [SECURITY.md](SECURITY.md).
+
+---
+
 ## Project Identity
 
-**`kcd`** is a headless Go daemon implementing KDE Connect protocol v8. Single binary — daemon and CLI client share the same entry point via `urfave/cli/v2` subcommands. The daemon exposes a Unix socket for IPC; the CLI connects to it as a client. No GUI. D-Bus is used only by the MPRIS and SystemVolume plugins, and those fail gracefully if D-Bus is unavailable.
+**`kcd`** is a headless Go daemon implementing the KDE Connect protocol v8.
+One static binary is both the daemon (`kcd daemon`) and the CLI client (every
+other subcommand), built on `urfave/cli/v2`.
 
-- **Language:** Go 1.25, `CGO_ENABLED=0` everywhere
-- **Module:** `github.com/bethropolis/kcd`
-- **Static binary** — `ldd kcd` must print "not a dynamic executable"
-- **Core constraint:** Memory efficiency. Never buffer what can be streamed. Reuse allocations via the packet pool and a single `bufio.Reader` per connection.
+- The daemon serves a Unix socket (newline-delimited JSON). The CLI, `pkg/client` and third-party tools are all clients of it.
+- There's no GUI. The daemon links D-Bus (`godbus`) only in the MPRIS plugin. Other desktop integration goes through external tools (`notify-send`, `gdbus`, `pactl`/`wpctl`, `loginctl`…). Every desktop dependency must degrade gracefully (log and continue) when it's missing.
+- **Language:** Go 1.25 (pinned in `mise.toml`, with golangci-lint and hk).
+- **Module:** `github.com/bethropolis/kcd`. **License:** MIT.
+- **Core constraints:** a static binary (`CGO_ENABLED=0`), memory efficiency (stream, never buffer payloads), and zero idle cost (no timers or polling when nothing is happening).
 
 ---
 
 ## Absolute Rules
 
-Never violate these. If a change would break one, stop and reconsider the approach entirely.
+Never violate these. If a change would break one, stop and reconsider the approach.
 
-1. **CGO_ENABLED=0 always.** No cgo, no dynamic linking. Build with `CGO_ENABLED=0 go build`.
-2. **Never buffer file payloads.** Receive with `io.Copy(dst, io.LimitReader(conn, payloadSize))`. Buffering the entire file causes OOM.
-3. **Never write to a `net.Conn` directly.** Always send via `device.Send(packet)`. The device's internal send channel is the only goroutine-safe write path.
-4. **One `bufio.Reader` per connection, allocated once at accept/dial time.** Never allocate a new one inside the packet read loop.
-5. **Use the packet pool.** Acquire with `protocol.AcquirePacket()`, release with `protocol.ReleasePacket(pkt)` after the plugin finishes — not before.
-6. **Protocol version = 8.** Hardcoded as `protocol.ProtocolVersion`. Never send a different value.
-7. **deviceId is permanent.** Generated once via `config.EnsureDeviceID`, stored in `kcd.toml`. Never regenerate. It is the stable identity used for cert fingerprint pairing.
-8. **Self-signed TLS, `InsecureSkipVerify: true`.** Authentication happens via the SHA-256 fingerprint stored in `devices.json` after pairing — not via CA chain.
-9. **`Plugin.Handle()` must return immediately.** Any D-Bus call, subprocess (`exec.Command`), or disk I/O must be spawned in a goroutine *inside* the plugin. Blocking `Handle()` stalls the entire TCP read loop for that device.
-10. **No deprecated packages.** No `ioutil` (use `os`/`io`). No `log` and no direct `go.uber.org/zap` imports (use `internal/log` — enforced by depguard). No `cobra` (use `urfave/cli/v2`).
-11. **Keep `Body` as `json.RawMessage` in the router.** Plugins unmarshal their own body types. The packet router never touches body content.
-12. **One goroutine per connection.** Dispatch is sequential per device — one packet handled at a time. This is intentional; it removes the need for per-plugin locks.
-13. **Cap incoming payload size with `io.LimitReader`.** Never trust the `payloadSize` field from the remote device without a cap.
-14. **TLS handshake order:** exchange plaintext identity → upgrade to TLS (initiator = TLS server, acceptor = TLS client) → send full identity over TLS. The inverted TLS roles are a KDE Connect protocol requirement.
+1. **`CGO_ENABLED=0` for every shipped binary.** `file bin/kcd` must report a statically linked executable. (Race-detector *tests* need `CGO_ENABLED=1`; that's for tests only.)
+2. **Never buffer file payloads.** Stream with `io.Copy(dst, io.LimitReader(conn, size))`.
+3. **Cap every size a peer declares.** `payloadSize` and packet lengths are untrusted. Enforce a hard maximum, and treat a short read as failure.
+4. **Never write to a `net.Conn` of a device directly.** Send with `dev.Send(pkt)`. The device's writer goroutine is the only write path.
+5. **One `bufio.Reader` per connection**, allocated at accept or dial time, never inside the read loop.
+6. **Use the packet pool.** `protocol.AcquirePacket()` / `protocol.ReleasePacket(pkt)`. A packet is released after the plugin's `Handle` returns, so goroutines must copy `pkt.Body` before using it.
+7. **Protocol version is 8** (`protocol.ProtocolVersion`). Never send another value.
+8. **The device ID is permanent.** It's generated once and bound to the certificate's CN. Never regenerate or rewrite it, or every pairing breaks.
+9. **TLS uses self-signed certs with `InsecureSkipVerify: true`.** Authentication is the SHA-256 fingerprint pinned in `devices.json` at pairing, not a CA chain. Never accept a paired device whose fingerprint doesn't match.
+10. **`Plugin.Handle()` returns immediately.** D-Bus calls, subprocesses, disk and network I/O run in a goroutine. **That goroutine must not use `Handle`'s `ctx`**: the dispatcher cancels it when `Handle` returns. Use the plugin's lifetime context, or `context.WithoutCancel(ctx)` plus its own timeout.
+11. **No deprecated or forbidden packages.** No `io/ioutil`, no stdlib `log`, no direct `go.uber.org/zap` (use `internal/log`; depguard enforces the zap rule), no `cobra` (use `urfave/cli/v2`).
+12. **The router never decodes bodies.** `Packet.Body` is `json.RawMessage`; each plugin decodes its own types.
+13. **One reader goroutine per connection; dispatch is sequential per device.** That's intentional and removes the need for per-plugin locks on the receive path. Don't parallelise dispatch.
+14. **TLS handshake order:**
+    1. exchange the plaintext identity;
+    2. upgrade to TLS with **inverted roles** (the TCP dialer is the TLS *server*, the acceptor is the TLS *client*);
+    3. send the full identity again over TLS.
+15. **Only pairing packets go to and from unpaired devices.** Android unpairs a device that sends it anything else.
+16. **Compatibility is a feature.** Existing `kcd.toml` files, `devices.json`, IPC clients and CLI flags must keep working:
+    - New config keys are optional and default to current behaviour; old keys become aliases, never removed.
+    - IPC changes are additive.
+    - The daemon never rewrites the user's config file.
 
 ---
 
 ## Architecture Invariants
 
-These structural constraints must hold at all times:
-
 | Invariant | Why |
 |---|---|
-| `internal/protocol/` has **zero external imports** (stdlib only) | Protocol types are used everywhere; external deps would create cycles |
-| `internal/config/` only imports `github.com/BurntSushi/toml` and `internal/protocol` | Config must stay lean and cycle-free (`protocol` is stdlib-only, so no cycle is possible) |
-| `internal/plugin/plugin.go` only imports `internal/protocol` and `internal/device` | Plugins never import each other |
-| Plugins are registered in `daemon.go`, never in their own `init()` | Explicit, ordered, conditional on config |
-| `pkg/client/` only imports `internal/device`, `internal/events`, `internal/ipc`, and `internal/plugins/contacts` from the `internal/` tree | Public client API must not depend on internals beyond the IPC protocol and the types it surfaces |
-| All binaries built with `CGO_ENABLED=0` | Required for static distribution |
+| `internal/protocol` imports the stdlib only | Wire types are used everywhere; dependencies there create cycles |
+| `internal/config` imports only `github.com/BurntSushi/toml` and `internal/protocol` | Config must stay lean and cycle-free |
+| `internal/plugin` (interface and registry) imports only `internal/protocol` and `internal/device` | Plugins depend on the interface, not on each other |
+| **A plugin never imports another plugin.** Shared code goes in a neutral package (`internal/transport`, or a new `internal/<name>`) | Keeps plugins independently removable |
+| Plugins are registered in `internal/daemon/plugins.go` (`setupPlugins`), pair first, never in `init()` | Explicit, ordered, conditional on config |
+| `pkg/client` imports from `internal/` only `device`, `events`, `ipc` and `plugins/contacts` | The public API must not drag in daemon internals. Shrink this list over time; never grow it |
+| All shipped binaries are built with `CGO_ENABLED=0` | Static distribution |
 
 ---
 
-## Comment Policy
+## Repository Map
 
-**Explain why, never what.** A comment that survives deletion without the reader losing information should be deleted.
-
-**Required, not optional.** These are not stylistic extras — add them:
-
-- Security rationale: what an attacker gains without a validation, why an input is rejected.
-- Protocol facts that cannot be re-derived from the code: a wire quirk, an Android-only behaviour, a literal error string worth matching on.
-- Invariants a plausible future edit would break.
-- The reason behind every timeout, retry count, or magic number.
-
-**Not wanted:**
-
-- Restating the next line of code.
-- Change narration (`used to`, `is now`, `no longer`) — git history owns that. Keep the conclusion, drop the archaeology.
-- Dev-process references (`Phase 2`, planning-artifact numbering). They mean nothing to a reader of the repo.
-- Prose duplicating this file or `docs/`.
-- Justifying the approach (`cleaner`, `zero-cost`, `race-free`). The code speaks.
-
-**Hard limit: 2 lines per block.** If it needs more, the code is unclear —
-rename, extract, or restructure instead. The one exception is
-security/protocol rationale that cannot fit: it may run long, but the
-reason goes in the first 2 lines so a reader can stop there.
-
-**Godoc stays** on exported identifiers: one line, starting with the identifier, even where thin. That is the API contract, not noise. Use `// Name does X.` even when `X` is obvious.
-
-When trimming a block, any comment touching validation, TLS, key handling, timeouts, or the KDE Connect wire format must keep its reason somewhere in the block, even if the wording changes.
-
----
-
-## Key File Locations
-
-| Purpose | Path |
+| Path | What lives there |
 |---|---|
-| Config file | `~/.config/kcd/kcd.toml` (`$XDG_CONFIG_HOME/kcd/kcd.toml`) |
-| Device state (persisted pairs) | `~/.local/state/kcd/devices.json` (`$XDG_STATE_HOME/kcd/devices.json`) |
-| TLS cert / key | `~/.config/kcd/cert.pem`, `~/.config/kcd/key.pem` |
-| IPC Unix socket | `/run/user/<uid>/kcd/kcd.sock` (`$XDG_RUNTIME_DIR/kcd/kcd.sock`) |
-| Album art cache | `~/.cache/kcd/art/` (`$XDG_CACHE_HOME/kcd/art`) — resolved `kdeconnect://` art URIs, keyed by `kdeArtHash` |
-| Downloaded files | `~/Downloads/kcd/` (overridable via `download_dir` in config) |
-| SFTP mount points | `$XDG_RUNTIME_DIR/kcd/mnt/` (`/run/user/1000/kcd/mnt`; `$XDG_STATE_HOME/kcd/mnt` with no user session) — never under a bulk-deletable user folder, since `rm -rf` descends into a live mount |
-| systemd user unit | `~/.config/systemd/user/kcd.service` |
-
-> **Note:** The socket lives in a `kcd/` subdirectory of the runtime dir, not directly in `/run/user/<uid>/`.
+| `cmd/kcd/` | CLI entry point: `main.go` (app, global flags, `daemon`, `doctor`, `status`) and `cli_<area>.go` per command group; `format_event.go` renders `watch` output |
+| `internal/daemon/` | `daemon.Run` wiring, `plugins.go` (registration), `ipc_routes_<area>.go` (IPC handlers), `transport*.go` (listen, dial, handshake, reconnect) |
+| `internal/protocol/` | Packet framing, pool, identity, `FlexBool`, constants |
+| `internal/transport/` | TLS connection wrapper, side-channel dial, idle-timeout conn, plaintext identity |
+| `internal/discovery/` | UDP broadcast and listener, mDNS advertise and browse, broadcaster ownership controller |
+| `internal/device/` | `Device` (state, send channel, read and write loops), `Registry`, `devices.json` load and save |
+| `internal/cert/` | Cert generation and loading, TLS config, fingerprints, pairing verification key |
+| `internal/plugin/` | `Plugin` interface, registry, dispatch (timeouts, panic recovery), exec helpers |
+| `internal/plugins/<name>/` | One package per KDE Connect plugin |
+| `internal/ipc/` | IPC wire types (`proto.go`), server, watch streaming, built-in handlers |
+| `internal/events/` | Event bus and event type constants |
+| `internal/config/` | Config struct, defaults, load, validation, XDG paths |
+| `internal/log/` | Logging facade over zap (the only package that may import zap) |
+| `internal/doctor/` | `kcd doctor` environment checks |
+| `internal/testutil/` | `MockPeer` (fake KDE Connect peer), `StartTestDaemon` |
+| `internal/integration/` | End-to-end tests (build tag `integration`) |
+| `pkg/client/` | Public Go client for the IPC socket |
+| `docs/` | `ARCHITECTURE.md`, `IPC_PROTOCOL.md`, `CLIENT_GUIDE.md`, `CLI.md`, `CONTAINER.md` |
+| `packaging/` | systemd units (user, system, socket-activated), completions, `kcd.example.toml`, firewall rules, Nautilus extension |
+| `desktop-integration/` | Waybar and other desktop integrations |
 
 ---
 
 ## Daemon Startup Order
 
-`daemon.Run()` wires everything in this exact sequence. Preserve the order when modifying startup:
+`daemon.Run()` (`internal/daemon/daemon.go`) wires things in this order. Keep
+the order when modifying startup:
 
-1. Build `log.Logger` via `log.New(cfg.LogLevel)`
-2. Load or generate TLS certificate (`cert.LoadOrGenerate`)
-3. Create event bus (`events.NewBus`)
-4. Create device registry (`device.NewRegistry`) and load persisted state from `devices.json`
-5. Create plugin registry (`plugin.NewRegistry`)
-6. Register all enabled plugins — **pair plugin always first**, then the rest conditioned on `cfg.Plugins.*`
-7. Create IPC handler (`ipc.NewHandler`) and register per-plugin IPC command handlers via `handler.Register`
-8. Start IPC server in a goroutine (`ipc.NewServer → Listen`)
-9. Build identity packet (`protocol.NewIdentityPacket`) using `plugins.Capabilities()`
-10. Start transport layer in a goroutine (`runTransport` → TCP listener + discovery broadcaster + mDNS)
-11. Send `READY=1` to `$NOTIFY_SOCKET` if present (systemd sd_notify)
-12. Block on `<-ctx.Done()`
-13. On shutdown, call `SftpPlugin.UnmountAll` (bounded by `shutdownUnmountBudget`). `OnDisconnect` only fires on a dropped connection, so without this every graceful stop leaves mounts live.
+1. Build the logger: `log.New(cfg.LogLevel)`.
+2. Load or generate the TLS certificate (`cert.LoadOrGenerate`), and build `cert.TLSConfig`.
+3. Create the event bus (`events.NewBus`).
+4. Create the device registry (`device.NewRegistry`), load `devices.json` (with migrations), and prune stale unpaired devices.
+5. Create the plugin registry (`plugin.NewRegistry`).
+6. Register plugins (`setupPlugins`): **pair first**, then each one enabled in `cfg.Plugins`.
+7. Build the identity packet from `plugins.Capabilities()`.
+8. Create the broadcaster controller. Start the mDNS advertisement (always on) and the reconnect-broadcast sync on connect/disconnect events.
+9. Create the IPC handler (`ipc.NewHandler`), register IPC routes (`registerIPCRoutes`), and set the pair-dial hook.
+10. Start the IPC server.
+11. Start the transport (`runTransport`): TCP listener, UDP listener, discovery.
+12. Send `READY=1` to `$NOTIFY_SOCKET` if set (systemd `Type=notify`).
+13. Install the SIGHUP reload handler. Today it reloads commands, notification filters and the log level only.
+14. Block on `<-ctx.Done()`.
+15. On shutdown, call `SftpPlugin.UnmountAll`, bounded by `shutdownUnmountBudget`. `OnDisconnect` only fires on a dropped connection, so without this every graceful stop would leave mounts live.
 
 ---
 
 ## Plugin System
 
-```
-⚠  CONSTRUCTORS: Every plugin now requires bus *events.Bus and
-logger log.Logger. Never use struct literals (&battery.BatteryPlugin{})
-— always call the constructor. The compiler will catch this but the
-error message may be confusing.
-```
-
-### Constructor Signature Reference
-
-| Plugin | Correct constructor signature |
-|---|---|
-| Battery | `battery.NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logger) *BatteryPlugin` |
-| Notification | `notification.NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger) *NotificationPlugin` |
-| Share | `share.NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.Config, bus *events.Bus, logger log.Logger) *SharePlugin` |
-| SFTP | `sftp.NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *SftpPlugin` |
-| Ping | `ping.NewPingPlugin(cfg config.PingConfig, bus *events.Bus, logger log.Logger) *PingPlugin` |
-| Pair | `pair.NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger log.Logger) *PairPlugin` |
-| Mousepad | `mousepad.NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger) *MousepadPlugin` |
-| SystemVolume | `systemvolume.NewSystemVolumePlugin(bus *events.Bus, logger log.Logger) *SystemVolumePlugin` |
-| SMS | `sms.NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger) *SMSPlugin` |
-| Contacts | `contacts.NewContactsPlugin(bus *events.Bus, logger log.Logger) *ContactsPlugin` |
-| MPRIS | `mpris.NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mprisCfg config.MPRISConfig, logger log.Logger, cacheDirs ...string) *MPRISPlugin` |
-
-### Interface
+### Interface (`internal/plugin/plugin.go`)
 
 ```go
 type Plugin interface {
-    Name()          string
-    IncomingTypes() []string   // packet types this plugin handles inbound
-    OutgoingTypes() []string   // packet types it sends outbound
+    Name() string
+    IncomingTypes() []string   // packet types handled inbound
+    OutgoingTypes() []string   // packet types sent
+    Timeout() time.Duration    // dispatch budget for Handle
     Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error
     OnConnect(dev device.Sender)
     OnDisconnect(dev device.Sender)
-    Timeout()       time.Duration
 }
 ```
 
-### Adding a new plugin — checklist
+`plugins.Capabilities()` returns the union of all registered plugins'
+incoming and outgoing types. Those go in the identity packet, so the peer knows
+what kcd supports.
 
-A plugin that needs both a packet handler *and* a CLI command requires changes in two places:
+### Constructors
 
-**1. Create `internal/plugins/<name>/<name>.go`**
+Every plugin has a `New<Name>Plugin(...)` constructor. **Always use it**, never
+a struct literal. Signatures differ (most take some of `cfg`, `bus *events.Bus`,
+`tlsConfig *tls.Config`, `logger log.Logger`, plus variadic options). The
+source of truth is the code:
 
-- Implement the `Plugin` interface
-- `Handle()` must return immediately (spawn goroutines for any blocking work)
-- Publish events via `bus.Publish(events.TypeXxx, dev.ID(), payload)` for anything the CLI's `watch` command should expose
-- If the plugin calls D-Bus or subprocesses, handle failure gracefully — log and return, don't crash
-
-**2. Register in `daemon.go`**
-
-```go
-// Plugin handler (packet routing)
-if cfg.Plugins.MyPlugin {
-    plugins.Register(myplugin.NewMyPlugin(bus, logger))
-}
-
-// IPC command handler (CLI → daemon bridge), if the plugin exposes CLI actions
-if cfg.Plugins.MyPlugin {
-    handler.Register(ipc.CmdMyAction, func(req ipc.Request) ipc.Response {
-        var p ipc.DevicePayload
-        if err := json.Unmarshal(req.Payload, &p); err != nil {
-            return ipc.Response{OK: false, Error: "invalid payload"}
-        }
-        pl, ok := plugins.GetByName("MyPlugin")
-        if !ok {
-            return ipc.Response{OK: false, Error: "myplugin not enabled"}
-        }
-        dev, ok := devices.Get(p.DeviceID)
-        if !ok {
-            return ipc.Response{OK: false, Error: "device not found"}
-        }
-        if err := pl.(*myplugin.MyPlugin).DoThing(dev); err != nil {
-            return ipc.Response{OK: false, Error: err.Error()}
-        }
-        return ipc.Response{OK: true}
-    })
-}
+```bash
+grep -rn "^func New[A-Za-z]*Plugin(" internal/plugins/
 ```
 
-**3. Add config toggle in `internal/config/config.go`**
+### Writing a plugin handler
 
-```go
-type PluginConfig struct {
-    // ...
-    MyPlugin bool `toml:"myplugin"`
-}
-```
+- `switch pkt.Type` first. A status packet must never be treated as a command.
+- Decode into plugin-owned types. **Inbound optional fields are pointers**, so absent and zero stay distinct.
+- **Outbound: no `omitempty` on a zero value that means something** (`false`, `0`, `""` that the receiver acts on).
+- Validate every peer field (type, range, length). Peer-controlled strings never become paths, commands or event names without sanitising or allowlisting.
+- Android sends some numbers and bools as strings. Use `protocol.FlexBool` (and a flexible int alongside it) to accept both. Always *send* the type the spec says.
+- Check units and field names against the spec schemas for every field you touch.
+- Publish an event (`bus.Publish(events.TypeX, dev.ID(), payload)`) for anything clients should be able to observe.
 
-Default it to `true` in `Defaults()`.
+### Adding a new plugin: checklist
 
-If the plugin needs specific settings beyond a boolean toggle, add a new struct to `internal/config/config.go` (e.g. `type MyPluginConfig struct { ... }`) and include it in the main `Config` struct.
-
-**4. Add IPC command constant in `internal/ipc/proto.go`**
-
-```go
-const CmdMyAction = "my_action"
-```
-
-**5. Add client method in `pkg/client/client.go`**
-
-**6. Add CLI subcommand in `cmd/kcd/main.go`**
-
-**7. Add config field to `packaging/kcd.example.toml`**
-
-**8. Document in `docs/IPC_PROTOCOL.md` and `docs/CLIENT_GUIDE.md`**
-
-- Add the new IPC command to the command reference table (section 3) with
-  request/response payload schemas.
-- If the plugin introduces new event types, add them to the event types
-  section (section 5) with full JSON payload examples.
-- If the plugin sends or receives new KDE Connect packet types, add entries
-  to the outbound (section 6) or inbound (section 7) packet reference tables.
-- Add the new CLI command to the command reference in `docs/CLI.md`.
-- Cover error cases in the walkthrough—what happens when the device is
-  disconnected, the plugin is disabled, or the payload is malformed.
-
-### Plugin lookup
-
-To get a plugin and type-assert to its concrete type from an IPC handler:
-
-```go
-pl, ok := plugins.GetByName("Share")
-if !ok { /* plugin disabled */ }
-sharePl := pl.(*share.SharePlugin)
-```
-
-### Plugin capabilities in identity
-
-`plugins.Capabilities()` returns `(incoming, outgoing []string)` — the union of all registered plugins' `IncomingTypes()` / `OutgoingTypes()`. These are sent in the identity packet so the remote device knows what this daemon supports.
+1. `internal/plugins/<name>/` with `<name>.go` (constructor, Name, types, Timeout, OnConnect/OnDisconnect), `handle.go`, `types.go`.
+2. Config toggle in `PluginConfig` (`internal/config/plugins.go`), defaulting to `true` in `Defaults()`, plus a settings struct if needed.
+3. Register it in `internal/daemon/plugins.go`.
+4. IPC: a constant in `internal/ipc/proto.go`, and a handler in `internal/daemon/ipc_routes_<area>.go` using the `deviceRoute` / `pluginRoute` helpers (`ipc_route_helpers.go`).
+5. A client method in `pkg/client/`, and a CLI command in `cmd/kcd/cli_<area>.go` with shell completions in `packaging/`.
+6. Event types in `internal/events/bus.go` (add them to `All()`; opt-in types to `OptInOnly()`).
+7. Docs: `packaging/kcd.example.toml`, `docs/IPC_PROTOCOL.md` (commands §3, events §5, packets §6/§7), `docs/CLIENT_GUIDE.md`, `docs/CLI.md`. Cover the error cases: device disconnected, plugin disabled, malformed payload.
+8. Tests (see Testing).
 
 ---
 
-## IPC Protocol
+## IPC Protocol (summary; full spec in `docs/IPC_PROTOCOL.md`)
 
-The daemon listens on a Unix socket. All messages are newline-delimited JSON.
-
-**Request:**
-```json
-{"cmd": "pair", "payload": {"deviceId": "a1b2_..."}}
-```
-
-**Response:**
-```json
-{"ok": true}
-{"ok": false, "error": "device not found"}
-{"ok": true, "data": [...]}
-```
-
-**Event stream (`watch`):** The `CmdWatch` command keeps the socket connection open and streams `events.Event` as NDJSON. Filters are sent in the payload:
-```json
-{"cmd": "watch", "payload": {"events": ["battery.update", "notification"]}}
-```
-
-The `kcd watch` CLI command reconnects automatically on disconnect with exponential backoff (1s → 30s max).
-
----
-
-## Discovery
-
-Discovery is dual-mode and runs concurrently. Both paths call the same `onDeviceFound` callback and feed into the same transport dial logic.
-
-| Method | How | When it works |
-|---|---|---|
-| UDP broadcast | Sends identity to `255.255.255.255:1716` + per-interface directed broadcasts | Same LAN, simple home networks |
-| mDNS / Zeroconf | Registers `_kdeconnect._udp.local.` via `libp2p/zeroconf/v2`; browses for peers | Restricted networks, Docker, corporate Wi-Fi, newer Android |
-
-mDNS advertisement runs for the daemon lifetime (responder-only, negligible
-idle cost). UDP broadcast is on demand and reference-counted per owner
-(`pairing` for `kcd pair` listen mode, `reconnect` for offline pairs):
-it runs while any paired device is disconnected so roamed phones can find
-us back, and stops fully when all pairs are connected — connected steady
-state keeps zero timers. The 30s/60s interval only ticks while a reconnect
-is actually wanted. Dial targets (`LastIP`/`LastPort`) persist in
-`devices.json`; paired sightings dial the sighted address (authenticated
-post-connect by CN + pinned fingerprint), with `LastIP` as the fallback
-for silent peers.
-
----
+- Socket: `$XDG_RUNTIME_DIR/kcd/kcd.sock`, mode 0600. NDJSON. One request per connection.
+- Request: `{"cmd":"pair","payload":{"deviceId":"..."}}`
+- Response: `{"ok":true}` · `{"ok":true,"data":...}` · `{"ok":false,"error":"..."}`
+- `watch` keeps the connection open and streams `events.Event` as NDJSON. Filters go in the payload: `{"cmd":"watch","payload":{"events":["battery.update"]}}`. The first event is always `state.snapshot`. The `kcd watch` CLI reconnects with backoff (1 s → 30 s).
+- **IPC changes are additive only:** new commands, new optional fields, new event types. Never change the meaning of an existing command or field. Every command and event must be documented in `docs/IPC_PROTOCOL.md`.
 
 ## Event Bus
 
-`events.Bus` is a non-blocking fan-out pub/sub. Plugins publish; IPC watch streams and internal subscribers receive.
+- `events.Bus` is a non-blocking fan-out. Plugins publish; IPC watchers and internal subscribers receive.
+- `bus.Subscribe(capacity, filters...)`: capacity comes **first** (`0` means the default of 64; `events.WatchSubscriberCap` (256) is for watch streams). Always `defer sub.Close()`.
+- A full subscriber channel **drops** events (with a warning). Publishing never blocks.
+- An empty filter means every event *except* the opt-in types (`events.OptInOnly()`, currently SMS). Those must be named explicitly, because subscribing to them makes the phone push every message. That's a consent decision.
+- `bus.HasSubscribers(type)` and `OnSubscriberChange` let plugins run work only while someone is listening. Use them to keep idle cost at zero.
 
-```go
-bus.Publish(events.TypeBatteryUpdate, dev.ID(), map[string]any{
-    "charge":   85,
-    "charging": true,
-})
-```
+## Discovery & Connection
 
-Rules:
-- Subscriber channels have capacity 64. If a slow subscriber fills its channel, events are **dropped** (with a `log.Warn`), never blocked.
-- Filters: `bus.Subscribe(events.TypeBatteryUpdate, events.TypeNotification)` — empty filter = all events except the opt-in types (`events.OptInOnly()`, currently the SMS ones), which must be named explicitly.
-- Always call `sub.Close()` when done to avoid goroutine leaks.
+| Path | Behaviour |
+|---|---|
+| mDNS advertise (`_kdeconnect._udp`) | Always on; responder only, no timers |
+| UDP listener (port 1716) | Always on; feeds sightings to the dial logic |
+| UDP broadcast and mDNS browse | **On demand**, reference-counted by owner: `pairing` (`kcd pair` listen mode) and `reconnect` (a paired device is offline) |
+| Reconnect | Per-device loop with exponential backoff. Sightings wake it immediately; it gives up after `reconnect.stale_after` until the next sighting |
 
-```
-bus.Subscribe takes capacity as its first argument:
-  sub := bus.Subscribe(0, events.TypeBatteryUpdate)       // default cap (64)
-  sub := bus.Subscribe(events.WatchSubscriberCap, ...)    // 256, for watch streams
-
-Never pass filters as the first argument. The old zero-argument form no
-longer compiles after Phase 5-A.
-```
-
----
+Dial targets (`LastIP`/`LastPort`) persist in `devices.json`. Paired sightings
+dial the sighted address, authenticated after connecting by CN and pinned
+fingerprint.
 
 ## Device State Machine
 
 ```
-Unpaired
-   ├─ local initiates ──► PairRequested
-   │                            │
-   │                      peer accepts ──► Paired
-   │                      peer rejects ──► Unpaired
-   │
-   └─ peer initiates ──► PairRequestedByPeer
-                               │
-                         local accepts ──► Paired
-                         local rejects ──► Unpaired
+Unpaired ── local requests ──► PairRequested ── peer accepts ──► Paired
+   │                               └─ peer rejects ─────────────► Unpaired
+   └──── peer requests ──► PairRequestedByPeer ── user accepts ──► Paired
+                                   └─ user rejects ─────────────► Unpaired
 ```
 
-`device.State` is protected by `sync.RWMutex`. Always use `dev.State()` and `dev.SetState()`.
-
-Device state is persisted to `devices.json` on every change. `DeviceInfo` fields that are saved: `ID`, `Name`, `Type`, `State`, `CertFP`, `LastSeen`.
+Pending states don't time out yet (the `pairing.timeout_secs` key is not implemented). Use `dev.State()` / `dev.SetState()` (guarded by a mutex). State changes are
+persisted to `devices.json` (`ID`, `Name`, `Type`, `State`, `CertFP`,
+`LastSeen`, `LastIP`, `LastPort`).
 
 ---
 
-## Known Gaps (do not regress these as "done")
+## Comment Policy
+
+**Explain why, never what.** A comment whose deletion loses no information should be deleted.
+
+**Required:**
+- Security rationale: what an attacker gains without a validation, and why an input is rejected.
+- Protocol facts the code can't show: a wire quirk, an Android-only behaviour, units, a literal error string worth matching on.
+- Invariants a plausible future edit would break.
+- The reason behind every timeout, retry count or magic number.
+
+**Not wanted:**
+- Restating the next line of code.
+- Change narration (`used to`, `is now`, `no longer`, `fixed`). Git history owns that.
+- Dev-process references: phases, planning documents, issue or spec numbers, review IDs. Those go in commit messages.
+- `TODO` / `FIXME` / `XXX` (the `godox` linter rejects them). Track open work outside the code.
+- Prose that duplicates this file or `docs/`.
+
+**Godoc stays** on exported identifiers: one line, starting with the identifier (`// Name does X.`). Comments end with a period (`godot` linter).
+
+**A comment block over 8 lines is usually two comments**, a contract and a history. Keep the contract and drop the history. When trimming a block that touches validation, TLS, key handling, timeouts or the wire format, keep its *reason*.
+
+---
+
+## Code Conventions
+
+- **Errors:** `fmt.Errorf("<pkg>: <verb> <object>: %w", err)`. Lowercase, wrapped with `%w`, checked with `errors.Is/As`. Never discard persistence errors. Never panic on peer input, files or config.
+- **Logging** (`internal/log`): lowercase messages prefixed with the subsystem (`"mpris: seek failed"`), snake_case keys that reuse existing names (`device_id`, `plugin`, `path`, `port`, `remote_addr`). Never log secrets or private content (SFTP passwords, clipboard text, SMS and notification bodies). Rate-limit anything that can loop.
+- **Concurrency:** every goroutine has an owner and an exit. Hold locks only around memory, never across `Send`, I/O or callbacks. No exported mutexes.
+- **Timers:** no ticker that runs at idle. Arm on demand and stop when done. Every retry loop backs off and exits on `ctx.Done()`.
+- **Processes:** pass an argv slice to `exec.Command`. Never `sh -c` with peer data (only user-configured commands go through a shell). No subprocess per high-frequency event.
+- **Files:** write important state to a temp file, then rename. Create new files with `O_EXCL`. Sanitise and confine any path derived from peer data.
+- **Config:** new keys go in `internal/config` with defaults in `Defaults()` and validation in `Validate()`, and are documented in `packaging/kcd.example.toml`.
+- **Dependencies:** must build with `CGO_ENABLED=0`. Prefer the stdlib for anything under ~50 lines.
+
+## Testing
+
+- Unit tests sit next to the code. Integration tests live in `internal/integration` (`//go:build integration`).
+- Helpers:
+  - `log.NewTest(t)` gives a test logger; `log.Observe()` captures logs for assertions.
+  - `testutil.NewMockPeer` / `DialPipe` / `SendPacket` / `ReadPacket` give a fake KDE Connect peer.
+  - `testutil.StartTestDaemon(t, cfg)` gives a daemon plus an IPC client.
+- Tests are deterministic: no `time.Sleep` to wait for goroutines; use channels or bounded `select` waits. Helpers call `t.Helper()`. Prefer table tests.
+- Code that runs external commands takes an injectable runner, so tests never spawn real `loginctl`, `xdotool` and so on.
+- A bug fix comes with a test that fails without the fix.
+
+## Verification (what CI runs)
+
+```bash
+gofmt -l .                                              # prints nothing
+go vet ./...
+golangci-lint run                                       # govet, staticcheck, unused, depguard, godot, godox, misspell...
+CGO_ENABLED=1 go test -p 1 -race -count=1 ./...
+CGO_ENABLED=1 go test -tags integration -race -count=1 ./internal/integration/...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/kcd ./cmd/kcd && file bin/kcd
+go mod tidy && git diff --exit-code go.mod go.sum
+```
+
+`just build`, `just test` and `just integration` wrap the common cases.
+`hk check` runs the pre-commit set. If `go` is missing, `mise install`
+provides the pinned toolchain. Report failures with their output; never claim
+a check passed without running it.
+
+---
+
+## Key File Locations (runtime)
+
+| Purpose | Path |
+|---|---|
+| Config | `$XDG_CONFIG_HOME/kcd/kcd.toml` (`~/.config/kcd/kcd.toml`), overridable with `--config` / `KCD_CONFIG` |
+| TLS cert / key | `~/.config/kcd/cert.pem`, `~/.config/kcd/key.pem` |
+| Paired devices | `$XDG_STATE_HOME/kcd/devices.json` (`~/.local/state/kcd/devices.json`) |
+| IPC socket | `$XDG_RUNTIME_DIR/kcd/kcd.sock`, in a `kcd/` subdirectory, not directly in the runtime dir |
+| Downloads | `~/Downloads/kcd/` (`download_dir`) |
+| Album art cache | `$XDG_CACHE_HOME/kcd/art/` |
+| SFTP mount points | `$XDG_RUNTIME_DIR/kcd/mnt/` (`$XDG_STATE_HOME/kcd/mnt` without a user session). Never under a bulk-deletable user folder, because `rm -rf` descends into a live mount |
+| systemd user unit | `~/.config/systemd/user/kcd.service` (sources in `packaging/`) |
+
+## Known Gaps (don't report these as "done")
 
 | Area | Status |
 |---|---|
-| **Mousepad keyboard** special keys (incoming) | Handled — `specialKey` 1–32 mapped per spec (`mapSpecialKey`/`mapUinputKey`, wired in `input.go`). kcd never sends mousepad packets (no controller surface), so there is nothing to verify in the other direction. |
-| **Un-arming the phone** | Not possible. Android's `haveMessagesBeenRequested` is set by any `sms.request*` packet and nothing clears it, not even plugin teardown, so the phone pushes every new message for the life of the connection. kcd's only lever is consent: `Subscriber.matches` refuses the opt-in types for an unfiltered subscriber, so an incidental `kcd watch` neither reads the body nor arms the phone. Once armed by name, ending it needs the plugin disabled on the device. |
-
----
+| **Un-arming the phone** | Not possible. Android's `haveMessagesBeenRequested` is set by any `sms.request*` packet and nothing clears it, so the phone pushes every new message for the life of the connection. kcd's only lever is consent: unfiltered subscribers never receive the opt-in SMS types, so an incidental `kcd watch` doesn't arm the phone. Once armed, ending it requires disabling the plugin on the phone. |
 
 ## Common Issues
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Device not discovered | Firewall blocking UDP 1716 | `ufw allow 1716/udp` — check with `nc -ulvp 1716` |
-| Device discovered but can't connect | Firewall blocking TCP 1716 | `ufw allow 1716/tcp` |
-| File transfer stalls | Firewall blocking side-channel ports | `ufw allow 1739:1764/tcp` |
-| TLS handshake fails | `InsecureSkipVerify` not set on one side | Ensure `cert.TLSConfig()` is used on both dial and accept paths |
-| Plugin receives no packets | Plugin not registered | Check `plugins.Capabilities()` output at startup with `--log-level=debug` |
-| `kcd devices` returns nothing | Daemon not running or wrong socket path | `systemctl --user status kcd`; check `cfg.SocketPath` matches |
-| Binary is dynamically linked | CGO leaked in a dependency | `CGO_ENABLED=0 go build`; check with `file kcd` |
-| OOM on large file transfer | File buffered instead of streamed | Use `io.LimitReader` + `io.Copy` in share plugin |
-| Cert fingerprint mismatch loop | Phone was reinstalled or cert regenerated | Delete the device entry from `devices.json`, re-pair |
-| MPRIS plugin disabled silently | D-Bus session bus not available | Expected — MPRIS logs a `Warn` and continues without it |
-| mDNS not advertising | `libp2p/zeroconf/v2` registration error | Check for port conflicts on mDNS port 5353; log level debug shows the error |
-| Desktop notifications show no icon | `libnotify < 0.8.0` | Upgrade to libnotify ≥ 0.8 (Ubuntu 22.04+, Fedora 36+) |
-| `kcd sftp mount` shows "permission denied" | sshfs path misconfiguration | Ensure kcd version includes the chroot fix — mount root is `user@ip:` not `user@ip:/storage/emulated/0` |
-| Paired device never auto-reconnects | Broadcast disabled and no IP cached | Connect manually once (`kcd connect <ip>`) to prime `LastIP`; subsequent drops will auto-reconnect |
-| `battery.update` events never arrive | Old binary before Phase 2 fix | Battery plugin now requires `NewBatteryPlugin(bus, logger)` — rebuild |
+| Device not discovered | Firewall blocks UDP 1716 | `ufw allow 1716/udp`; check with `nc -ulvp 1716` |
+| Discovered but can't connect | Firewall blocks TCP 1716 | `ufw allow 1716/tcp` |
+| File transfer stalls | Firewall blocks side-channel ports | `ufw allow 1739:1764/tcp` |
+| Plugin receives no packets | Plugin not registered or disabled | Check `kcd status` and the capabilities logged at `--log-level=debug` |
+| `kcd devices` returns nothing | Daemon not running, or socket path mismatch | `systemctl --user status kcd`; compare `socket_path` |
+| Binary dynamically linked | cgo leaked in | Build with `CGO_ENABLED=0`; check with `file` |
+| Fingerprint mismatch loop | Phone reinstalled or cert regenerated | Unpair (`kcd unpair <id>`) and pair again |
+| MPRIS silently disabled | No D-Bus session bus | Expected: MPRIS logs a warning and continues |
+| Desktop notifications without icons | libnotify < 0.8 | Upgrade libnotify |
+| Paired device never auto-reconnects | No cached address and no sighting | `kcd connect <ip>` once to prime `LastIP` |
 
----
 
 ## References
 
-- KDE Connect protocol spec: https://github.com/KDE/kdeconnect-meta/blob/work/protocol-schemas/protocol.md
-- KDE Connect meta / plugin list: https://github.com/KDE/kdeconnect-meta
-- KDE Connect android app repo:  https://github.com/KDE/kdeconnect-android
-- `godbus` (D-Bus bindings): https://pkg.go.dev/github.com/godbus/dbus/v5
-- MPRIS2 spec: https://specifications.freedesktop.org/mpris-spec/latest/
-- `libp2p/zeroconf/v2` (mDNS): https://github.com/libp2p/zeroconf
-- `urfave/cli/v2` (CLI framework): https://cli.urfave.org/v2/
-- `go.uber.org/zap` (logging): https://pkg.go.dev/go.uber.org/zap
+- Protocol spec (official): https://invent.kde.org/network/kdeconnect-meta/-/blob/master/protocol.md (schemas in `schemas/`)
+- Android app (reference behaviour): https://invent.kde.org/network/kdeconnect-android
+- KDE desktop implementation: https://invent.kde.org/network/kdeconnect-kde
+- `godbus`: https://pkg.go.dev/github.com/godbus/dbus/v5 · MPRIS2: https://specifications.freedesktop.org/mpris-spec/latest/
+- `libp2p/zeroconf/v2`: https://github.com/libp2p/zeroconf · `urfave/cli/v2`: https://cli.urfave.org/v2/
