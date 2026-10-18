@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
@@ -67,6 +68,30 @@ func TestReceiveToFileAcceptsEmptyPayload(t *testing.T) {
 	info, err := os.Stat(dest)
 	if err != nil || info.Size() != 0 {
 		t.Fatalf("empty destination: %v, %v", info, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReceiveToFileStreamsUnknownLengthToEOF(t *testing.T) {
+	serverCert, err := cert.GenerateSelfSigned("unknown-length-receiver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCfg := cert.TLSConfig(serverCert)
+	want := []byte("cloud-backed payload")
+	addr, fp, done := startSidechannelServer(t, tlsCfg, want, 0)
+	host, portText, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(portText)
+	dest := filepath.Join(t.TempDir(), "payload")
+	n, err := ReceiveToFile(context.Background(), net.ParseIP(host), port, -1, dest, tlsCfg, fp, log.Nop(), ReceiveOptions{MaxSize: 128, Sidechannel: SidechannelOptions{Timeout: 2 * time.Second}})
+	if err != nil || n != int64(len(want)) {
+		t.Fatalf("receive = %d, %v", n, err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("payload = %q, %v; want %q", got, err, want)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)

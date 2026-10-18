@@ -95,6 +95,20 @@ func TestPinnedFingerprint(t *testing.T) {
 	}
 }
 
+func TestMatchesDeviceIDNormalizesAndroidCN(t *testing.T) {
+	peer := &x509.Certificate{}
+	peer.Subject.CommonName = "device-id"
+	if !MatchesDeviceID(peer, "device_id") {
+		t.Fatal("hyphenated certificate CN did not match identity ID")
+	}
+	if MatchesDeviceID(peer, "other_id") {
+		t.Fatal("unrelated identity ID matched certificate CN")
+	}
+	if MatchesDeviceID(nil, "device_id") {
+		t.Fatal("nil certificate matched identity ID")
+	}
+}
+
 func TestVerifySideChannelPeer(t *testing.T) {
 	c, err := GenerateSelfSigned("verify_peer_test")
 	if err != nil {
