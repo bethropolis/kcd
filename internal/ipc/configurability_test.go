@@ -17,7 +17,7 @@ func TestConfiguredPairListenTimeout(t *testing.T) {
 	devices := device.NewRegistry(bus)
 	cfg := config.Defaults()
 	pl := pair.NewPairPlugin(devices, nil, cfg.Pairing, nil, bus, logger)
-	h := NewHandler(devices, nil, pl, "", bus, 0)
+	h := NewHandler(devices, nil, pl, nil, bus, 0)
 	h.SetPairListenTimeout(time.Millisecond)
 	done := make(chan Response, 1)
 	go func() { done <- h.handlePairListen() }()

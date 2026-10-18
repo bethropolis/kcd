@@ -29,7 +29,7 @@ func startDeviceStub(t *testing.T, devs []device.DeviceInfo) *client.Client {
 		devReg.Add(device.NewDevice(d.ID, d.Name, "phone", logger))
 	}
 
-	handler := ipc.NewHandler(devReg, plugin.NewRegistry(logger), nil, "", nil, 0)
+	handler := ipc.NewHandler(devReg, plugin.NewRegistry(logger), nil, nil, nil, 0)
 	handler.Register(ipc.CmdDevices, func(ipc.Request) ipc.Response {
 		data, _ := json.Marshal(devs)
 		return ipc.Response{OK: true, Data: data}

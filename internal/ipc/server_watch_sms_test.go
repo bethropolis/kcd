@@ -69,7 +69,7 @@ func startWatchStream(t *testing.T, bus *events.Bus, filters []string) (net.Conn
 
 	sock := filepath.Join(t.TempDir(), "watch.sock")
 	logger := log.NewTest(t)
-	h := NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, "", bus, 0)
+	h := NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, nil, bus, 0)
 	srv := NewServer(sock, h, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -21,7 +21,7 @@ func contactsTestHandler(t *testing.T, withPlugin bool) *ipc.Handler {
 	if withPlugin {
 		plugins.Register(contacts.NewContactsPlugin(nil, log.Nop()))
 	}
-	h := ipc.NewHandler(devices, plugins, nil, "", bus, 0)
+	h := ipc.NewHandler(devices, plugins, nil, nil, bus, 0)
 	registerContactsRoutes(h, devices, plugins)
 	return h
 }

@@ -49,7 +49,7 @@ func startPairStub(t *testing.T) *pairStub {
 	logger := log.NewTest(t)
 	stub := &pairStub{}
 
-	h := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, "", nil, 0)
+	h := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, nil, nil, 0)
 	for _, name := range []string{ipc.CmdBroadcastStart, ipc.CmdBroadcastStop, ipc.CmdPair, ipc.CmdUnpair} {
 		cmd := name
 		h.Register(cmd, func(ipc.Request) ipc.Response {

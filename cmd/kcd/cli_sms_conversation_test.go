@@ -31,7 +31,7 @@ func startConvStub(t *testing.T) *convStub {
 	logger := log.NewTest(t)
 	stub := &convStub{}
 
-	h := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, "", nil, 0)
+	h := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, nil, nil, 0)
 	h.Register(ipc.CmdSmsRequestConv, func(req ipc.Request) ipc.Response {
 		stub.mu.Lock()
 		stub.payloads = append(stub.payloads, append(json.RawMessage(nil), req.Payload...))

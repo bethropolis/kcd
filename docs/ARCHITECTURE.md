@@ -201,6 +201,8 @@ A `Device` wraps an active TCP connection with:
 
 `Registry` holds all known devices (both connected and remembered-from-disk). It is safe for concurrent reads and writes. On disk, device state is persisted to `$XDG_STATE_HOME/kcd/devices.json` so that paired devices survive daemon restarts.
 
+`Registry.Load` restores device records and resets interrupted pairing requests to Unpaired. `Registry.Save` serializes a single `DeviceInfo` snapshot per device, including `LastSeen`, and atomically replaces the state file. Pair-state callbacks enqueue coalesced saves so packet handling never waits for disk; save failures are logged, and shutdown writes a final snapshot.
+
 ### State machine
 
 ```mermaid

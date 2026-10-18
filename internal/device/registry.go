@@ -11,6 +11,7 @@ import (
 type Registry struct {
 	devices sync.Map // map[string]*Device (keyed by device ID)
 	bus     *events.Bus
+	saveMu  sync.Mutex
 }
 
 // NewRegistry creates a new empty device registry.

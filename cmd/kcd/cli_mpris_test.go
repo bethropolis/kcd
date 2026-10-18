@@ -21,7 +21,7 @@ func startMprisStub(t *testing.T, players []ipc.MprisRemotePlayer) *client.Clien
 	sockPath := filepath.Join(t.TempDir(), "test.sock")
 	logger := log.NewTest(t)
 
-	handler := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, "", nil, 0)
+	handler := ipc.NewHandler(device.NewRegistry(nil), plugin.NewRegistry(logger), nil, nil, nil, 0)
 	handler.Register(ipc.CmdMprisRemote, func(ipc.Request) ipc.Response {
 		data, _ := json.Marshal(ipc.MprisRemoteResponse{Players: players})
 		return ipc.Response{OK: true, Data: data}
