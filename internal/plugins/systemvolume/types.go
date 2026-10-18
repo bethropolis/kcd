@@ -36,8 +36,9 @@ func NewSystemVolumePlugin(bus *events.Bus, logger log.Logger, backends ...*audi
 type VolumeBody struct {
 	RequestSinks bool   `json:"requestSinks,omitempty"`
 	Name         string `json:"name,omitempty"`
-	Volume       int    `json:"volume,omitempty"`
-	Muted        bool   `json:"muted,omitempty"`
+	Volume       *int   `json:"volume,omitempty"`
+	Muted        *bool  `json:"muted,omitempty"`
+	Enabled      *bool  `json:"enabled,omitempty"`
 	MaxVolume    int    `json:"maxVolume,omitempty"`
 }
 

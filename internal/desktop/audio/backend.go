@@ -116,6 +116,22 @@ func (b *Backend) Set(ctx context.Context, volume int, muted bool) error {
 	return err
 }
 
+// SetVolume updates only the default sink's volume, preserving its mute state.
+func (b *Backend) SetVolume(ctx context.Context, volume int) error {
+	if b == nil || b.name == "" {
+		return fmt.Errorf("audio: no backend available")
+	}
+	if volume < 0 || volume > 100 {
+		return fmt.Errorf("audio: volume %d outside 0–100", volume)
+	}
+	if b.name == "wpctl" {
+		_, err := b.exec.Run(ctx, "wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", strconv.Itoa(volume)+"%")
+		return err
+	}
+	_, err := b.exec.Run(ctx, "pactl", "set-sink-volume", "@DEFAULT_SINK@", strconv.Itoa(volume)+"%")
+	return err
+}
+
 // SetMuted updates only the default sink's mute state.
 func (b *Backend) SetMuted(ctx context.Context, muted bool) error {
 	if b == nil || b.name == "" {

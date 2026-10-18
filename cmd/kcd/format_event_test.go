@@ -180,6 +180,11 @@ func TestFormatEventNewTypes(t *testing.T) {
 			want: "[d1] volume: Speaker (muted)\n",
 		},
 		{
+			name: "volume partial unmute",
+			ev:   events.Event{Type: events.TypeVolumeUpdate, DeviceID: "d1", Payload: map[string]any{"name": "Speaker", "muted": false}},
+			want: "[d1] volume: Speaker (unmuted)\n",
+		},
+		{
 			name: "volume sink list renders names not Go slice syntax",
 			ev: events.Event{Type: events.TypeVolumeUpdate, DeviceID: "d1", Payload: map[string]any{"sinks": []map[string]any{
 				{"name": "Speaker", "volume": 42, "muted": false},

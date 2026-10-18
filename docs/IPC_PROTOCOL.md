@@ -1244,7 +1244,9 @@ and `mountPoint`.
 
 #### `volume.update`
 
-Device volume level changed (sent in two shapes).
+Device volume level or mute state changed (sent in two shapes). For a per-sink
+update, `name` is present and `volume` / `muted` are included when supplied by
+the peer or known from the cached sink state; a partial packet may omit either.
 
 **Payload (per-sink update):**
 
@@ -1255,8 +1257,8 @@ Device volume level changed (sent in two shapes).
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Audio stream name |
-| `volume` | number | Volume level (0–100) |
-| `muted` | bool | Whether the stream is muted |
+| `volume` | number | Optional volume level (0–100) |
+| `muted` | bool | Optional mute state |
 
 **Payload (full sink list):**
 

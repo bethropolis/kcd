@@ -237,10 +237,16 @@ func formatEvent(ev events.Event) string {
 			name = "output"
 		}
 		name = oneLine(truncate(name, 40))
-		if m, _ := payload["muted"].(bool); m {
+		if m, ok := payload["muted"].(bool); ok && m {
 			return fmt.Sprintf("[%s] volume: %s (muted)\n", ev.DeviceID, name)
 		}
-		return fmt.Sprintf("[%s] volume: %s %v%%\n", ev.DeviceID, name, payload["volume"])
+		if volume, ok := payload["volume"]; ok {
+			return fmt.Sprintf("[%s] volume: %s %v%%\n", ev.DeviceID, name, volume)
+		}
+		if _, ok := payload["muted"]; ok {
+			return fmt.Sprintf("[%s] volume: %s (unmuted)\n", ev.DeviceID, name)
+		}
+		return fmt.Sprintf("[%s] volume: %s updated\n", ev.DeviceID, name)
 
 	case events.TypeRunCommandOutput:
 		return fmt.Sprintf("[%s] runcommand %s: %s\n", ev.DeviceID, runCommandLabel(payload), runCommandDetail(payload))
