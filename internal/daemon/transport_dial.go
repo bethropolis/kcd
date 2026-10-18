@@ -68,7 +68,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 		ProtocolVersion:       myID.ProtocolVersion,
 		TCPPort:               myID.TCPPort,
 		TargetDeviceID:        targetID,
-		TargetProtocolVersion: targetProto,
+		TargetProtocolVersion: protocol.FlexInt(targetProto),
 	}
 	preTlsPkt, _ := protocol.NewPacket(protocol.TypeIdentity, preTlsId)
 

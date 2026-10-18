@@ -120,7 +120,7 @@ type IdentityBody struct {
 	IncomingCapabilities  []string `json:"incomingCapabilities,omitempty"`
 	OutgoingCapabilities  []string `json:"outgoingCapabilities,omitempty"`
 	TargetDeviceID        string   `json:"targetDeviceId,omitempty"`
-	TargetProtocolVersion int      `json:"targetProtocolVersion,omitempty"`
+	TargetProtocolVersion FlexInt  `json:"targetProtocolVersion,omitempty"`
 }
 
 // NewIdentityPacket creates a fully-formed identity packet ready for the wire.

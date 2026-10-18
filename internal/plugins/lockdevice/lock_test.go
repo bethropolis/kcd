@@ -5,15 +5,16 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"net"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
+	"github.com/bethropolis/kcd/internal/testutil"
 )
 
 type captureSender struct {
@@ -37,7 +38,7 @@ func (s *captureSender) GetBattery() (int, bool)       { return 0, false }
 // touch the local session — a regression here locks the operator's own
 // workstation while reporting success for the phone.
 func TestLockUnlockSendRequestPackets(t *testing.T) {
-	p := NewLockDevicePlugin(log.Nop())
+	p := NewLockDevicePlugin(config.LockDeviceConfig{}, nil, log.Nop())
 	dev := &captureSender{}
 
 	if err := p.Lock(dev); err != nil {
@@ -61,7 +62,9 @@ func TestLockUnlockSendRequestPackets(t *testing.T) {
 		if pkt.Type != want.pktType {
 			t.Errorf("packet %d type = %q, want %q", i, pkt.Type, want.pktType)
 		}
-		var body LockBody
+		var body struct {
+			SetLocked bool `json:"setLocked"`
+		}
 		if err := json.Unmarshal(pkt.Body, &body); err != nil {
 			t.Fatalf("packet %d body is not JSON: %v", i, err)
 		}
@@ -81,44 +84,18 @@ func TestLockUnlockSendRequestPackets(t *testing.T) {
 	}
 }
 
-// fakeLoginctl puts a recording loginctl earlier on PATH and returns a
-// function reporting the invocations seen so far. Handle shells out, so
-// without this the tests would lock the operator's own session.
-func fakeLoginctl(t *testing.T) func() []string {
-	t.Helper()
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "calls.log")
-	script := "#!/bin/sh\necho \"$@\" >> \"" + logFile + "\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "loginctl"), []byte(script), 0o755); err != nil {
+func TestUnlockedStateIncludesFalse(t *testing.T) {
+	data, err := json.Marshal(outboundLockState{IsLocked: false})
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	return func() []string {
-		b, err := os.ReadFile(logFile)
-		if err != nil {
-			return nil
-		}
-		var out []string
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			if line != "" {
-				out = append(out, line)
-			}
-		}
-		return out
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func waitForCalls(t *testing.T, calls func() []string, want int) []string {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := calls(); len(got) >= want {
-			return got
-		}
-		time.Sleep(10 * time.Millisecond)
+	if value, ok := body["isLocked"]; !ok || value != false {
+		t.Fatalf("unlocked state JSON = %s, want isLocked:false", data)
 	}
-	t.Fatalf("saw %d loginctl calls, want at least %d", len(calls()), want)
-	return nil
 }
 
 func lockPacket(t *testing.T, typ string, body any) *protocol.Packet {
@@ -130,53 +107,85 @@ func lockPacket(t *testing.T, typ string, body any) *protocol.Packet {
 	return pkt
 }
 
-// A peer's bare state report must never act on the local session. Before
-// the type gate, any isLocked packet fell into the unlock branch.
+// A peer's state report and an incomplete request must never run a local action.
 func TestHandleIgnoresStatePackets(t *testing.T) {
-	p := NewLockDevicePlugin(log.Nop())
+	runner := &recordingRunner{calls: make(chan string, 1)}
+	p := NewLockDevicePlugin(config.LockDeviceConfig{AllowRemoteUnlock: true}, nil, log.Nop(), sysexec.New(runner))
 	dev := &captureSender{}
-	calls := fakeLoginctl(t)
 	ctx := context.Background()
 
-	for _, body := range []LockBody{{IsLocked: true}, {IsLocked: false}, {}} {
+	for _, body := range []outboundLockState{{IsLocked: true}, {IsLocked: false}, {}} {
 		if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock", body)); err != nil {
 			t.Fatalf("Handle(state %v): %v", body, err)
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
-	if got := calls(); len(got) != 0 {
-		t.Errorf("state packets executed loginctl %v; want no local action", got)
+	if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock.request", struct{}{})); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-runner.calls:
+		t.Errorf("state or malformed request executed loginctl %q", got)
+	case <-time.After(100 * time.Millisecond):
 	}
 	if len(dev.sent) != 0 {
 		t.Errorf("state packets sent %d packets; want none", len(dev.sent))
 	}
 }
 
+func TestHandlePublishesPeerLockState(t *testing.T) {
+	bus := events.NewBus(log.Nop())
+	sub := bus.Subscribe(1, events.TypeLockState)
+	defer sub.Close()
+	p := NewLockDevicePlugin(config.LockDeviceConfig{}, bus, log.Nop())
+	dev := &captureSender{}
+	locked := false
+	if err := p.Handle(context.Background(), dev, lockPacket(t, "kdeconnect.lock", inboundLockState{IsLocked: &locked})); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sub.C:
+		if event.Type != events.TypeLockState || event.DeviceID != dev.ID() {
+			t.Fatalf("lock event identity = %#v", event)
+		}
+		payload, ok := event.Payload.(map[string]bool)
+		if !ok || payload["isLocked"] {
+			t.Fatalf("lock event payload = %#v, want isLocked:false", event.Payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("peer lock state did not publish an event")
+	}
+}
+
 // Explicit lock requests still drive the local session.
 func TestHandleActsOnLockRequest(t *testing.T) {
-	p := NewLockDevicePlugin(log.Nop())
-	dev := &captureSender{}
-	calls := fakeLoginctl(t)
+	runner := &recordingRunner{calls: make(chan string, 2)}
+	p := NewLockDevicePlugin(config.LockDeviceConfig{AllowRemoteUnlock: true}, nil, log.Nop(), sysexec.New(runner))
+	dev := testutil.NewFakeSender("device")
 	ctx := context.Background()
 
-	if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock.request", LockBody{SetLocked: true})); err != nil {
+	locked := true
+	if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock.request", inboundLockRequest{SetLocked: &locked})); err != nil {
 		t.Fatalf("Handle(lock): %v", err)
 	}
-	if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock.request", LockBody{SetLocked: false})); err != nil {
+	locked = false
+	if err := p.Handle(ctx, dev, lockPacket(t, "kdeconnect.lock.request", inboundLockRequest{SetLocked: &locked})); err != nil {
 		t.Fatalf("Handle(unlock): %v", err)
 	}
-	got := waitForCalls(t, calls, 2)
-	// Async execution orders nothing: assert the set, not the sequence.
-	want := map[string]bool{"lock-session": false, "unlock-session": false}
-	for _, c := range got {
-		if _, ok := want[c]; !ok {
-			t.Errorf("unexpected loginctl call %q", c)
+	want := map[string]bool{"loginctl lock-session": false, "loginctl unlock-session": false}
+	for range 2 {
+		select {
+		case got := <-runner.calls:
+			if _, ok := want[got]; !ok {
+				t.Errorf("unexpected loginctl call %q", got)
+			}
+			want[got] = true
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for lock and unlock commands")
 		}
-		want[c] = true
 	}
-	for c, seen := range want {
+	for call, seen := range want {
 		if !seen {
-			t.Errorf("missing loginctl call %q (saw %v)", c, got)
+			t.Errorf("missing loginctl call %q", call)
 		}
 	}
 }

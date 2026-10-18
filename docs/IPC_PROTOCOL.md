@@ -1453,6 +1453,13 @@ The extension is sniffed from the received bytes (JPEG/PNG/GIF/WebP),
 defaulting to `.jpg`. The cache directory holds at most 500 files and is
 cleared when it overflows.
 
+### Lock Device Events
+
+#### `lock.state`
+
+The peer's reported lock state, or the desktop's state after a requested local
+lock action. Payload is `{"isLocked": bool}`; the boolean is always present.
+
 ---
 
 ## 6. Outbound Packet Reference
@@ -1522,8 +1529,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.clipboard` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |
 | `kdeconnect.clipboard.connect` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |
 | `kdeconnect.clipboard.file` | Clipboard | `ClipboardFileBody{Filename string}` |
-| `kdeconnect.lock` | LockDevice | `LockBody{RequestLocked, SetLocked, IsLocked}` |
-| `kdeconnect.lock.request` | LockDevice | `LockBody{}` (triggers lock/unlock) |
+| `kdeconnect.lock` | LockDevice | `{"isLocked": bool}` state report; `false` is sent explicitly |
+| `kdeconnect.lock.request` | LockDevice | `{"requestLocked": true}` queries state, or `{"setLocked": bool}` requests a local lock action |
 | `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, AlbumArtUrl, TransferringAlbumArt, ...}` — inbound packets with `transferringAlbumArt: true` + `payloadTransferInfo` carry album art bytes (side channel) that the daemon caches to `$XDG_CACHE_HOME/kcd/art/` |
 | `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) — an outbound `kdeconnect.mpris.request` with `player` + `albumArtUrl` asks the phone to stream art back |
 | `kdeconnect.runcommand` | RunCommand | `{CommandList string}` — the phone's reply to a command-list request, holding a JSON object of label → `{name, command}` |

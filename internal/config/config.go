@@ -37,6 +37,7 @@ type Config struct {
 	Battery             BatteryConfig                `toml:"battery"`
 	MPRIS               MPRISConfig                  `toml:"mpris"`
 	Notification        NotificationPluginConfig     `toml:"notification_plugin"`
+	LockDevice          LockDeviceConfig             `toml:"lockdevice"`
 	Share               ShareConfig                  `toml:"share"`
 	SFTP                SFTPConfig                   `toml:"sftp"`
 	Ping                PingConfig                   `toml:"ping"`

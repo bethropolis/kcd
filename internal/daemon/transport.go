@@ -234,8 +234,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 							log.String("device_id", preBody.DeviceID),
 							log.String("target_device_id", preBody.TargetDeviceID))
 					}
-					if dev, ok := devices.Get(preBody.DeviceID); ok && dev.InCooldown() &&
-						(bc == nil || !bc.IsRunning()) {
+					pairingMode := bc != nil && bc.IsRunning()
+					if shouldRefuseInboundCooldown(preBody, devices, pairingMode) {
 						logger.Debug("refusing inbound inside reconnect cooldown",
 							log.String("device_id", preBody.DeviceID))
 						protocol.ReleasePacket(preTlsPkt)
@@ -263,4 +263,12 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	}()
 
 	<-ctx.Done()
+}
+
+func shouldRefuseInboundCooldown(identity protocol.IdentityBody, devices *device.Registry, pairingMode bool) bool {
+	if pairingMode {
+		return false
+	}
+	dev, ok := devices.Get(identity.DeviceID)
+	return ok && dev.InCooldown()
 }

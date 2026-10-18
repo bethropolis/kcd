@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -99,6 +100,29 @@ func TestDisplayName(t *testing.T) {
 	for _, tc := range cases {
 		if got := DisplayName(tc.in); got != tc.want {
 			t.Errorf("DisplayName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIdentityTargetProtocolVersionAcceptsAndroidString(t *testing.T) {
+	for _, raw := range []string{`{"targetProtocolVersion":"8"}`, `{"targetProtocolVersion":8}`} {
+		var body IdentityBody
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatalf("decode identity %s: %v", raw, err)
+		}
+		if body.TargetProtocolVersion != 8 {
+			t.Errorf("target protocol version = %d, want 8", body.TargetProtocolVersion)
+		}
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(encoded, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := wire["targetProtocolVersion"].(float64); !ok {
+			t.Fatalf("targetProtocolVersion must marshal as a JSON number: %s", encoded)
 		}
 	}
 }

@@ -84,6 +84,9 @@
     "ShowIcons": false,
     "CancelGraceMS": 1500
   },
+  "LockDevice": {
+    "AllowRemoteUnlock": false
+  },
   "Share": {
     "PortMin": 1739,
     "PortMax": 1764,

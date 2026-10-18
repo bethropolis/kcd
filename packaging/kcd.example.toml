@@ -158,6 +158,11 @@ presenter = true
 # See `kcd volume --help`.
 remotesystemvolume = true
 
+# Lock behavior for incoming requests from paired peers.
+[lockdevice]
+# Allow paired peers to unlock this desktop session. Remote locking remains enabled.
+allow_remote_unlock = false
+
 # ─── Connection timing and storage ────────────────────────────────────────────
 
 # Durations use Go syntax (e.g. "750ms", "10s", "5m") and must be positive.

@@ -53,6 +53,27 @@ func TestShouldEphemeralClose(t *testing.T) {
 	}
 }
 
+func TestAndroidTargetProtocolVersionStillAppliesReconnectCooldown(t *testing.T) {
+	registry := device.NewRegistry(nil)
+	dev := device.NewDevice("phone-id", "Phone", "phone", log.Nop())
+	registry.Add(dev)
+	local, peer := net.Pipe()
+	defer peer.Close()
+	dev.Connect(context.Background(), transport.NewConn(tls.Server(local, &tls.Config{})), nil, nil, nil)
+	defer dev.Disconnect()
+
+	var identity protocol.IdentityBody
+	if err := json.Unmarshal([]byte(`{"deviceId":"phone-id","targetProtocolVersion":"8"}`), &identity); err != nil {
+		t.Fatalf("decode Android pre-TLS identity: %v", err)
+	}
+	if !shouldRefuseInboundCooldown(identity, registry, false) {
+		t.Fatal("Android-shaped duplicate identity bypassed reconnect cooldown")
+	}
+	if shouldRefuseInboundCooldown(identity, registry, true) {
+		t.Fatal("pairing mode should permit the inbound handshake")
+	}
+}
+
 func TestEphemeralMarkerReset(t *testing.T) {
 	dev := device.NewDevice("test-id", "Test", "phone", log.Nop())
 	if dev.EphemeralDialed() {

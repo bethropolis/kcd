@@ -81,6 +81,23 @@ func TestConfigVersionIsOptionalAndNonRejecting(t *testing.T) {
 	}
 }
 
+func TestLockDeviceRemoteUnlockDefaultsOffAndCanBeEnabled(t *testing.T) {
+	defaultConfig, err := loadTOML(t, "device_name = 'legacy'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultConfig.LockDevice.AllowRemoteUnlock {
+		t.Fatal("remote unlock must be disabled by default")
+	}
+	configured, err := loadTOML(t, "device_name = 'legacy'\n[lockdevice]\nallow_remote_unlock = true\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.LockDevice.AllowRemoteUnlock {
+		t.Fatal("explicit allow_remote_unlock setting was ignored")
+	}
+}
+
 func TestLoadOverridesAndRoundTrip(t *testing.T) {
 	cfg, err := loadTOML(t, `
 [network]

@@ -54,6 +54,11 @@ type NotificationPluginConfig struct {
 	CancelGraceMS int `toml:"cancel_grace_ms"`
 }
 
+// LockDeviceConfig controls actions a paired peer may request on this session.
+type LockDeviceConfig struct {
+	AllowRemoteUnlock bool `toml:"allow_remote_unlock"`
+}
+
 type ShareConfig struct {
 	PortMin           int    `toml:"port_min"`
 	PortMax           int    `toml:"port_max"`

@@ -41,6 +41,7 @@ const (
 	TypeRunCommandOutput     EventType = "runcommand.output"
 	TypeNotificationCanceled EventType = "notification.canceled"
 	TypeVolumeUpdate         EventType = "volume.update"
+	TypeLockState            EventType = "lock.state"
 	TypeSMSIncoming          EventType = "sms.incoming"
 	TypeSMSAttachment        EventType = "sms.attachment"
 	TypeRingReceived         EventType = "ring.received"
@@ -63,6 +64,7 @@ func All() []EventType {
 		TypeSftpMount, TypeSftpMounted, TypeSftpUnmounted,
 		TypeRunCommandOutput,
 		TypeVolumeUpdate,
+		TypeLockState,
 		TypeSMSIncoming, TypeSMSAttachment,
 		TypeRingReceived, TypeContactsUpdated,
 		TypeMprisUpdate, TypeStateSnapshot,

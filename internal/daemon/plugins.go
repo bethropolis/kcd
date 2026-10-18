@@ -83,7 +83,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(findthisdevice.NewFindThisDevicePlugin(bus, logger))
 	}
 	if cfg.Plugins.LockDevice {
-		plugins.Register(lockdevice.NewLockDevicePlugin(logger))
+		plugins.Register(lockdevice.NewLockDevicePlugin(cfg.LockDevice, bus, logger))
 	}
 	if cfg.Plugins.SystemVolume {
 		plugins.Register(systemvolume.NewSystemVolumePlugin(bus, logger))
