@@ -45,15 +45,6 @@ func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *d
 	bc.StopOwned(discovery.OwnerReconnect)
 }
 
-func restoredPairingState(state device.PairingState) device.PairingState {
-	switch state {
-	case device.StateUnknown, device.StatePairRequested, device.StatePairRequestedByPeer:
-		return device.StateUnpaired
-	default:
-		return state
-	}
-}
-
 // Run starts the core daemon lifecycle.
 // buildIdentity assembles the daemon's advertised identity from config,
 // including the configured device type rather than a hardcoded one.
@@ -87,25 +78,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
 	statePath := config.StatePath()
-	if loaded, err := device.LoadDevices(statePath); err == nil {
-		for _, info := range loaded {
-			info.State = restoredPairingState(info.State)
-			// Migrate pre-fix names: decode decimal byte escapes to real UTF-8
-			// (SanitizeDeviceName already decodes; don't double-decode).
-			info.Name = protocol.SanitizeDeviceName(info.Name)
-			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
-			dev.SetState(info.State)
-			dev.CertFP = info.CertFP
-			dev.SetLastSeen(info.LastSeen)
-			// Restore the dial target so auto-dial works immediately after a
-			// restart (validation lives inside DialTarget).
-			if ip, port := info.DialTarget(); ip != nil {
-				dev.SetLastIP(ip)
-				dev.SetLastPort(port)
-			}
-			devices.Add(dev)
-		}
-	} else {
+	if err := devices.Load(statePath, logger); err != nil {
 		logger.Warn("failed to load devices", log.Error(err))
 	}
 
@@ -114,28 +87,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		logger.Info("pruned stale devices on startup", log.Int("count", pruned))
 	}
 
-	// Helper to save device state
-	saveDevices := func() {
-		devices.Prune(pruneThreshold)
-		devs := devices.List()
-		infos := make([]device.DeviceInfo, 0, len(devs))
-		for _, dev := range devs {
-			info := device.DeviceInfo{
-				ID:       dev.ID(),
-				Name:     dev.Name(),
-				Type:     dev.Type,
-				State:    dev.State(),
-				CertFP:   dev.CertFP,
-				LastSeen: dev.LastSeen(),
-				LastPort: dev.LastPort(),
-			}
-			// net.IP.String() on nil renders "<nil>" — store empty instead.
-			if ip := dev.LastIP(); ip != nil {
-				info.LastIP = ip.String()
-			}
-			infos = append(infos, info)
+	// Pair callbacks only enqueue writes because Handle must never wait on disk.
+	saveQueue := make(chan struct{}, 1)
+	saveWorkerDone := make(chan struct{})
+	requestSave := func() {
+		select {
+		case saveQueue <- struct{}{}:
+		default:
 		}
-		_ = device.SaveDevices(statePath, infos)
+	}
+	saveDevices := func() error {
+		devices.Prune(pruneThreshold)
+		return devices.Save(statePath)
 	}
 
 	// 3. Plugin Registry
@@ -146,7 +109,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		localCert, _ = x509.ParseCertificate(certPair.Certificate[0])
 	}
 
-	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, saveDevices, plugins)
+	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, requestSave, plugins)
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()
@@ -154,6 +117,23 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+
+	go func() {
+		defer close(saveWorkerDone)
+		for {
+			select {
+			case <-saveQueue:
+				if err := saveDevices(); err != nil {
+					logger.Error("device state save failed", log.Error(err))
+				}
+			case <-ctx.Done():
+				if err := saveDevices(); err != nil {
+					logger.Error("device state save failed", log.Error(err))
+				}
+				return
+			}
+		}
+	}()
 
 	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 
@@ -175,7 +155,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	// 5. IPC Server
-	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
+	handler := ipc.NewHandler(devices, plugins, pairPlugin, saveDevices, bus, pruneThreshold)
 	handler.SetPairListenTimeout(config.Duration(cfg.Pairing.ListenTimeout))
 
 	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
@@ -289,6 +269,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	<-ctx.Done()
+	<-saveWorkerDone
 
 	logger.Info("kcd daemon shutting down")
 

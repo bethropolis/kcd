@@ -22,7 +22,7 @@ type Handler struct {
 	devices           *device.Registry
 	plugins           *plugin.Registry
 	pairPlugin        *pair.PairPlugin
-	statePath         string
+	saveDevicesFn     func() error
 	bus               *events.Bus
 	routes            map[string]func(Request) Response
 	pruneThreshold    time.Duration
@@ -33,12 +33,12 @@ type Handler struct {
 }
 
 // NewHandler creates a new IPC command handler.
-func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *pair.PairPlugin, statePath string, bus *events.Bus, pruneThreshold time.Duration) *Handler {
+func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *pair.PairPlugin, saveDevices func() error, bus *events.Bus, pruneThreshold time.Duration) *Handler {
 	return &Handler{
 		devices:        devices,
 		plugins:        plugins,
 		pairPlugin:     pairPlugin,
-		statePath:      statePath,
+		saveDevicesFn:  saveDevices,
 		bus:            bus,
 		routes:         make(map[string]func(Request) Response),
 		pruneThreshold: pruneThreshold,
@@ -94,28 +94,12 @@ func (h *Handler) handleDevices() Response {
 	return Response{OK: true, Data: data}
 }
 
-func (h *Handler) saveDevices() {
-	if h.statePath == "" {
-		return
+func (h *Handler) saveDevices() error {
+	if h.saveDevicesFn == nil {
+		return nil
 	}
 	h.devices.Prune(h.pruneThreshold)
-	devs := h.devices.List()
-	infos := make([]device.DeviceInfo, 0, len(devs))
-	for _, dev := range devs {
-		info := device.DeviceInfo{
-			ID:       dev.ID(),
-			Name:     dev.Name(),
-			Type:     dev.Type,
-			State:    dev.State(),
-			CertFP:   dev.CertFP,
-			LastPort: dev.LastPort(),
-		}
-		if ip := dev.LastIP(); ip != nil {
-			info.LastIP = ip.String()
-		}
-		infos = append(infos, info)
-	}
-	_ = device.SaveDevices(h.statePath, infos)
+	return h.saveDevicesFn()
 }
 
 func (h *Handler) handlePair(payload []byte) Response {
@@ -169,7 +153,9 @@ func (h *Handler) handlePair(payload []byte) Response {
 	}
 
 	dev.SetState(device.StatePaired)
-	h.saveDevices()
+	if err := h.saveDevices(); err != nil {
+		return Response{OK: false, Error: "failed to save device state"}
+	}
 
 	return Response{OK: true}
 }
@@ -200,7 +186,9 @@ func (h *Handler) handleUnpair(payload []byte) Response {
 	dev.Disconnect()
 	h.devices.Remove(p.DeviceID)
 	h.forgetContacts(p.DeviceID)
-	h.saveDevices()
+	if err := h.saveDevices(); err != nil {
+		return Response{OK: false, Error: "failed to save device state"}
+	}
 
 	return Response{OK: true}
 }

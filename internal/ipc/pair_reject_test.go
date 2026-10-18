@@ -17,7 +17,7 @@ func TestPairRejectDeclinesPeerRequest(t *testing.T) {
 	devices := device.NewRegistry(bus)
 	cfg := config.Defaults()
 	pl := pair.NewPairPlugin(devices, nil, cfg.Pairing, nil, bus, logger)
-	h := NewHandler(devices, nil, pl, "", bus, 0)
+	h := NewHandler(devices, nil, pl, nil, bus, 0)
 
 	dev := device.NewDevice("phone1", "Phone", "phone", logger)
 	dev.SetState(device.StatePairRequestedByPeer)

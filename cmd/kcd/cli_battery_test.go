@@ -31,7 +31,7 @@ func startBatteryStub(t *testing.T) *client.Client {
 		devReg.Add(device.NewDevice(d.ID, d.Name, "phone", logger))
 	}
 
-	h := ipc.NewHandler(devReg, plugin.NewRegistry(logger), nil, "", nil, 0)
+	h := ipc.NewHandler(devReg, plugin.NewRegistry(logger), nil, nil, nil, 0)
 	h.Register(ipc.CmdDevices, func(ipc.Request) ipc.Response {
 		data, _ := json.Marshal(devs)
 		return ipc.Response{OK: true, Data: data}

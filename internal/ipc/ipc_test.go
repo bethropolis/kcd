@@ -24,8 +24,8 @@ func TestIPCRoundTrip(t *testing.T) {
 	dev1 := device.NewDevice("dev123", "Pixel 5", "phone", logger)
 	devReg.Add(dev1)
 
-	// Pass nil for pairPlugin (uses fallback path) and empty statePath for tests
-	handler := ipc.NewHandler(devReg, pluginReg, nil, "", nil, 0)
+	// Pass nil for pairPlugin (uses fallback path) and for the optional saver.
+	handler := ipc.NewHandler(devReg, pluginReg, nil, nil, nil, 0)
 	server := ipc.NewServer(sockPath, handler, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
