@@ -4,203 +4,24 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
-	"os"
-	"strings"
-	"time"
 
-	"github.com/bethropolis/kcd/internal/cert"
-	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-type progressWriter struct {
-	total    int64
-	current  int64
-	callback func(int64, int64)
-}
-
-func (pw *progressWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	pw.current += int64(n)
-	if pw.callback != nil {
-		pw.callback(pw.current, pw.total)
-	}
-	return n, nil
-}
-
 func ReceiveSideChannel(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, onProgress func(int64, int64), logger log.Logger, options ...transport.SidechannelOptions) error {
-	if size < 0 {
-		return fmt.Errorf("share: indefinite payload sizes (-1) are not supported")
-	}
-
-	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("share: create file %s: %w", dest, err)
-	}
-	defer f.Close()
-
-	limitReader := io.LimitReader(conn, size)
-
-	r := limitReader
-	if onProgress != nil {
-		r = io.TeeReader(limitReader, &progressWriter{total: size, callback: onProgress})
-	}
-
-	n, err := io.Copy(f, r)
-	if err != nil {
-		os.Remove(dest) // don't leave a corrupt partial behind
-		return fmt.Errorf("share: stream transfer to %s: %w", dest, err)
-	}
-
-	if n < size {
-		os.Remove(dest) // don't leave a corrupt partial behind
-		return fmt.Errorf("share: transfer truncated (%d/%d bytes)", n, size)
-	}
-
-	logger.Info("share: transfer complete", log.String("path", dest), log.Int64("bytes", n))
-	return nil
-}
-
-// ListenSideChannel binds to an available TCP port in the KDE Connect side-channel range.
-func ListenSideChannel(ctx context.Context, cfg config.ShareConfig, tlsConfig *tls.Config) (net.Listener, int, error) {
-	lc := net.ListenConfig{KeepAlive: 30 * time.Second}
-	var ln net.Listener
-	var err error
-
-	for port := cfg.PortMin; port <= cfg.PortMax; port++ {
-		ln, err = lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
-		if err == nil {
-			return ln, port, nil
-		}
-	}
-	return nil, 0, fmt.Errorf("no available ports in range %d-%d", cfg.PortMin, cfg.PortMax)
-}
-
-// AcceptAndSend waits for the phone, handshakes over TLS, and streams the file.
-// SidechannelOptions bound streaming silence; portMin/Max are firewall hints only.
-func AcceptAndSend(ln net.Listener, filePath string, tlsConfig *tls.Config, expectedDeviceID, expectedFP string, timeout time.Duration, onProgress func(int64, int64), logger log.Logger, portMin, portMax int, options ...transport.SidechannelOptions) error {
-	defer ln.Close()
-
-	addr := ln.Addr().String()
-
-	// Give Android some time to connect (the user might need to tap "Accept" on their phone)
-	acceptCtx, cancelAccept := context.WithTimeout(context.Background(), timeout)
-	defer cancelAccept()
-
-	go func() {
-		<-acceptCtx.Done()
-		ln.Close() // Unblocks Accept() if timeout is reached
-	}()
-
-	logger.Info("share: waiting for device to connect",
-		log.String("listen_addr", addr),
-		log.String("device_id", expectedDeviceID),
-		log.String("file", filePath),
-	)
-
-	conn, err := ln.Accept()
-	if err != nil {
-		if acceptCtx.Err() != nil {
-			logger.Warn(fmt.Sprintf("share: timed out waiting for device to connect — is TCP %d-%d open in your firewall?", portMin, portMax),
-				log.String("listen_addr", addr),
-				log.String("device_id", expectedDeviceID),
-			)
-			return fmt.Errorf("timed out waiting for device to connect on %s (check firewall: ufw allow %d:%d/tcp)", addr, portMin, portMax)
-		}
-		return fmt.Errorf("accept failed: %w", err)
-	}
-	defer conn.Close()
-
-	logger.Info("share: device connected to side-channel, starting TLS handshake",
-		log.String("remote_addr", conn.RemoteAddr().String()),
-	)
-
-	tlsConn := tls.Server(conn, tlsConfig)
-	if err := tlsConn.HandshakeContext(acceptCtx); err != nil {
-		if err == io.EOF {
-			logger.Debug("share: TLS handshake aborted by remote device (EOF)",
-				log.String("remote_addr", conn.RemoteAddr().String()),
-			)
-		} else {
-			logger.Error("share: TLS handshake failed on side-channel",
-				log.String("remote_addr", conn.RemoteAddr().String()),
-				log.Error(err),
-			)
-		}
-		return fmt.Errorf("tls handshake failed: %w", err)
-	}
-
-	state := tlsConn.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
-		logger.Error("share: device presented no client certificate",
-			log.String("remote_addr", conn.RemoteAddr().String()),
-			log.String("expected_device", expectedDeviceID),
-		)
-		return fmt.Errorf("share: client presented no certificate (expected device %s)", expectedDeviceID)
-	}
-	// Android mints cert CNs with hyphens but sends underscores in identity
-	// packets: normalize before comparing.
-	certCN := state.PeerCertificates[0].Subject.CommonName
-	normCN := strings.ReplaceAll(certCN, "-", "_")
-	if normCN != expectedDeviceID {
-		logger.Error("share: cert CN mismatch — unexpected device connected to side-channel",
-			log.String("expected_device", expectedDeviceID),
-			log.String("cert_cn", certCN),
-		)
-		return fmt.Errorf("share: cert CN mismatch: expected device %s, got %s", expectedDeviceID, certCN)
-	}
-	// The CN check only confirms the ID claim: pin the paired fingerprint so
-	// a different cert minted with the same CN can't pull the file.
-	if expectedFP == "" {
-		logger.Warn("share: no pinned peer fingerprint, skipping side-channel verification",
-			log.String("expected_device", expectedDeviceID))
-	} else if err := cert.VerifySideChannelPeer(state, expectedFP); err != nil {
-		logger.Error("share: side-channel peer verification failed",
-			log.String("expected_device", expectedDeviceID),
-			log.String("expected_fp", expectedFP),
-			log.Error(err),
-		)
-		return fmt.Errorf("share: side-channel peer verification failed: %w", err)
-	}
-
-	logger.Info("share: TLS OK, streaming file",
-		log.String("file", filePath),
-		log.String("remote_addr", conn.RemoteAddr().String()),
-	)
-
-	f, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-
-	stat, _ := f.Stat()
-	size := stat.Size()
-
-	var r io.Reader = f
-	if onProgress != nil {
-		r = io.TeeReader(f, &progressWriter{total: size, callback: onProgress})
-	}
-
-	var streamConn net.Conn = tlsConn
+	var opts transport.SidechannelOptions
 	if len(options) > 0 {
-		streamConn = transport.WithIdleTimeout(tlsConn, options[0].IdleTimeout)
+		opts = options[0]
 	}
-
-	n, err := io.Copy(streamConn, r)
+	maxSize := opts.MaxPayloadSize
+	if maxSize <= 0 {
+		maxSize = 1024 * 1024 * 1024
+	}
+	_, err := transport.ReceiveToFile(ctx, ip, port, size, dest, tlsConfig, expectedFP, logger, transport.ReceiveOptions{MaxSize: maxSize, OnProgress: onProgress, Sidechannel: opts})
 	if err != nil {
-		return fmt.Errorf("stream error: %w", err)
+		return fmt.Errorf("share: receive payload: %w", err)
 	}
-
-	logger.Info("share: send complete", log.String("path", filePath), log.Int64("bytes", n))
 	return nil
 }

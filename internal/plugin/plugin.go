@@ -24,8 +24,9 @@ type Plugin interface {
 	// Return 0 for no timeout (or a global default).
 	Timeout() time.Duration
 
-	// Handle processes an incoming packet in the device's read loop: any
-	// blocking work must spawn a goroutine and return immediately.
+	// Handle processes a packet in the device read loop. Its context is cancelled
+	// when Handle returns, so work that outlives the call needs its own context.
+	// Blocking work must run asynchronously and return immediately.
 
 	// OnConnect is called when the device connects.
 	OnConnect(dev device.Sender)

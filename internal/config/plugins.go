@@ -60,6 +60,7 @@ type LockDeviceConfig struct {
 }
 
 type ShareConfig struct {
+	MaxFileSize       int64  `toml:"max_file_size"`
 	PortMin           int    `toml:"port_min"`
 	PortMax           int    `toml:"port_max"`
 	AcceptTimeoutSecs int    `toml:"accept_timeout_secs"`
@@ -157,6 +158,7 @@ func (c *ClipboardConfig) Defaults() {
 }
 
 func (c *ShareConfig) Defaults() {
+	c.MaxFileSize = 1024 * 1024 * 1024
 	c.PortMin = protocol.DefaultSidechannelPortMin
 	c.PortMax = protocol.DefaultSidechannelPortMax
 	c.AcceptTimeoutSecs = 120

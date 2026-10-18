@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
-	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugins/share"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 )
 
 func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
@@ -47,16 +46,20 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 		return
 	}
 
-	var shareCfg config.ShareConfig
-	shareCfg.Defaults()
-
-	ln, port, err := share.ListenSideChannel(ctx, shareCfg, p.tlsConfig)
+	portMin, portMax := p.sidechannel.PortMin, p.sidechannel.PortMax
+	if portMin == 0 {
+		portMin = protocol.DefaultSidechannelPortMin
+	}
+	if portMax == 0 {
+		portMax = protocol.DefaultSidechannelPortMax
+	}
+	ln, port, err := transport.ListenSidechannel(ctx, portMin, portMax)
 	if err != nil {
 		return
 	}
 
 	go func() {
-		_ = share.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger, shareCfg.PortMin, shareCfg.PortMax)
+		_ = transport.AcceptAndSend(ln, filePath, p.tlsConfig, dev.ID(), cert.PinnedFingerprint(dev.PeerCert()), 10*time.Second, nil, p.logger, portMin, portMax, p.sidechannel)
 	}()
 
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", map[string]interface{}{
@@ -128,7 +131,7 @@ func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, play
 	// independent context so the side-channel dial isn't aborted.
 	dlCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := share.ReceiveSideChannel(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, cert.PinnedFingerprint(dev.PeerCert()), nil, p.logger); err != nil {
+	if _, err := transport.ReceiveToFile(dlCtx, remoteIP, port, size, tmpPath, p.tlsConfig, cert.PinnedFingerprint(dev.PeerCert()), p.logger, transport.ReceiveOptions{MaxSize: maxAlbumArtBytes, Sidechannel: p.sidechannel}); err != nil {
 		p.logger.Warn("mpris: album art transfer failed", log.Error(err))
 		return
 	}

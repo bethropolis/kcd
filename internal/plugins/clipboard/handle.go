@@ -2,16 +2,13 @@ package clipboard
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
-	"fmt"
-	"io"
 	"mime"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
@@ -120,7 +117,9 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		tmpFile.Close()
 		defer os.Remove(tmpPath)
 
-		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, p.sidechannel); err != nil {
+		dlCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if _, err := transport.ReceiveToFile(dlCtx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, transport.ReceiveOptions{MaxSize: maxClipboardFileSize, Sidechannel: p.sidechannel}); err != nil {
 			p.logger.Error("clipboard file: download failed", log.Error(err))
 			return
 		}
@@ -151,27 +150,5 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		}
 	}()
 
-	return nil
-}
-
-// downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger log.Logger, options ...transport.SidechannelOptions) error {
-	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("clipboard: create file %s: %w", dest, err)
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, io.LimitReader(conn, size))
-	if err != nil {
-		os.Remove(dest) // don't leave a corrupt partial behind
-		return fmt.Errorf("clipboard: stream to %s: %w", dest, err)
-	}
 	return nil
 }

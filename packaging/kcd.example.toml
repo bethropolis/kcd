@@ -275,6 +275,7 @@ suspend = "systemctl suspend"
 # ─── Share: file transfer settings ────────────────────────────────────────────
 
 [share]
+# max_file_size = 1073741824   # maximum received file size (bytes; default 1 GiB)
 # port_min = 1739               # start of TCP port range for transfers
 # port_max = 1764               # end of TCP port range for transfers
 # accept_timeout_secs = 120     # how long to wait for phone to connect

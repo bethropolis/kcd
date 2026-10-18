@@ -13,6 +13,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 )
 
 func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath string) error {
@@ -31,7 +32,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	}
 
 	// Bind to an available side-channel port (using config range)
-	ln, port, err := ListenSideChannel(ctx, p.cfg, p.TLSConfig)
+	ln, port, err := transport.ListenSidechannel(ctx, p.cfg.PortMin, p.cfg.PortMax)
 	if err != nil {
 		return err
 	}
@@ -51,7 +52,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.cfg.PortMin, p.cfg.PortMax, p.sidechannel)
+		err := transport.AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.cfg.PortMin, p.cfg.PortMax, p.sidechannel)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",

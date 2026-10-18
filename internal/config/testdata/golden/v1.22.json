@@ -89,6 +89,7 @@
     "AllowRemoteUnlock": false
   },
   "Share": {
+    "MaxFileSize": 1073741824,
     "PortMin": 1739,
     "PortMax": 1764,
     "AcceptTimeoutSecs": 120,

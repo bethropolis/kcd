@@ -34,9 +34,12 @@ import (
 
 func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger log.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
 	sidechannel := transport.SidechannelOptions{
-		Timeout:       config.Duration(cfg.Network.SidechannelTimeout),
-		IdleTimeout:   config.Duration(cfg.Network.TransferIdleTimeout),
-		KeepAliveIdle: config.Duration(cfg.Network.KeepAliveIdle),
+		Timeout:        config.Duration(cfg.Network.SidechannelTimeout),
+		IdleTimeout:    config.Duration(cfg.Network.TransferIdleTimeout),
+		KeepAliveIdle:  config.Duration(cfg.Network.KeepAliveIdle),
+		MaxPayloadSize: cfg.Share.MaxFileSize,
+		PortMin:        cfg.Share.PortMin,
+		PortMax:        cfg.Share.PortMax,
 	}
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
@@ -66,7 +69,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, cfg.Plugins.PauseMusic, cfg.MPRIS, logger, cfg.Cache.AlbumArtDir))
+		plugins.Register(mpris.NewMPRISPluginWithOptions(tlsCfg, bus, cfg.Plugins.PauseMusic, cfg.MPRIS, logger, sidechannel, cfg.Cache.AlbumArtDir))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
