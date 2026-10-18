@@ -216,9 +216,15 @@ stateDiagram-v2
     Unpaired --> PairRequestedByPeer : Peer initiates
     PairRequestedByPeer --> Paired : Local accepts
     PairRequestedByPeer --> Unpaired : Local rejects
+    PairRequestedByPeer --> Unpaired : Timeout
 
     Paired --> Unpaired : Unpair
+    Paired --> PairRequestedByPeer : Peer requests pairing again
 ```
+
+Pending requests expire after `[pairing].timeout_secs`, capped at Android's
+30-second requester and 25-second receiver windows. Pending states loaded from
+disk are reset to Unpaired because the peer's request expired while kcd was down.
 
 Auto-reconnect: on Disconnect, if State == Paired and LastIP != nil,
 reconnectWithBackoff is spawned. It dials LastIP with exponential backoff

@@ -972,6 +972,9 @@ A pairing request was rejected, or a device was unpaired.
 {"name": "Pixel 9", "type": "phone"}
 ```
 
+When a pending request expires, the payload also includes
+`"reason": "timeout"`.
+
 ### 5.3 Battery Events
 
 #### `battery.update`

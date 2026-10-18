@@ -35,63 +35,62 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 
 	switch state {
 	case device.StatePairRequested:
-		// We requested pairing, they accepted
 		p.logger.Info("pairing accepted by peer", log.String("device_id", dev.ID()))
 		p.pairingDone(dev)
-
-	case device.StatePairRequestedByPeer:
-		// Already have a pending request, ignore duplicate
-		p.logger.Debug("ignoring duplicate pair request", log.String("device_id", dev.ID()))
-
-	case device.StatePaired:
-		// Already paired — the peer's pair:true is confirmation; ack it back.
-		p.logger.Debug("received pair confirmation from already paired device", log.String("device_id", dev.ID()))
-		pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
-		dev.Send(pkt)
 		return nil
 
-	case device.StateUnpaired, device.StateUnknown:
-		// New pair request from peer
-		// Validate timestamp for protocol v8
-		if body.Timestamp > 0 {
-			now := time.Now().Unix()
-			diff := now - body.Timestamp
-			if diff < -AllowedTimestampDiff || diff > AllowedTimestampDiff {
-				p.logger.Warn("pair request timestamp out of range",
-					log.String("device_id", dev.ID()),
-					log.Int64("timestamp", body.Timestamp),
-					log.Int64("now", now))
-				pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
-				dev.Send(pkt)
-				return nil
-			}
-			// Remembered so the verification key can be recomputed for
-			// this request rather than at pairing time.
-			p.mu.Lock()
-			p.pairingTimestamp[dev.ID()] = body.Timestamp
-			p.mu.Unlock()
+	case device.StatePairRequestedByPeer:
+		p.logger.Debug("ignoring duplicate pair request", log.String("device_id", dev.ID()))
+		return nil
+
+	case device.StatePaired, device.StateUnpaired, device.StateUnknown:
+		if !p.validateRequestTimestamp(dev, body.Timestamp) {
+			return nil
 		}
-
-		p.logger.Info("incoming pair request", log.String("device_id", dev.ID()))
-
-		var vKey string
-		peerCert := dev.PeerCert()
-		if peerCert != nil {
-			vKey = cert.VerificationKey(p.localCert, peerCert, p.pairingTimestampFor(dev.ID()))
-			p.logger.Info("pairing verification code",
-				log.String("device_id", dev.ID()),
-				log.String("code", vKey))
-		}
-
-		dev.SetState(device.StatePairRequestedByPeer)
-		if p.onStateChanged != nil {
-			p.onStateChanged()
-		}
-
-		p.emit(events.TypePairRequested, dev, vKey)
+		p.startIncomingRequest(dev)
 	}
 
 	return nil
+}
+
+func (p *PairPlugin) validateRequestTimestamp(dev *device.Device, timestamp int64) bool {
+	if timestamp <= 0 && dev.PeerProtocolVersion() >= protocol.ProtocolVersion {
+		p.logger.Warn("pair request missing timestamp", log.String("device_id", dev.ID()))
+		p.sendPairReject(dev)
+		return false
+	}
+	if timestamp <= 0 {
+		return true
+	}
+	now := time.Now().Unix()
+	diff := now - timestamp
+	if diff < -AllowedTimestampDiff || diff > AllowedTimestampDiff {
+		p.logger.Warn("pair request timestamp out of range",
+			log.String("device_id", dev.ID()),
+			log.Int64("timestamp", timestamp),
+			log.Int64("now", now))
+		p.sendPairReject(dev)
+		return false
+	}
+	p.mu.Lock()
+	p.pairingTimestamp[dev.ID()] = timestamp
+	p.mu.Unlock()
+	return true
+}
+
+func (p *PairPlugin) startIncomingRequest(dev *device.Device) {
+	p.logger.Info("incoming pair request", log.String("device_id", dev.ID()))
+
+	var vKey string
+	if peerCert := dev.PeerCert(); peerCert != nil {
+		vKey = cert.VerificationKey(p.localCert, peerCert, p.pairingTimestampFor(dev.ID()))
+		p.logger.Info("pairing verification code",
+			log.String("device_id", dev.ID()),
+			log.String("code", vKey))
+	}
+
+	p.changeState(dev, device.StatePairRequestedByPeer)
+	p.emit(events.TypePairRequested, dev, vKey)
 }
 
 func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) error {
@@ -99,30 +98,26 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 
 	switch state {
 	case device.StatePairRequested:
-		// We requested, they rejected
 		p.logger.Info("pair request rejected by peer", log.String("device_id", dev.ID()))
-		dev.SetState(device.StateUnpaired)
+		p.changeState(dev, device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
-		p.emit(events.TypePairRejected, dev, "")
+		p.emitRejected(dev, "")
 
 	case device.StatePairRequestedByPeer:
-		// They requested, then cancelled
 		p.logger.Info("pair request cancelled by peer", log.String("device_id", dev.ID()))
-		dev.SetState(device.StateUnpaired)
+		p.changeState(dev, device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
-		p.emit(events.TypePairRejected, dev, "")
+		p.emitRejected(dev, "")
 
 	case device.StatePaired:
-		// Unpair request
 		p.logger.Info("unpair request received", log.String("device_id", dev.ID()))
-		dev.SetState(device.StateUnpaired)
+		p.changeState(dev, device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
 
 	case device.StateUnpaired, device.StateUnknown:
-		// Already unpaired, ignore
 		p.logger.Debug("ignoring unpair request for unpaired device", log.String("device_id", dev.ID()))
 	}
 
@@ -130,10 +125,6 @@ func (p *PairPlugin) handleUnpairRequest(_ context.Context, dev *device.Device) 
 	p.mu.Lock()
 	delete(p.pairingTimestamp, dev.ID())
 	p.mu.Unlock()
-
-	if p.onStateChanged != nil {
-		p.onStateChanged()
-	}
 
 	return nil
 }

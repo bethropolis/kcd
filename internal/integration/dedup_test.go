@@ -130,7 +130,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	if err := peer.SendPacket(connA, identPkt); err != nil {
 		t.Fatalf("send identity: %v", err)
 	}
-	pairPkt, _ := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, _ := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	if err := peer.SendPacket(connA, pairPkt); err != nil {
 		t.Fatalf("send pair: %v", err)
 	}

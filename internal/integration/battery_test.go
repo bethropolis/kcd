@@ -88,7 +88,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	_ = peer.SendPacket(conn, identPkt)
 
 	// Send pair request to get into Paired state
-	pairPkt, _ := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, _ := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	_ = peer.SendPacket(conn, pairPkt)
 
 	// Give daemon time to process the pair request

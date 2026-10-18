@@ -45,6 +45,15 @@ func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *d
 	bc.StopOwned(discovery.OwnerReconnect)
 }
 
+func restoredPairingState(state device.PairingState) device.PairingState {
+	switch state {
+	case device.StateUnknown, device.StatePairRequested, device.StatePairRequestedByPeer:
+		return device.StateUnpaired
+	default:
+		return state
+	}
+}
+
 // Run starts the core daemon lifecycle.
 // buildIdentity assembles the daemon's advertised identity from config,
 // including the configured device type rather than a hardcoded one.
@@ -80,11 +89,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	statePath := config.StatePath()
 	if loaded, err := device.LoadDevices(statePath); err == nil {
 		for _, info := range loaded {
-			// Migrate pre-fix state: devices persisted as UNKNOWN (the old
-			// zero value) are simply unpaired.
-			if info.State == device.StateUnknown {
-				info.State = device.StateUnpaired
-			}
+			info.State = restoredPairingState(info.State)
 			// Migrate pre-fix names: decode decimal byte escapes to real UTF-8
 			// (SanitizeDeviceName already decodes; don't double-decode).
 			info.Name = protocol.SanitizeDeviceName(info.Name)

@@ -46,7 +46,7 @@ configuration is captured at startup. Running the daemon directly, send
 | `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"`, `sighting_driven = true`, `fallback_max = "1h"`, `stale_after = "24h"` |
 | `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
 | `[mpris]` | `poll_while_playing = true`, `position_interval = "2s"` |
-| `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |
+| `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`, `timeout_secs = 30` controls pending pairing, capped at Android's 30-second requester and 25-second receiver windows |
 | `[cache]` | `sms_attachments_dir = ""`, `album_art_dir = ""`, `contacts_dir = ""` |
 | `[notifications]` | `app_name = "KDE Connect"`; per-app `"show"`/`"silent"` filters and `"*"` fallback remain supported |
 | `[ping]` | `app_name = ""` inherits the notification application name; a non-empty value overrides it |
@@ -272,6 +272,10 @@ kcd pair <device-id>
 ```
 
 If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
+
+If a paired device starts a new pairing request, `kcd` asks for confirmation
+again. This covers a phone that lost its saved pairing after reinstall or data
+reset.
 
 When `kcd` sends the request, it prints a **verification code**. Compare it with the code on the phone's prompt: they must match. A mismatch means something is intercepting the connection — cancel and `kcd unpair` the device. No code is printed when the phone initiated the request (use [listen mode](#listen-mode-headless--server) for that direction) or when the device is already paired.
 

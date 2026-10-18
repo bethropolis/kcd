@@ -21,11 +21,17 @@ func (d *Device) Send(p *protocol.Packet) error {
 	connected := d.conn != nil
 	sendChan := d.sendChan
 	done := d.done
+	state := d.state
 	d.mu.RUnlock()
 
 	if !connected {
 		protocol.ReleasePacket(p)
 		return nil // silently drop if not connected
+	}
+	if !packetAllowed(state, p.Type) {
+		d.logger.Debug("dropping packet for unpaired device", log.String("type", p.Type))
+		protocol.ReleasePacket(p)
+		return nil
 	}
 
 	select {
@@ -100,6 +106,11 @@ func (d *Device) writerLoop(ctx context.Context) {
 		case <-done:
 			return
 		case pkt := <-sendChan:
+			if !packetAllowed(d.State(), pkt.Type) {
+				d.logger.Debug("dropping queued packet for unpaired device", log.String("type", pkt.Type))
+				protocol.ReleasePacket(pkt)
+				continue
+			}
 			d.mu.RLock()
 			conn := d.conn
 			d.mu.RUnlock()
@@ -128,4 +139,8 @@ func (d *Device) writerLoop(ctx context.Context) {
 			protocol.ReleasePacket(pkt)
 		}
 	}
+}
+
+func packetAllowed(state PairingState, packetType string) bool {
+	return state == StatePaired || packetType == protocol.TypePair
 }

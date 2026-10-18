@@ -55,6 +55,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	} else {
 		dev.SetName(safeDeviceName)
 	}
+	dev.SetPeerProtocolVersion(peerBody.ProtocolVersion)
 	dev.SetLastSeen(time.Now())
 
 	certFP := cert.Fingerprint(peerCert)
@@ -84,12 +85,10 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		return plugins.Dispatch(ctx, sender, pkt)
 	}
 
-	onConnect := func(sender *device.Device) {
-		plugins.OnConnect(sender)
-	}
+	onConnect := func(sender *device.Device) { notifyPluginsConnected(plugins, sender) }
 
 	onDisconnect := func(sender *device.Device) {
-		plugins.OnDisconnect(sender)
+		notifyPluginsDisconnected(plugins, sender)
 		// Only attempt reconnection for paired devices whose last IP we know.
 		// Unpaired or manually-disconnected devices are left alone.
 		if sender.State() != device.StatePaired {
@@ -115,4 +114,16 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)
 	return nil
+}
+
+func notifyPluginsConnected(plugins *plugin.Registry, sender *device.Device) {
+	if sender.State() == device.StatePaired {
+		plugins.OnConnect(sender)
+	}
+}
+
+func notifyPluginsDisconnected(plugins *plugin.Registry, sender *device.Device) {
+	if sender.State() == device.StatePaired {
+		plugins.OnDisconnect(sender)
+	}
 }

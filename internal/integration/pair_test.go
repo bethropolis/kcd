@@ -107,7 +107,7 @@ func TestPairFlowIntegration(t *testing.T) {
 	_ = peer.SendPacket(conn, identPkt)
 
 	// Send pair request
-	pairPkt, err := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, err := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	if err != nil {
 		t.Fatalf("build pair pkt: %v", err)
 	}

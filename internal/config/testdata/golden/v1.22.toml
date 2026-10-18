@@ -308,7 +308,7 @@ suspend = "systemctl suspend"
 # ─── Pairing: protocol settings ──────────────────────────────────────────────
 
 [pairing]
-# timeout_secs = 30             # how long to wait for a pairing response
+# timeout_secs = 30             # pending-pair wait; capped at Android's 30s/25s windows
 # intent_ttl = "5m"             # lifetime of explicit `kcd pair <id>` intent
 # listen_timeout = "60s"        # maximum wait in `kcd pair` listen mode
 

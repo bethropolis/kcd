@@ -205,9 +205,13 @@ Unpaired ── local requests ──► PairRequested ── peer accepts ─�
    │                               └─ peer rejects ─────────────► Unpaired
    └──── peer requests ──► PairRequestedByPeer ── user accepts ──► Paired
                                    └─ user rejects ─────────────► Unpaired
+Paired ── peer requests pairing again ──► PairRequestedByPeer
 ```
 
-Pending states don't time out yet (the `pairing.timeout_secs` key is not implemented). Use `dev.State()` / `dev.SetState()` (guarded by a mutex). State changes are
+Pending states expire after `pairing.timeout_secs`, capped at Android's
+30-second requester and 25-second receiver windows. A restart restores
+pending states as `Unpaired`. Use `dev.State()`, `dev.SetState()`, and
+`dev.TransitionState()` for mutex-guarded state access. State changes are
 persisted to `devices.json` (`ID`, `Name`, `Type`, `State`, `CertFP`,
 `LastSeen`, `LastIP`, `LastPort`).
 

@@ -23,25 +23,38 @@ type PairPlugin struct {
 	devices        *device.Registry
 	localCert      *x509.Certificate
 	onStateChanged func() // callback to persist state
+	onPaired       func(device.Sender)
+	onUnpaired     func(device.Sender)
 	logger         log.Logger
 	bus            *events.Bus
 	cfg            config.PairingConfig
 
-	mu               sync.Mutex
-	pairingTimestamp map[string]int64 // deviceID -> timestamp from pair request
+	mu                sync.Mutex
+	pairingTimestamp  map[string]int64 // deviceID -> timestamp from pair request
+	pendingTimers     map[string]*time.Timer
+	pendingGeneration map[string]uint64
+	nextGeneration    uint64
 }
 
 // NewPairPlugin creates a new pairing plugin.
 func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg config.PairingConfig, onStateChanged func(), bus *events.Bus, logger log.Logger) *PairPlugin {
 	return &PairPlugin{
-		devices:          devices,
-		localCert:        localCert,
-		cfg:              cfg,
-		onStateChanged:   onStateChanged,
-		logger:           logger.Named("pair"),
-		bus:              bus,
-		pairingTimestamp: make(map[string]int64),
+		devices:           devices,
+		localCert:         localCert,
+		cfg:               cfg,
+		onStateChanged:    onStateChanged,
+		logger:            logger.Named("pair"),
+		bus:               bus,
+		pairingTimestamp:  make(map[string]int64),
+		pendingTimers:     make(map[string]*time.Timer),
+		pendingGeneration: make(map[string]uint64),
 	}
+}
+
+// SetLifecycleCallbacks sets plugin callbacks for pairing and unpairing transitions.
+func (p *PairPlugin) SetLifecycleCallbacks(onPaired, onUnpaired func(device.Sender)) {
+	p.onPaired = onPaired
+	p.onUnpaired = onUnpaired
 }
 
 // pairingTimestampFor returns the stored pair-request timestamp for a
@@ -65,6 +78,20 @@ func (p *PairPlugin) emit(typ events.EventType, dev *device.Device, vKey string)
 		payload["verificationKey"] = vKey
 	}
 	p.bus.Publish(typ, dev.ID(), payload)
+}
+
+func (p *PairPlugin) emitRejected(dev *device.Device, reason string) {
+	if p.bus == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"name": dev.Name(),
+		"type": dev.Type,
+	}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	p.bus.Publish(events.TypePairRejected, dev.ID(), payload)
 }
 
 func (p *PairPlugin) Name() string { return "Pair" }

@@ -14,14 +14,26 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-type stubRoutePlugin struct{ name string }
+type stubRoutePlugin struct {
+	name         string
+	onConnect    func(device.Sender)
+	onDisconnect func(device.Sender)
+}
 
-func (s *stubRoutePlugin) Name() string               { return s.name }
-func (s *stubRoutePlugin) IncomingTypes() []string    { return nil }
-func (s *stubRoutePlugin) OutgoingTypes() []string    { return nil }
-func (s *stubRoutePlugin) Timeout() time.Duration     { return 0 }
-func (s *stubRoutePlugin) OnConnect(device.Sender)    {}
-func (s *stubRoutePlugin) OnDisconnect(device.Sender) {}
+func (s *stubRoutePlugin) Name() string            { return s.name }
+func (s *stubRoutePlugin) IncomingTypes() []string { return nil }
+func (s *stubRoutePlugin) OutgoingTypes() []string { return nil }
+func (s *stubRoutePlugin) Timeout() time.Duration  { return 0 }
+func (s *stubRoutePlugin) OnConnect(dev device.Sender) {
+	if s.onConnect != nil {
+		s.onConnect(dev)
+	}
+}
+func (s *stubRoutePlugin) OnDisconnect(dev device.Sender) {
+	if s.onDisconnect != nil {
+		s.onDisconnect(dev)
+	}
+}
 func (s *stubRoutePlugin) Handle(context.Context, device.Sender, *protocol.Packet) error {
 	return nil
 }

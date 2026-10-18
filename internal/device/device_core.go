@@ -22,8 +22,9 @@ type Device struct {
 	IncomingCaps []string
 	OutgoingCaps []string
 
-	state  PairingState
-	CertFP string
+	state               PairingState
+	CertFP              string
+	peerProtocolVersion int
 
 	lastSeen time.Time
 	lastIP   net.IP // cached from last successful connection; survives Disconnect
@@ -104,12 +105,13 @@ type Device struct {
 // New devices start as Unpaired (not Unknown) so listings are unambiguous.
 func NewDevice(id, name, dtype string, logger log.Logger) *Device {
 	return &Device{
-		id:       id,
-		name:     name,
-		Type:     dtype,
-		state:    StateUnpaired,
-		sendChan: make(chan *protocol.Packet, 32),
-		done:     make(chan struct{}),
+		id:                  id,
+		name:                name,
+		Type:                dtype,
+		state:               StateUnpaired,
+		peerProtocolVersion: protocol.ProtocolVersion,
+		sendChan:            make(chan *protocol.Packet, 32),
+		done:                make(chan struct{}),
 		// A send on a nil channel blocks forever, so the select takes default:
 		// nil-safe, and zero-value Devices work in tests.
 		reconnectWake: make(chan struct{}, 1),
@@ -150,6 +152,38 @@ func (d *Device) SetState(s PairingState) {
 	if s == StateUnpaired {
 		d.PokeReconnect()
 	}
+}
+
+// TransitionState changes pairing state only when it still matches expected.
+func (d *Device) TransitionState(expected, next PairingState) bool {
+	d.mu.Lock()
+	if d.state != expected {
+		d.mu.Unlock()
+		return false
+	}
+	d.state = next
+	d.mu.Unlock()
+	if next == StateUnpaired {
+		d.PokeReconnect()
+	}
+	return true
+}
+
+// SetPeerProtocolVersion records the protocol version advertised by the peer.
+func (d *Device) SetPeerProtocolVersion(version int) {
+	if version <= 0 {
+		version = protocol.ProtocolVersion
+	}
+	d.mu.Lock()
+	d.peerProtocolVersion = version
+	d.mu.Unlock()
+}
+
+// PeerProtocolVersion returns the protocol version advertised by the peer.
+func (d *Device) PeerProtocolVersion() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.peerProtocolVersion
 }
 
 // PokeReconnect wakes the reconnect loop to re-check now; non-blocking and
