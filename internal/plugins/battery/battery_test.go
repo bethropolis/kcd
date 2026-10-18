@@ -10,6 +10,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 func newPlugin(t *testing.T) (*BatteryPlugin, *events.Bus) {
@@ -18,8 +19,19 @@ func newPlugin(t *testing.T) (*BatteryPlugin, *events.Bus) {
 	bus := events.NewBus(logger)
 	cfg := config.BatteryConfig{}
 	cfg.Defaults()
-	return NewBatteryPlugin(cfg, bus, logger), bus
+	p := NewBatteryPlugin(cfg, bus, logger)
+	p.exec = sysexec.New(noopRunner{})
+	return p, bus
 }
+
+type noopRunner struct{}
+
+func (noopRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+func (noopRunner) RunInput(context.Context, string, string, ...string) ([]byte, error) {
+	return nil, nil
+}
+func (noopRunner) Output(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+func (noopRunner) LookPath(string) (string, error)                           { return "", nil }
 
 func TestBatteryPlugin_Handle_UpdatesDevice(t *testing.T) {
 	logger := log.NewTest(t)

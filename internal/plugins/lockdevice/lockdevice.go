@@ -11,18 +11,24 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 // LockDevicePlugin handles incoming lock/unlock requests from the phone.
 type LockDevicePlugin struct {
 	logger log.Logger
+	exec   *sysexec.Exec
 }
 
-func NewLockDevicePlugin(logger log.Logger) *LockDevicePlugin {
+func NewLockDevicePlugin(logger log.Logger, executors ...*sysexec.Exec) *LockDevicePlugin {
+	exec := sysexec.New(nil)
+	if len(executors) > 0 && executors[0] != nil {
+		exec = executors[0]
+	}
 	return &LockDevicePlugin{
 		logger: logger.With(log.String("plugin", "lockdevice")),
+		exec:   exec,
 	}
 }
 
@@ -71,9 +77,9 @@ func (p *LockDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return nil
 	}
 	if body.SetLocked {
-		plugin.RunCommandAsync(p.logger, "loginctl", "lock-session")
+		p.exec.RunAsync(p.logger, "loginctl", "lock-session")
 	} else {
-		plugin.RunCommandAsync(p.logger, "loginctl", "unlock-session")
+		p.exec.RunAsync(p.logger, "loginctl", "unlock-session")
 	}
 
 	return nil
@@ -88,7 +94,7 @@ func (p *LockDevicePlugin) getLocked() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	out, err := plugin.RunCommandOutput(ctx, "loginctl", "show-session", sessionID, "-p", "LockedHint")
+	out, err := p.exec.Output(ctx, "loginctl", "show-session", sessionID, "-p", "LockedHint")
 	if err != nil {
 		return false
 	}

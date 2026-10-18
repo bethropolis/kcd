@@ -74,7 +74,9 @@ Never violate these. If a change would break one, stop and reconsider the approa
 | `internal/discovery/` | UDP broadcast and listener, mDNS advertise and browse, broadcaster ownership controller |
 | `internal/device/` | `Device` (state, send channel, read and write loops), `Registry`, `devices.json` load and save |
 | `internal/cert/` | Cert generation and loading, TLS config, fingerprints, pairing verification key |
-| `internal/plugin/` | `Plugin` interface, registry, dispatch (timeouts, panic recovery), exec helpers |
+| `internal/plugin/` | `Plugin` interface, registry, and dispatch (timeouts, panic recovery) |
+| `internal/sysexec/` | Injectable subprocess runner and cached executable lookup |
+| `internal/desktop/` | Shared clipboard and audio backends used by independent plugins |
 | `internal/plugins/<name>/` | One package per KDE Connect plugin |
 | `internal/ipc/` | IPC wire types (`proto.go`), server, watch streaming, built-in handlers |
 | `internal/events/` | Event bus and event type constants |
@@ -251,7 +253,8 @@ persisted to `devices.json` (`ID`, `Name`, `Type`, `State`, `CertFP`,
 - Helpers:
   - `log.NewTest(t)` gives a test logger; `log.Observe()` captures logs for assertions.
   - `testutil.NewMockPeer` / `DialPipe` / `SendPacket` / `ReadPacket` give a fake KDE Connect peer.
-  - `testutil.StartTestDaemon(t, cfg)` gives a daemon plus an IPC client.
+  - `testutil.FakeSender` records plugin packets; `testutil.ExpectEvent` waits for a typed event.
+  - `testutil/daemonstart.StartTestDaemon(t, cfg)` gives a daemon plus an IPC client.
 - Tests are deterministic: no `time.Sleep` to wait for goroutines; use channels or bounded `select` waits. Helpers call `t.Helper()`. Prefer table tests.
 - Code that runs external commands takes an injectable runner, so tests never spawn real `loginctl`, `xdotool` and so on.
 - A bug fix comes with a test that fails without the fix.

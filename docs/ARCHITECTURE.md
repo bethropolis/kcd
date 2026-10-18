@@ -253,14 +253,15 @@ Plugin execution is wrapped in a context with the plugin's declared `Timeout()` 
 
 ### Subprocess policy
 
-All subprocess spawns go through `internal/plugin/exec.go` unless a site
-needs something the seam cannot express:
+Shared process calls go through `internal/sysexec`, whose `Runner` interface
+allows tests to replace process execution and whose executable lookup cache
+avoids repeating `LookPath` probes:
 
 | Helper | Use when |
 |---|---|
-| `RunCommandAsync(logger, name, args...)` | Fire-and-forget, output only matters on failure (10s bound, warns once). The helper owns the goroutine — do not wrap it in another. |
-| `RunCommandSync(ctx, name, args...)` | Caller needs the exit status or combined output; caller owns the timeout via ctx. |
-| `RunCommandOutput(ctx, name, args...)` | Caller parses stdout; stderr is discarded so it cannot corrupt the parse. |
+| `RunAsync(logger, name, args...)` | Fire-and-forget, bounded to 10s; the helper owns the goroutine. |
+| `Run(ctx, name, args...)` | Caller needs the exit status and combined output. |
+| `Output(ctx, name, args...)` | Caller parses stdout; stderr stays separate. |
 
 Hand-rolled `exec.CommandContext` stays only where the seam is
 inexpressive — do not "migrate" these without replacing the missing
@@ -273,9 +274,13 @@ capability:
 - **stdout purity + stored IDs**: notification send/close (`--print-id` output becomes the next `-r` replace ID).
 - **long-lived streaming child**: `wl-paste --watch` supervisor loop in the CLI.
 
-Every `exec.CommandContext` outside `internal/plugin/exec.go` must carry
+Every `exec.CommandContext` outside `internal/sysexec` must carry
 an explicit timeout — `context.Background()` with no deadline is a
 goroutine leak when the child wedges.
+
+Clipboard text sharing uses `internal/desktop/clipboard`; `systemvolume` and
+`findthisdevice` share the pactl/wpctl backend in `internal/desktop/audio`.
+Plugins depend on these neutral packages, never on each other.
 
 ### Implemented plugins
 

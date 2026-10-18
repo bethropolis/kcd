@@ -8,7 +8,6 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -80,7 +79,7 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 
 	if message != "" {
 		// Desktop notification.
-		plugin.RunCommandAsync(p.logger, "notify-send",
+		p.exec.RunAsync(p.logger, "notify-send",
 			"-a", p.notifications.AppName(),
 			"-u", urgency,
 			"-i", "battery",

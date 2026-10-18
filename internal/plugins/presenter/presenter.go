@@ -13,8 +13,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 // PresenterPlugin handles kdeconnect.presenter packets containing
@@ -139,7 +139,7 @@ func getScreenSize() (int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	out, err := plugin.RunCommandOutput(ctx, "xdpyinfo")
+	out, err := sysexec.Output(ctx, "xdpyinfo")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "dimensions:") {
@@ -151,7 +151,7 @@ func getScreenSize() (int, int) {
 		}
 	}
 
-	out, err = plugin.RunCommandOutput(ctx, "wlr-randr")
+	out, err = sysexec.Output(ctx, "wlr-randr")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
@@ -173,9 +173,9 @@ func moveCursor(x, y int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := plugin.RunCommandSync(ctx, "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
+	if _, err := sysexec.Run(ctx, "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
 		return
 	}
 
-	_, _ = plugin.RunCommandSync(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
+	_, _ = sysexec.Run(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
 }

@@ -1,0 +1,330 @@
+# kcd configuration file
+# Copy this file to ~/.config/kcd/kcd.toml and edit to taste.
+# All settings are optional — safe defaults are applied automatically.
+# `systemctl --user reload kcd` re-reads this file and applies [commands],
+# the [notifications] filters and log_level. Everything else needs
+# systemctl --user restart kcd.
+
+# ─── Identity ─────────────────────────────────────────────────────────────────
+
+# Stable identifier used for pairing and certificate fingerprint checks.
+# Generated once on first run and written back here. Never edit it: changing it
+# makes every paired device fail to authenticate, and you would have to
+# re-pair each one.
+# device_id = ""
+
+# The name other devices see when discovering this machine.
+# Default: system hostname.
+# device_name = "my-desktop"
+
+# Device type advertised to the KDE Connect app.
+# One of: desktop, laptop, tablet, phone, tv
+# Default: "desktop"
+# device_type = "desktop"
+
+# ─── Network ──────────────────────────────────────────────────────────────────
+
+# TCP port for the KDE Connect control channel and UDP discovery.
+# Change only if another service is using 1716.
+# Default: 1716
+# tcp_port = 1716
+
+# Nothing to configure here. Broadcast is on demand: UDP runs while a paired
+# device is offline, and mDNS advertises always at negligible cost. Paired
+# phones reconnect via their last known address.
+
+# ─── Pairing ──────────────────────────────────────────────────────────────────
+
+# Pairing is interactive. Run `kcd pair` (no arguments) to enter listen mode:
+# it waits for any incoming pair request and auto-accepts it.
+#
+# To initiate pairing to a specific device, run `kcd pair <device-id>`.
+
+# ─── Device Management ─────────────────────────────────────────────────────────
+
+# Automatically remove stale (unpaired, disconnected) devices from the registry.
+# This prevents old discovery entries from accumulating in `kcd devices`.
+# Set to "0" to disable auto-pruning entirely.
+# Default: "15m"
+# prune_stale_threshold = "15m"
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+
+# Directory where files received from paired devices are saved.
+# Default: ~/Downloads/kcd
+# download_dir = "~/Downloads/kcd"
+
+# Unix socket used for IPC between the daemon and the kcd CLI.
+# Only change this if you run multiple daemon instances.
+# Default: $XDG_RUNTIME_DIR/kcd/kcd.sock  (e.g. /run/user/1000/kcd/kcd.sock)
+# socket_path = "/run/user/1000/kcd/kcd.sock"
+
+# TLS certificate and key generated on first run.
+# Default: $XDG_CONFIG_HOME/kcd/cert.pem and key.pem
+# cert_file = "~/.config/kcd/cert.pem"
+# key_file  = "~/.config/kcd/key.pem"
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+# Log verbosity level.
+# One of: debug, info, warn, error, quiet
+# Default: "info"
+# log_level = "info"
+
+# ─── Plugins ──────────────────────────────────────────────────────────────────
+
+# Each plugin can be individually enabled or disabled.
+# All plugins are enabled by default.
+
+[plugins]
+
+# Monitor the phone's battery charge and charging state.
+battery = true
+
+# Bi-directional clipboard sync.
+# Wayland: requires wl-copy / wl-paste (wl-clipboard package).
+# X11:     requires xclip.
+clipboard = true
+
+# Forward phone notifications to the desktop via notify-send.
+# Requires libnotify / a running notification daemon.
+notification = true
+
+# Receive files and URLs from the phone, and send files to it.
+# Note: directory transfer is not supported (individual files only).
+share = true
+
+# Expose local shell commands to the phone.
+# Commands are defined in the [commands] section below.
+runcommand = true
+
+# Control desktop media players (Spotify, VLC, etc.) via D-Bus / MPRIS2.
+# Requires a D-Bus session bus. Disabled gracefully if unavailable.
+mpris = true
+
+# Pause music on incoming calls or when using the phone as a trackpad.
+pausemusic = true
+
+# Simple connectivity check — sends a "Ping!" notification to the phone.
+ping = true
+
+# Receive phone call and SMS notifications on the desktop.
+telephony = true
+
+# Phone signal strength and network type reporting.
+connectivity = true
+
+# Use the phone as a wireless trackpad and keyboard.
+# Wayland: requires ydotool (+ ydotoold running as a service).
+# X11:     requires xdotool.
+mousepad = true
+
+# Browse the phone's filesystem over SFTP.
+# Optional: requires sshfs for `kcd sftp mount`. See `kcd sftp --help`.
+sftp = true
+
+# Ring the phone to locate it.
+findmyphone = true
+
+# Let the phone ring this machine to locate it.
+findthisdevice = true
+
+# Lock / unlock the desktop session via loginctl.
+lockdevice = true
+
+# Control desktop audio volume from the phone via D-Bus / PulseAudio-PipeWire.
+systemvolume = true
+
+# Send and receive SMS messages via a connected phone.
+# See `kcd sms --help`, and the [sms] section below for notifications.
+sms = true
+
+# Sync the phone address book (vCards cached under
+# ~/.local/share/kcd/contacts/<device-id>/). See `kcd contacts --help`.
+# The phone gates this on READ_CONTACTS plus per-device opt-in; unpairing
+# wipes the cached address book.
+contacts = true
+
+# Presenter remote — control slideshow presentations from the phone.
+# Gyroscope-based pointer: requires xdotool (X11) or ydotool (Wayland).
+# Screen size detection: requires xdpyinfo (X11) or wlr-randr (Wayland).
+presenter = true
+
+# Control the remote device's audio volume from this machine.
+# See `kcd volume --help`.
+remotesystemvolume = true
+
+# ─── Connection timing and storage ────────────────────────────────────────────
+
+# Durations use Go syntax (e.g. "750ms", "10s", "5m") and must be positive.
+# Restart the daemon after changing these settings.
+
+[network]
+# dial_timeout = "5s"             # control-channel TCP dial
+# handshake_timeout = "10s"       # identity/TLS handshake
+# sidechannel_timeout = "15s"     # side-channel connection setup
+# transfer_idle_timeout = "60s"  # abort transfers silent longer than this
+# keepalive_idle = "30s"          # TCP keepalive first probe; >= 10s;
+                                 # larger = fewer probes, slower zombie detection
+
+[reconnect]
+# initial_backoff = "2s"
+# max_backoff = "5m"              # must be >= initial_backoff
+# flap_threshold = "15s"          # minimum lifetime for a stable connection
+# sighting_driven = true          # dial as soon as a paired phone is seen on
+                                 # the network instead of on a timer
+# fallback_max = "1h"             # must be >= max_backoff; silent-case spacing while parked
+# stale_after = "24h"             # stop redialing entirely after this much
+                                 # silence; a sighting starts it again
+
+[discovery]
+# broadcast_interval = "30s"
+# broadcast_idle_interval = "60s" # must be >= broadcast_interval
+# These intervals apply only while on-demand UDP broadcast is running;
+# they do not enable permanent broadcast or change mDNS advertisement.
+
+[mpris]
+# The D-Bus watcher is event-driven; these two tune the position poller that
+# keeps the phone's display moving in real time.
+# poll_while_playing = true   # false = trust the extrapolated position from
+                             # D-Bus signals alone. Cheaper, but a dropped
+                             # signal leaves the phone's position stale.
+# position_interval = "2s"    # Re-read cadence while playing. Signals start
+                             # and stop the poller, so a paused or absent
+                             # player costs zero wakeups.
+
+[cache]
+# Empty values preserve existing storage paths; use absolute paths to override.
+# sms_attachments_dir = ""        # default: system temp directory/kcd/sms-attachments
+# album_art_dir = ""              # default: $XDG_CACHE_HOME/kcd/art
+# contacts_dir = ""               # default: $XDG_DATA_HOME/kcd/contacts
+# Changing a path does not migrate existing files.
+
+[clipboard]
+# Push the local clipboard on connection/reconnection. Off by default.
+# push_on_connect = false
+
+# ─── RunCommand: exposed commands ─────────────────────────────────────────────
+
+# Shell commands that the RunCommand plugin makes available to your phone.
+# Trigger them from the KDE Connect Android app → your device → Run command.
+# Keys are the display labels; values are the shell commands executed locally.
+
+[commands]
+uptime  = "uptime -p"
+lock    = "loginctl lock-session"
+suspend = "systemctl suspend"
+# reboot  = "systemctl reboot"
+# screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
+
+# Per-device commands override the global set for specific paired devices.
+# Use the device ID shown in `kcd devices`.
+# [commands_per_device."<device-id>"]
+# screenshot = "grimblast save screen ~/Pictures/screenshot-$(date +%F-%T).png"
+
+# ─── Notification filters ─────────────────────────────────────────────────────
+
+# Control which phone app notifications appear on the desktop.
+# Keys are Android app package names. Values: "show" or "silent".
+# "silent" still emits a notification event (visible in kcd watch) but skips
+# the desktop popup.
+# The special key "*" sets the default for all unmatched apps.
+#
+# [notifications]
+# app_name = "KDE Connect" # desktop notification branding, not a filter
+# "com.whatsapp"       = "show"
+# "com.google.android.gm" = "silent"
+# "*"                  = "show"
+
+# ─── Battery: notifications and thresholds ────────────────────────────────────
+
+# In addition to monitoring your phone's battery, the daemon also sends this
+# machine's battery state to connected devices. This happens once on connect
+# and whenever the phone explicitly requests it — no periodic polling.
+
+[battery]
+# notify_low = true
+# notify_full = true
+# low_urgency = "critical"      # low, normal, critical
+# full_urgency = "normal"      # low, normal, critical
+# low_message = "Battery low"
+# full_message = "Battery fully charged"
+
+# ─── Notification: desktop popup settings ────────────────────────────────────
+
+[notification_plugin]
+# urgency = ""                  # default: libnotify choice
+# fetch_icons = true            # download app icons from the phone
+# icon_cache_dir = ""           # persistent path for icons, defaults to temp
+# max_body_length = 0           # 0 = no limit (truncates with … if set)
+# expire_ms = -1                # notification timeout in milliseconds, -1 = default
+# skip_non_clearable = false    # skip non-dismissible notifications (media playback, etc.)
+# replace_notifications = true  # replace the same notification in place on re-posts (e.g. scrobble now-playing) instead of flooding new popups
+# show_icons = false            # show app icons on desktop popups (downloaded from the phone); off by default
+# cancel_grace_ms = 1500        # delay closing a popup after a phone cancel; a same-id re-post within this window updates in place instead of flickering (0 = close immediately)
+
+# ─── Share: file transfer settings ────────────────────────────────────────────
+
+[share]
+# port_min = 1739               # start of TCP port range for transfers
+# port_max = 1764               # end of TCP port range for transfers
+# accept_timeout_secs = 120     # how long to wait for phone to connect
+# auto_open = false             # automatically open received files
+# open_command = "xdg-open"     # command used for auto_open
+# overwrite = false             # overwrite files with same name instead of renaming
+
+# ─── SFTP: remote filesystem mounting ────────────────────────────────────────
+
+[sftp]
+# Parent directory for mounts. Default: $XDG_RUNTIME_DIR/kcd/mnt
+#   (/run/user/1000/kcd/mnt), or $XDG_STATE_HOME/kcd/mnt with no user session.
+#   A mount exposes the phone's storage through the filesystem, so keep it out
+#   of folders you wipe in bulk -- `rm -rf` descends into a mount unless given
+#   -x/--one-file-system. kcd warns if this lands under Downloads, Documents,
+#   Desktop, Music, Pictures or Videos.
+# mount_dir = ""
+# read_only = false             # mount read-only, so deletions cannot reach
+                                # the phone; `kcd sftp mount --ro` / --no-ro
+                                # override this per request
+# credentials_timeout_secs = 20 # how long to wait for the phone's SFTP
+                                # response. Also sets the kcd CLI's deadline for
+                                # the commands that wait on it, so a phone that
+                                # never answers is reported as such rather than
+                                # as a socket timeout.
+# keepalive_interval_secs = 15  # sshfs ServerAliveInterval
+# keepalive_count = 3           # sshfs ServerAliveCountMax
+# auto_open = true              # automatically open mount in file manager
+# open_command = "xdg-open"     # command used for auto_open
+# extra_sshfs_opts = []         # list of strings, e.g. ["follow_symlinks", "allow_other"]
+
+# ─── Ping: connectivity check ────────────────────────────────────────────────
+
+[ping]
+# app_name = ""                # inherit [notifications].app_name; non-empty overrides
+# A previously explicit "KDE Connect" remains an override of the global name.
+# icon = "smartphone"
+# default_message = ""          # used if the phone sends an empty ping message
+
+# ─── Pairing: protocol settings ──────────────────────────────────────────────
+
+[pairing]
+# timeout_secs = 30             # how long to wait for a pairing response
+# intent_ttl = "5m"             # lifetime of explicit `kcd pair <id>` intent
+# listen_timeout = "60s"        # maximum wait in `kcd pair` listen mode
+
+# ─── SMS: notification settings ──────────────────────────────────────────────
+
+[sms]
+# notify_incoming = true       # show a desktop notification on incoming SMS
+# always_arm = false           # Ask the phone to push new SMS on every
+                               # connect, so notifications work with no
+                               # client attached.
+#
+# `kcd sms conversations` / `kcd sms conversation` arm the phone as a side
+# effect — it starts pushing every new message and cannot be stopped from this
+# side. Stop the SMS plugin on the device to end that.
+
+# ─── Mousepad: remote input settings ─────────────────────────────────────────
+
+[mousepad]
+# backend = "auto"              # auto, ydotool, xdotool

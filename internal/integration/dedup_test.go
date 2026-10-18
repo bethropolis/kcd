@@ -12,6 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/testutil"
+	"github.com/bethropolis/kcd/internal/testutil/daemonstart"
 )
 
 // drainSnapshot skips the state.snapshot bootstrap event every watch stream
@@ -101,7 +102,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	cfg.Plugins.SystemVolume = false
 	cfg.Plugins.SMS = false
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
 	evCh := make(chan events.Event, 16)
 	go func() {

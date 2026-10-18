@@ -17,7 +17,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 // sshUserPattern allows generated Android SFTP usernames while rejecting
@@ -333,7 +333,7 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 	}
 	unmountCtx, unmountCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer unmountCancel()
-	out, err := plugin.RunCommandSync(unmountCtx, tool, "-u", mountPoint)
+	out, err := sysexec.Run(unmountCtx, tool, "-u", mountPoint)
 	if err == nil {
 		p.finishUnmount(deviceID, mountPoint)
 		return nil
@@ -354,7 +354,7 @@ func (p *SftpPlugin) Unmount(deviceID string) error {
 	// Still present but dead: a normal unmount refuses it ("Transport endpoint
 	// is not connected"), so detach lazily — insiders see ENOTCONN, not a hang.
 	if strings.Contains(detail, "Transport endpoint is not connected") {
-		lazyOut, lazyErr := plugin.RunCommandSync(unmountCtx, tool, "-uz", mountPoint)
+		lazyOut, lazyErr := sysexec.Run(unmountCtx, tool, "-uz", mountPoint)
 		if lazyErr == nil {
 			p.logger.Info("SFTP mount force-detached with a lazy unmount",
 				log.String("mount_point", mountPoint),

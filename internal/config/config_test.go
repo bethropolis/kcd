@@ -57,7 +57,7 @@ func TestLoadDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Network != Defaults().Network || cfg.Pairing.IntentTTL != "5m" || cfg.ConfigPath == "" {
+		if cfg.ConfigVersion != 1 || cfg.Network != Defaults().Network || cfg.Pairing.IntentTTL != "5m" || cfg.ConfigPath == "" {
 			t.Fatal("omitted fields did not retain defaults")
 		}
 	}
@@ -68,6 +68,16 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("Load unexpectedly created missing file")
+	}
+}
+
+func TestConfigVersionIsOptionalAndNonRejecting(t *testing.T) {
+	cfg, err := loadTOML(t, "config_version = 42\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConfigVersion != 42 {
+		t.Fatalf("config_version = %d, want 42", cfg.ConfigVersion)
 	}
 }
 

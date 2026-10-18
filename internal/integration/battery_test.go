@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/testutil"
+	"github.com/bethropolis/kcd/internal/testutil/daemonstart"
 )
 
 func TestBatteryUpdateFlowIntegration(t *testing.T) {
@@ -50,7 +51,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
 	// Subscribe to battery events
 	evCh := make(chan events.Event, 4)

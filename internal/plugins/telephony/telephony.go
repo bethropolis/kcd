@@ -9,8 +9,8 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 type TelephonyPlugin struct {
@@ -88,7 +88,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			return
 		}
 
-		plugin.RunCommandAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
+		sysexec.RunAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
 	}()
 
 	return nil

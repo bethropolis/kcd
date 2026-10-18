@@ -9,10 +9,12 @@ import (
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 type MousepadPlugin struct {
 	logger     log.Logger
+	exec       *sysexec.Exec
 	cfg        config.MousepadConfig
 	useYdotool bool
 	useUinput  bool
@@ -29,11 +31,16 @@ type MousepadPlugin struct {
 	cancel context.CancelFunc
 }
 
-func NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger) *MousepadPlugin {
+func NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger, executors ...*sysexec.Exec) *MousepadPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	isWayland := os.Getenv("WAYLAND_DISPLAY") != ""
+	exec := sysexec.New(nil)
+	if len(executors) > 0 && executors[0] != nil {
+		exec = executors[0]
+	}
 	p := &MousepadPlugin{
 		logger:    logger.With(log.String("plugin", "mousepad")),
+		exec:      exec,
 		cfg:       cfg,
 		isWayland: isWayland,
 		moveCh:    make(chan MousepadBody, 1),

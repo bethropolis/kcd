@@ -11,7 +11,7 @@ import (
 )
 
 func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
-	if p.backend == "" {
+	if !p.audio.Available() {
 		return nil // No audio backend, silently ignore.
 	}
 
@@ -58,7 +58,7 @@ func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 }
 
 func (p *SystemVolumePlugin) OnConnect(dev device.Sender) {
-	if p.backend == "" {
+	if !p.audio.Available() {
 		return
 	}
 	go func() {

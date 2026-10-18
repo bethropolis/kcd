@@ -7,6 +7,10 @@
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
 
+# Optional schema version used to select compatibility notices. Older files
+# without this key are treated as version 1.
+# config_version = 1
+
 # Stable identifier used for pairing and certificate fingerprint checks.
 # Generated once on first run and written back here. Never edit it: changing it
 # makes every paired device fail to authenticate, and you would have to

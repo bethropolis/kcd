@@ -13,14 +13,15 @@ import (
 
 // Config holds all daemon configuration.
 type Config struct {
-	DeviceID    string `toml:"device_id"`
-	DeviceName  string `toml:"device_name"`
-	DeviceType  string `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
-	CertFile    string `toml:"cert_file"`
-	KeyFile     string `toml:"key_file"`
-	SocketPath  string `toml:"socket_path"`
-	DownloadDir string `toml:"download_dir"`
-	TCPPort     int    `toml:"tcp_port"`
+	ConfigVersion int    `toml:"config_version"`
+	DeviceID      string `toml:"device_id"`
+	DeviceName    string `toml:"device_name"`
+	DeviceType    string `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
+	CertFile      string `toml:"cert_file"`
+	KeyFile       string `toml:"key_file"`
+	SocketPath    string `toml:"socket_path"`
+	DownloadDir   string `toml:"download_dir"`
+	TCPPort       int    `toml:"tcp_port"`
 	// EnableBroadcast was removed — broadcast starts automatically with `kcd pair` (listen mode)
 	LogLevel string `toml:"log_level"` // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
@@ -59,6 +60,7 @@ func Defaults() *Config {
 	}
 
 	c := &Config{}
+	c.ConfigVersion = 1
 	c.DeviceName = hostname
 	c.DeviceType = "desktop"
 	c.CertFile = configPath("cert.pem", false)

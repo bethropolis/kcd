@@ -5,7 +5,6 @@ import (
 
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/device"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -176,7 +175,7 @@ func (p *MousepadPlugin) execKeyFallback(keyName string) {
 }
 
 func (p *MousepadPlugin) runCmd(name string, arg ...string) {
-	plugin.RunCommandAsync(p.logger, name, arg...)
+	p.exec.RunAsync(p.logger, name, arg...)
 }
 
 // OnConnect explicitly tells the Android app that this device supports Keyboard input.

@@ -1,0 +1,128 @@
+{
+  "ConfigVersion": 1,
+  "DeviceID": "",
+  "DeviceName": "5f0df2c93f64",
+  "DeviceType": "desktop",
+  "CertFile": "/golden/config/kcd/cert.pem",
+  "KeyFile": "/golden/config/kcd/key.pem",
+  "SocketPath": "/golden/runtime/kcd/kcd.sock",
+  "DownloadDir": "/golden/home/Downloads/kcd",
+  "TCPPort": 1716,
+  "LogLevel": "info",
+  "Network": {
+    "DialTimeout": "5s",
+    "HandshakeTimeout": "10s",
+    "SidechannelTimeout": "15s",
+    "TransferIdleTimeout": "60s",
+    "KeepAliveIdle": "30s"
+  },
+  "Reconnect": {
+    "InitialBackoff": "2s",
+    "MaxBackoff": "5m",
+    "FlapThreshold": "15s",
+    "SightingDriven": true,
+    "FallbackMax": "1h",
+    "StaleAfter": "24h"
+  },
+  "Discovery": {
+    "BroadcastInterval": "30s",
+    "BroadcastIdleInterval": "60s"
+  },
+  "Cache": {
+    "SMSAttachmentsDir": "",
+    "AlbumArtDir": "",
+    "ContactsDir": ""
+  },
+  "Plugins": {
+    "Battery": true,
+    "Clipboard": true,
+    "Notification": true,
+    "Share": true,
+    "RunCommand": true,
+    "MPRIS": true,
+    "Ping": true,
+    "Telephony": true,
+    "Connectivity": true,
+    "Mousepad": true,
+    "SFTP": true,
+    "FindMyPhone": true,
+    "LockDevice": true,
+    "SystemVolume": true,
+    "PauseMusic": true,
+    "SMS": true,
+    "Contacts": true,
+    "Presenter": true,
+    "FindThisDevice": true,
+    "RemoteSystemVolume": true
+  },
+  "Commands": {
+    "lock": "loginctl lock-session",
+    "suspend": "systemctl suspend",
+    "uptime": "uptime -p"
+  },
+  "CommandsPerDevice": {},
+  "Notifications": null,
+  "Battery": {
+    "NotifyLow": true,
+    "NotifyFull": true,
+    "LowUrgency": "critical",
+    "FullUrgency": "normal",
+    "LowMessage": "Battery low",
+    "FullMessage": "Battery fully charged"
+  },
+  "MPRIS": {
+    "PollWhilePlaying": true,
+    "PositionInterval": "2s"
+  },
+  "Notification": {
+    "Urgency": "",
+    "FetchIcons": true,
+    "IconCacheDir": "",
+    "MaxBodyLength": 0,
+    "ExpireMS": -1,
+    "SkipNonClearable": false,
+    "ReplaceNotifications": true,
+    "ShowIcons": false,
+    "CancelGraceMS": 1500
+  },
+  "Share": {
+    "PortMin": 1739,
+    "PortMax": 1764,
+    "AcceptTimeoutSecs": 120,
+    "AutoOpen": false,
+    "OpenCommand": "xdg-open",
+    "Overwrite": false
+  },
+  "SFTP": {
+    "MountDir": "/golden/runtime/kcd/mnt",
+    "CredentialsTimeoutSecs": 20,
+    "KeepaliveIntervalSecs": 15,
+    "KeepaliveCount": 3,
+    "AutoOpen": true,
+    "OpenCommand": "xdg-open",
+    "ExtraSshfsOpts": null,
+    "ReadOnly": false
+  },
+  "Ping": {
+    "AppName": "",
+    "Icon": "smartphone",
+    "DefaultMessage": ""
+  },
+  "Clipboard": {
+    "PushOnConnect": false
+  },
+  "Pairing": {
+    "TimeoutSecs": 30,
+    "IntentTTL": "5m",
+    "ListenTimeout": "60s"
+  },
+  "Mousepad": {
+    "Backend": "auto"
+  },
+  "SMS": {
+    "NotifyIncoming": true,
+    "AlwaysArm": false
+  },
+  "PruneStaleThreshold": "15m",
+  "ConfigPath": ""
+}

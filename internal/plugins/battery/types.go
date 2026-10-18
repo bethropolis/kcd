@@ -6,6 +6,7 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 // ThresholdEvent values from the KDE Connect protocol.
@@ -21,6 +22,7 @@ type BatteryPlugin struct {
 	cfg           config.BatteryConfig
 	bus           *events.Bus
 	logger        log.Logger
+	exec          *sysexec.Exec
 }
 
 // NewBatteryPlugin creates a BatteryPlugin.
@@ -34,6 +36,7 @@ func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logg
 		cfg:           cfg,
 		bus:           bus,
 		logger:        logger.With(log.String("plugin", "battery")),
+		exec:          sysexec.New(nil),
 	}
 }
 

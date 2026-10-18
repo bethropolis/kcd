@@ -5,18 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
+	desktopclipboard "github.com/bethropolis/kcd/internal/desktop/clipboard"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
@@ -31,14 +30,9 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 			p.bus.Publish(events.TypeShareText, dev.ID(), map[string]string{"text": body.Text})
 		}
 		go func() {
-			var cmd *exec.Cmd
-			if os.Getenv("WAYLAND_DISPLAY") != "" {
-				cmd = exec.CommandContext(context.Background(), "wl-copy")
-			} else {
-				cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
+			if err := desktopclipboard.SetText(context.Background(), body.Text, nil); err != nil {
+				p.Logger.Warn("share: clipboard update failed", log.Error(err))
 			}
-			cmd.Stdin = strings.NewReader(body.Text)
-			_ = cmd.Run()
 		}()
 		return nil
 	}
@@ -51,7 +45,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		// Only http(s) may reach xdg-open (other schemes hit unrelated
 		// handlers); the URL event still emits either way.
 		if isOpenableURL(body.Url) {
-			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+			sysexec.RunAsync(p.Logger, "xdg-open", body.Url)
 		} else {
 			p.Logger.Warn("share: refusing to open non-http(s) URL",
 				log.String("url", body.Url))
@@ -134,7 +128,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 					if err != nil {
 						absPath = destPath
 					}
-					plugin.RunCommandAsync(p.Logger, cmd, absPath)
+					sysexec.RunAsync(p.Logger, cmd, absPath)
 				}
 			}
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/testutil"
 )
 
 type testSender struct {
@@ -94,11 +95,7 @@ func newMPRISPacket(t *testing.T, body MPRISRequest) *protocol.Packet {
 
 func expectEvent(t *testing.T, sub *events.Subscriber) {
 	t.Helper()
-	select {
-	case <-sub.C:
-	case <-time.After(time.Second):
-		t.Fatal("expected event")
-	}
+	testutil.ExpectEvent(t, sub, events.TypeMprisUpdate, time.Second)
 }
 
 func expectNoEvent(t *testing.T, sub *events.Subscriber) {
