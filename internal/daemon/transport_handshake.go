@@ -36,6 +36,9 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	if err := json.Unmarshal(peerPkt.Body, &peerBody); err != nil {
 		return fmt.Errorf("failed to unmarshal peer identity: %w", err)
 	}
+	if !protocol.ValidDeviceID(peerBody.DeviceID) {
+		return fmt.Errorf("invalid device ID %q", peerBody.DeviceID)
+	}
 
 	peerCert := conn.PeerCert()
 	if peerCert == nil {

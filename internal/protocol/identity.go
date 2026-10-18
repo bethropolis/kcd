@@ -20,6 +20,11 @@ var invalidNameChars = regexp.MustCompile("[`'\";:.!?()\\[\\]<>$&|\\\\*~#%^{}=/]
 
 const MaxDeviceNameLength = 32
 
+var deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{32,38}$`)
+
+// ValidDeviceID reports whether an identity is safe to use as a stable peer key.
+func ValidDeviceID(id string) bool { return deviceIDPattern.MatchString(id) }
+
 // SanitizeDeviceName strips terminal/XSS characters and truncates rune-aware
 // to the spec length, decoding the decimal byte escapes phones may send first.
 func SanitizeDeviceName(name string) string {
