@@ -1,10 +1,13 @@
 package mousepad
 
 import (
+	"context"
 	"strconv"
+	"time"
 
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -130,22 +133,29 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 			} else {
 				keyName := mapSpecialKey(body.SpecialKey)
 				if keyName != "" {
-					p.execKeyFallback(keyName)
+					p.execKeyFallback(keyName, body)
 				}
 			}
 		} else {
 			keyName := mapSpecialKey(body.SpecialKey)
 			if keyName != "" {
-				p.execKeyFallback(keyName)
+				p.execKeyFallback(keyName, body)
 			}
 		}
 	} else if body.Key != "" {
 		// Unicode can't go through uinput: use the display-server tool, with
 		// "--" so leading '-' in phone text isn't misparsed as a flag.
 		if p.isWayland {
-			p.runCmd("wtype", "--", body.Key)
+			args := modifierArgs(body)
+			args = append(args, body.Key)
+			args = append(args, modifierReleaseArgs(body)...)
+			p.runCmd("wtype", args...)
 		} else {
-			p.runCmd("xdotool", "type", "--", body.Key)
+			if key := modifiedKey(body, body.Key); key != "" {
+				p.runCmd("xdotool", "key", key)
+			} else {
+				p.runCmd("xdotool", "type", "--", body.Key)
+			}
 		}
 	}
 
@@ -166,17 +176,76 @@ func (p *MousepadPlugin) handleEvent(body MousepadBody) {
 	}
 }
 
-func (p *MousepadPlugin) execKeyFallback(keyName string) {
+func (p *MousepadPlugin) execKeyFallback(keyName string, body MousepadBody) {
 	if p.isWayland {
-		p.runCmd("wtype", "-k", keyName)
+		args := modifierArgs(body)
+		args = append(args, "-k", keyName)
+		args = append(args, modifierReleaseArgs(body)...)
+		p.runCmd("wtype", args...)
 	} else {
-		p.runCmd("xdotool", "key", keyName)
+		key := keyName
+		if mk := modifiedKey(body, keyName); mk != "" {
+			key = mk
+		}
+		p.runCmd("xdotool", "key", key)
 	}
 }
 
-func (p *MousepadPlugin) runCmd(name string, arg ...string) {
-	p.exec.RunAsync(p.logger, name, arg...)
+func modifierArgs(body MousepadBody) []string {
+	var args []string
+	for _, modifier := range modifierNames(body) {
+		args = append(args, "-M", modifier)
+	}
+	return args
 }
+
+func modifierReleaseArgs(body MousepadBody) []string {
+	mods := modifierNames(body)
+	args := make([]string, 0, len(mods)*2)
+	for i := len(mods) - 1; i >= 0; i-- {
+		args = append(args, "-m", mods[i])
+	}
+	return args
+}
+
+func modifierNames(body MousepadBody) []string {
+	var mods []string
+	if body.Ctrl {
+		mods = append(mods, "ctrl")
+	}
+	if body.Alt {
+		mods = append(mods, "alt")
+	}
+	if body.Shift {
+		mods = append(mods, "shift")
+	}
+	if body.Super {
+		mods = append(mods, "super")
+	}
+	return mods
+}
+
+func modifiedKey(body MousepadBody, key string) string {
+	mods := modifierNames(body)
+	if len(mods) == 0 {
+		return ""
+	}
+	for _, modifier := range mods {
+		key = modifier + "+" + key
+	}
+	return key
+}
+
+func (p *MousepadPlugin) runCmd(name string, arg ...string) {
+	ctx, cancel := context.WithTimeout(p.ctx, inputCommandTimeout)
+	defer cancel()
+	if _, err := p.exec.Run(ctx, name, arg...); err != nil {
+		p.logger.Warn("mousepad: input command failed", log.String("cmd", name), log.Error(err))
+	}
+}
+
+// inputCommandTimeout bounds a stuck display-server tool without interrupting a normal input action.
+const inputCommandTimeout = 2 * time.Second
 
 // OnConnect explicitly tells the Android app that this device supports Keyboard input.
 // Without this, the Android app will not show the keyboard icon in the Remote Input UI.

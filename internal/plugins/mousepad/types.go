@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/bendahl/uinput"
@@ -24,8 +25,11 @@ type MousepadPlugin struct {
 	mouse    uinput.Mouse
 	keyboard uinput.Keyboard
 
-	moveCh  chan MousepadBody // capacity 1, older frames dropped
-	eventCh chan MousepadBody // capacity 64, clicks + keys
+	queueMu   sync.Mutex
+	queue     []MousepadBody
+	queueWake chan struct{}
+	moveX     float64
+	moveY     float64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,8 +47,7 @@ func NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger, executors .
 		exec:      exec,
 		cfg:       cfg,
 		isWayland: isWayland,
-		moveCh:    make(chan MousepadBody, 1),
-		eventCh:   make(chan MousepadBody, 64),
+		queueWake: make(chan struct{}, 1),
 		ctx:       ctx,
 		cancel:    cancel,
 	}

@@ -32,6 +32,18 @@ func mapUinputKey(k int) int {
 		return uinput.KeyDelete
 	case 14:
 		return uinput.KeyEsc
+	case 15:
+		return uinput.KeySysrq
+	case 16:
+		return uinput.KeyScrolllock
+	case 17:
+		return uinput.KeyLeftctrl
+	case 18:
+		return uinput.KeyLeftalt
+	case 19:
+		return uinput.KeyLeftshift
+	case 20:
+		return uinput.KeyLeftmeta
 	case 21:
 		return uinput.KeyF1
 	case 22:
@@ -89,8 +101,18 @@ func mapSpecialKey(k int) string {
 		return "Delete"
 	case 14:
 		return "Escape"
+	case 15:
+		return "Sys_Req"
 	case 16:
 		return "Scroll_Lock"
+	case 17:
+		return "Control_L"
+	case 18:
+		return "Alt_L"
+	case 19:
+		return "Shift_L"
+	case 20:
+		return "Super_L"
 	case 21:
 		return "F1"
 	case 22:
