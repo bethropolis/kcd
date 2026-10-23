@@ -41,6 +41,9 @@ func (c *Config) Validate() error {
 	if c.Share.PortMin > c.Share.PortMax {
 		return fmt.Errorf("config: share port_min (%d) cannot be greater than port_max (%d)", c.Share.PortMin, c.Share.PortMax)
 	}
+	if c.Share.MaxFileSize <= 0 || c.Share.MaxFileSize > 1<<50 {
+		return fmt.Errorf("config: share max_file_size must be between 1 and 1125899906842624 bytes")
+	}
 
 	// Prune threshold validation
 	if c.PruneStaleThreshold != "" {

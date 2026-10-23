@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -52,7 +51,9 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 	expectedFP := cert.PinnedFingerprint(dev.PeerCert())
 
 	go func() {
-		if err := p.receiveAttachment(ctx, remoteIP, port, payloadSize, destPath, expectedFP); err != nil {
+		dlCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if err := p.receiveAttachment(dlCtx, remoteIP, port, payloadSize, destPath, expectedFP); err != nil {
 			p.logger.Error("sms: attachment download failed", log.Error(err))
 			return
 		}
@@ -78,21 +79,8 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 	if size <= 0 || size > maxSMSAttachmentBytes {
 		return fmt.Errorf("sms: refusing attachment with invalid size %d (limit %d)", size, maxSMSAttachmentBytes)
 	}
-	conn, err := transport.DialSidechannel(ctx, ip, port, p.tlsConfig, expectedFP, p.logger, p.sidechannel)
+	_, err := transport.ReceiveToFile(ctx, ip, port, size, destPath, p.tlsConfig, expectedFP, p.logger, transport.ReceiveOptions{MaxSize: maxSMSAttachmentBytes, Sidechannel: p.sidechannel})
 	if err != nil {
-		return fmt.Errorf("sms: connect to attachment side-channel: %w", err)
-	}
-	defer conn.Close()
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("sms: create attachment file: %w", err)
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, io.LimitReader(conn, size))
-	if err != nil {
-		os.Remove(destPath) // don't leave a corrupt partial behind
 		return fmt.Errorf("sms: receive attachment data: %w", err)
 	}
 

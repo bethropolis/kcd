@@ -135,6 +135,12 @@ func PinnedFingerprint(peer *x509.Certificate) string {
 	return Fingerprint(peer)
 }
 
+// MatchesDeviceID compares certificate CNs after KDE Connect's identity normalization.
+// Android may use hyphens in certificate CNs while identity packets use underscores.
+func MatchesDeviceID(peer *x509.Certificate, deviceID string) bool {
+	return peer != nil && strings.ReplaceAll(peer.Subject.CommonName, "-", "_") == deviceID
+}
+
 // VerifySideChannelPeer checks the side-channel cert against the pinned
 // fingerprint; empty expected skips verification so unpaired devices work.
 func VerifySideChannelPeer(state tls.ConnectionState, expectedFP string) error {

@@ -24,7 +24,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return fmt.Errorf("share: parse body: %w", err)
 	}
 
-	if body.Text != "" && pkt.PayloadSize <= 0 {
+	if body.Text != "" && pkt.PayloadTransferInfo == nil {
 		p.Logger.Info("share: received text", log.String("text", body.Text))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareText, dev.ID(), map[string]string{"text": body.Text})
@@ -37,7 +37,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	if body.Url != "" && pkt.PayloadSize <= 0 {
+	if body.Url != "" && pkt.PayloadTransferInfo == nil {
 		p.Logger.Info("share: received url", log.String("url", body.Url))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
@@ -53,8 +53,11 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
+	if pkt.PayloadSize < -1 || pkt.PayloadTransferInfo == nil {
 		return nil
+	}
+	if pkt.PayloadSize > p.cfg.MaxFileSize {
+		return fmt.Errorf("share: payload size %d exceeds configured limit %d", pkt.PayloadSize, p.cfg.MaxFileSize)
 	}
 
 	safeName := SanitizeFilename(body.Filename)

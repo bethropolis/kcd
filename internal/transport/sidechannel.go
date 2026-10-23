@@ -19,7 +19,10 @@ type SidechannelOptions struct {
 	IdleTimeout time.Duration
 	// KeepAliveIdle overrides the TCP keepalive first-probe delay for
 	// the dial; zero keeps DefaultKeepAliveIdle.
-	KeepAliveIdle time.Duration
+	KeepAliveIdle  time.Duration
+	MaxPayloadSize int64
+	PortMin        int
+	PortMax        int
 }
 
 // defaultSetupTimeout bounds side-channel establishment (TCP dial + TLS

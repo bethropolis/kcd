@@ -246,6 +246,23 @@ func TestNotificationPlugin_FetchIconReusesCacheOnRepost(t *testing.T) {
 	}
 }
 
+func TestFetchIconUsesValidatedPayloadHash(t *testing.T) {
+	p := newPlugin(t)
+	p.tlsConfig = &tls.Config{}
+	p.iconDir = t.TempDir()
+	hash := "0123456789abcdef0123456789abcdef"
+	path := filepath.Join(p.iconDir, hash+".png")
+	if err := os.WriteFile(path, []byte("cached"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.fetchIcon(context.Background(), "App", "id", nil, 0, 0, false, "", hash); got != path {
+		t.Fatalf("hash cache path = %q, want %q", got, path)
+	}
+	if got := p.fetchIcon(context.Background(), "App", "id", nil, 0, 0, false, "", "../bad"); got != "" {
+		t.Fatalf("malformed hash accepted: %q", got)
+	}
+}
+
 func TestSanitizeNotifID(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"0|com.arn.scrobble|10247", "0_com.arn.scrobble_10247"},

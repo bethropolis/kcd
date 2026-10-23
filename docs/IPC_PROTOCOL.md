@@ -1019,6 +1019,7 @@ A notification was received from a device.
   "title": "John Doe",
   "text": "See you at 5",
   "requestReplyId": "reply-123",
+  "payloadHash": "d97f60d052bf11d1e88821e04fff0007",
   "id": "notif-456"
 }
 ```
@@ -1030,6 +1031,7 @@ A notification was received from a device.
 | `text` | string | Notification body text (Android `ticker` field) |
 | `requestReplyId` | string | Present if the notification supports inline replies |
 | `id` | string | Notification identifier |
+| `payloadHash` | string | Optional 32-character hexadecimal icon hash; icon bytes are sent only when this changes |
 
 > **Desktop popups:** the daemon shows each phone notification via `notify-send`.
 > Popups render **without an icon by default** (`show_icons = false`); set

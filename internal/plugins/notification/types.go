@@ -114,6 +114,7 @@ type NotificationBody struct {
 	IsClearable    bool   `json:"isClearable,omitempty"`
 	Silent         bool   `json:"silent,omitempty"`
 	RequestReplyId string `json:"requestReplyId,omitempty"`
+	PayloadHash    string `json:"payloadHash,omitempty"`
 }
 
 func (p *NotificationPlugin) Name() string           { return "Notification" }

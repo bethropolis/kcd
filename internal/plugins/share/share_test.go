@@ -14,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/transport"
 )
 
 func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
@@ -50,13 +51,13 @@ func TestSharePlugin_SideChannelRoundTrip(t *testing.T) {
 	// 1. Start Sender
 	cfg := config.ShareConfig{}
 	cfg.Defaults()
-	ln, port, err := ListenSideChannel(ctx, cfg, tlsConfig)
+	ln, port, err := transport.ListenSidechannel(ctx, cfg.PortMin, cfg.PortMax)
 	if err != nil {
 		t.Fatalf("ListenSideChannel failed: %v", err)
 	}
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, func(c, t int64) {}, logger, cfg.PortMin, cfg.PortMax)
+		serverDone <- transport.AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, func(c, t int64) {}, logger, cfg.PortMin, cfg.PortMax)
 	}()
 
 	// 2. Run Receiver (dial loopback)
@@ -122,13 +123,13 @@ func TestSharePlugin_SideChannelRejectsWrongFingerprint(t *testing.T) {
 	// upward, and a lingering listener would otherwise collide.
 	cfg.PortMin = 1762
 	cfg.PortMax = 1764
-	ln, port, err := ListenSideChannel(ctx, cfg, tlsConfig)
+	ln, port, err := transport.ListenSidechannel(ctx, cfg.PortMin, cfg.PortMax)
 	if err != nil {
 		t.Fatalf("ListenSideChannel failed: %v", err)
 	}
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, nil, logger, cfg.PortMin, cfg.PortMax)
+		serverDone <- transport.AcceptAndSend(ln, sourcePath, tlsConfig, "test_device_share", fp, 2*time.Second, nil, logger, cfg.PortMin, cfg.PortMax)
 	}()
 
 	// Dial with a wrong expected fingerprint: the receiver must refuse

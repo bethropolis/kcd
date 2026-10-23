@@ -43,7 +43,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	}
 
 	certCN := peerCert.Subject.CommonName
-	if certCN != peerBody.DeviceID {
+	if !cert.MatchesDeviceID(peerCert, peerBody.DeviceID) {
 		return fmt.Errorf("certificate CN (%s) doesn't match device ID (%s)", certCN, peerBody.DeviceID)
 	}
 

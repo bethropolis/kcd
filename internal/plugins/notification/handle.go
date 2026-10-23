@@ -128,9 +128,11 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 
 	// Handlers must not block — all I/O in a goroutine.
 	go func() {
+		dlCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		var iconPath string
 		if p.cfg.ShowIcons {
-			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP)
+			iconPath = p.fetchIcon(dlCtx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP, body.PayloadHash)
 		}
 		p.sendDesktopNotification(dev.ID(), appName, body.ID, body.Title, text, iconPath)
 	}()
