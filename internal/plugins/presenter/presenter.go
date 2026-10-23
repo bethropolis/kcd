@@ -29,7 +29,7 @@ type PresenterPlugin struct {
 	screenW int
 	screenH int
 
-	moveCh chan PresenterBody
+	moveCh chan struct{}
 }
 
 // PresenterBody is the payload of a kdeconnect.presenter packet.
@@ -45,7 +45,7 @@ func NewPresenterPlugin(logger log.Logger) *PresenterPlugin {
 		logger: logger.With(log.String("plugin", "Presenter")),
 		xPos:   0.5,
 		yPos:   0.5,
-		moveCh: make(chan PresenterBody, 1),
+		moveCh: make(chan struct{}, 1),
 	}
 	p.detectScreen()
 	go p.worker()
@@ -81,56 +81,47 @@ func (p *PresenterPlugin) Handle(_ context.Context, _ device.Sender, pkt *protoc
 		return err
 	}
 
-	select {
-	case p.moveCh <- body:
-	default:
-		select {
-		case <-p.moveCh:
-		default:
+	p.mu.Lock()
+	if body.Stop != nil && *body.Stop {
+		p.xPos = 0.5
+		p.yPos = 0.5
+	} else {
+		if body.Dx != nil {
+			p.xPos += *body.Dx
 		}
-		p.moveCh <- body
+		if body.Dy != nil {
+			p.yPos += *body.Dy * p.ratio
+		}
+		if p.xPos < 0 {
+			p.xPos = 0
+		}
+		if p.xPos > 1 {
+			p.xPos = 1
+		}
+		if p.yPos < 0 {
+			p.yPos = 0
+		}
+		if p.yPos > 1 {
+			p.yPos = 1
+		}
+	}
+	p.mu.Unlock()
+
+	select {
+	case p.moveCh <- struct{}{}:
+	default:
 	}
 	return nil
 }
 
 func (p *PresenterPlugin) worker() {
-	for body := range p.moveCh {
-		p.handleBody(body)
+	for range p.moveCh {
+		p.mu.Lock()
+		x := int(p.xPos * float64(p.screenW))
+		y := int(p.yPos * float64(p.screenH))
+		p.mu.Unlock()
+		moveCursor(x, y)
 	}
-}
-
-func (p *PresenterPlugin) handleBody(body PresenterBody) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if body.Stop != nil && *body.Stop {
-		p.xPos = 0.5
-		p.yPos = 0.5
-		return
-	}
-
-	if body.Dx != nil {
-		p.xPos += *body.Dx
-	}
-	if body.Dy != nil {
-		p.yPos += *body.Dy * p.ratio
-	}
-	if p.xPos < 0 {
-		p.xPos = 0
-	}
-	if p.xPos > 1 {
-		p.xPos = 1
-	}
-	if p.yPos < 0 {
-		p.yPos = 0
-	}
-	if p.yPos > 1 {
-		p.yPos = 1
-	}
-
-	x := int(p.xPos * float64(p.screenW))
-	y := int(p.yPos * float64(p.screenH))
-	moveCursor(x, y)
 }
 
 // getScreenSize attempts to detect the screen resolution via xdpyinfo (X11)
@@ -173,7 +164,7 @@ func moveCursor(x, y int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := sysexec.Run(ctx, "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
+	if _, err := sysexec.Run(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
 		return
 	}
 
