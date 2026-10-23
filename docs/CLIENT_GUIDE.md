@@ -452,8 +452,9 @@ ipc_request(sock, "remote_volume_mute", {
 ```
 
 Volume changes from the phone arrive as `volume.update` events. The event payload
-is either `{"name", "volume", "muted"}` for a single sink change or `{"sinks": [...]}`
-for the full sink list.
+is either a per-sink object with `name` and any known `volume` / `muted` fields,
+or `{"sinks": [...]}` for the full sink list. The phone can send volume and mute
+as separate packets, so clients should preserve cached fields that are absent.
 
 ### 5.11 Get SFTP Connection Info
 

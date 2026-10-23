@@ -1164,7 +1164,7 @@ kcd watch [--events <type,...>] [--json]
 | `telephony.missed` | Missed call: `{contactName, phoneNumber}` |
 | `telephony.canceled` | Call ended |
 | `connectivity.update` | Signal strength: `{signal, networkType}` |
-| `volume.update` | Device volume changed: `{name, volume, muted}` |
+| `volume.update` | Device volume or mute changed: `{name, volume?, muted?}` |
 | `mpris.update` | Now playing: `{player, title, artist, album, isPlaying, pos, length, volume}` |
 | `sftp.mount` | SFTP credentials: `{uri, ip, port, user, password, path, multiPaths, pathNames, errorMessage}` |
 | `sftp.mounted` | Mount finished: `{mountPoint, volume?}` |
