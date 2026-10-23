@@ -22,6 +22,10 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 		p.logger.Warn("mpris: cannot resolve player", log.String("player", player))
 		return
 	}
+	if p.dbus == nil {
+		p.logger.Warn("mpris: dbus unavailable", log.String("player", player))
+		return
+	}
 	obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
 
 	switch action {
@@ -71,6 +75,9 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 }
 
 func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
+	if p.dbus == nil {
+		return 0
+	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 	var v dbus.Variant
 	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Position").Store(&v); err != nil {

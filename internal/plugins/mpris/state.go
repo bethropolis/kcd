@@ -18,6 +18,9 @@ func (p *MPRISPlugin) playerState(playerName string) (*NowPlaying, error) {
 }
 
 func (p *MPRISPlugin) playerStateDBus(busName, playerName string) (*NowPlaying, error) {
+	if p.dbus == nil {
+		return nil, fmt.Errorf("mpris: dbus unavailable")
+	}
 	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
 
 	var props map[string]dbus.Variant
@@ -180,6 +183,9 @@ func fillChangedProps(np *NowPlaying, changed map[string]dbus.Variant) bool {
 }
 
 func (p *MPRISPlugin) queryPositionAndCanSeek(pl *trackedPlayer) (pos int64, canSeek bool) {
+	if p.dbus == nil {
+		return 0, false
+	}
 	obj := p.dbus.Object(pl.busName, "/org/mpris/MediaPlayer2")
 
 	var position int64

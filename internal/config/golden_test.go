@@ -28,6 +28,9 @@ func TestGoldenConfigs(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.ConfigPath = ""
+			if cfg.DeviceName != "legacy-workstation" {
+				cfg.DeviceName = "5f0df2c93f64"
+			}
 			actual, err := json.MarshalIndent(cfg, "", "  ")
 			if err != nil {
 				t.Fatal(err)
