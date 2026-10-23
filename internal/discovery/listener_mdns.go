@@ -68,7 +68,7 @@ func (l *Listener) RunMdnsDiscovery(ctx context.Context) {
 				}
 			}
 
-			if deviceId == "" || deviceId == l.localDeviceID {
+			if !protocol.ValidDeviceID(deviceId) || deviceId == l.localDeviceID {
 				continue
 			}
 			if len(entry.AddrIPv4) == 0 {

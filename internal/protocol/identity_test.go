@@ -126,3 +126,22 @@ func TestIdentityTargetProtocolVersionAcceptsAndroidString(t *testing.T) {
 		}
 	}
 }
+
+func TestValidDeviceID(t *testing.T) {
+	valid := []string{
+		"740bd4b9b4184ee497d6caf1da8151be",
+		"a1b2c3d4_e5f6_4789_8abc_def012345678",
+		"0123456789abcdef0123456789abcdef0123",
+	}
+	invalid := []string{"", "short", "x/../../../tmp/evil", strings.Repeat("a", 39), strings.Repeat("a", 32) + ".", strings.Repeat("é", 32)}
+	for _, id := range valid {
+		if !ValidDeviceID(id) {
+			t.Errorf("ValidDeviceID(%q) = false", id)
+		}
+	}
+	for _, id := range invalid {
+		if ValidDeviceID(id) {
+			t.Errorf("ValidDeviceID(%q) = true", id)
+		}
+	}
+}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
-	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -26,111 +25,84 @@ func (p *SftpPlugin) RequestMount(dev device.Sender) error {
 // RequestAndMount requests credentials, mounts via sshfs, and returns the
 // local path to open.
 func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender, readOnly bool) (string, error) {
-	if p.bus == nil {
-		return "", fmt.Errorf("event bus not available")
+	body, err := p.requestCredentials(ctx, dev)
+	if err != nil {
+		return "", err
 	}
-
-	// Subscribe BEFORE sending the request to guarantee we don't miss the response.
-	sub := p.bus.Subscribe(0, events.TypeSftpMount)
-	defer sub.Close()
-
-	if err := p.RequestMount(dev); err != nil {
-		return "", fmt.Errorf("send SFTP request: %w", err)
-	}
-
-	p.logger.Info("SFTP request sent, waiting for phone response", log.String("device", dev.ID()))
-
-	timeout := p.credentialsTimeout()
-	deadline, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	for {
-		select {
-		case evt, ok := <-sub.C:
-			if !ok {
-				return "", fmt.Errorf("event bus closed")
-			}
-			if evt.DeviceID != dev.ID() {
-				continue
-			}
-			p.mu.RLock()
-			body, exists := p.lastBody[dev.ID()]
-			p.mu.RUnlock()
-			if !exists {
-				return "", fmt.Errorf("credentials missing after event (internal error)")
-			}
-			return p.mountWithBody(ctx, dev.ID(), body, "", readOnly)
-
-		case <-deadline.Done():
-			return "", fmt.Errorf("timed out after %s waiting for SFTP response — the phone did not start its SFTP server. Either the KDE Connect app is not open, or it has not granted kcd file access (on Android, enable file access for KDE Connect)", timeout)
-		}
-	}
+	path, err := p.mountWithBody(ctx, dev.ID(), body, "", readOnly)
+	p.clearPassword(dev.ID(), body.Password)
+	return path, err
 }
 
 // RequestAndMountVolume requests credentials and mounts the volume (empty
 // volumePath lists instead). The caller closes the returned closer when done.
 func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Sender, volumePath string, readOnly bool) (mountPath string, volumes []StorageVolume, err error) {
-	if p.bus == nil {
-		return "", nil, fmt.Errorf("event bus not available")
+	body, err := p.requestCredentials(ctx, dev)
+	if err != nil {
+		return "", nil, err
 	}
-
-	sub := p.bus.Subscribe(0, events.TypeSftpMount)
-	defer sub.Close()
-
-	if err := p.RequestMount(dev); err != nil {
-		return "", nil, fmt.Errorf("send SFTP request: %w", err)
+	volumes = p.buildVolumes(body)
+	if volumePath == "" {
+		return "", volumes, nil
 	}
-
-	p.logger.Info("SFTP request sent, waiting for phone response", log.String("device", dev.ID()))
-
-	timeout := p.credentialsTimeout()
-	deadline, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	for {
-		select {
-		case evt, ok := <-sub.C:
-			if !ok {
-				return "", nil, fmt.Errorf("event bus closed")
-			}
-			if evt.DeviceID != dev.ID() {
-				continue
-			}
-			p.mu.RLock()
-			body, exists := p.lastBody[dev.ID()]
-			p.mu.RUnlock()
-			if !exists {
-				return "", nil, fmt.Errorf("credentials missing after event (internal error)")
-			}
-
-			vols := p.buildVolumes(body)
-
-			if volumePath == "" {
-				return "", vols, nil
-			}
-
-			path, err := p.mountWithBody(ctx, dev.ID(), body, volumePath, readOnly)
-			if err != nil {
-				return "", nil, err
-			}
-			return path, vols, nil
-
-		case <-deadline.Done():
-			return "", nil, fmt.Errorf("timed out after %s waiting for SFTP response — the phone did not start its SFTP server. Either the KDE Connect app is not open, or it has not granted kcd file access (on Android, enable file access for KDE Connect)", timeout)
-		}
+	path, err := p.mountWithBody(ctx, dev.ID(), body, volumePath, readOnly)
+	p.clearPassword(dev.ID(), body.Password)
+	if err != nil {
+		return "", nil, err
 	}
+	return path, volumes, nil
 }
 
 // MountLocally mounts using previously cached credentials.
 // Prefer RequestAndMount for a one-step experience.
 func (p *SftpPlugin) MountLocally(ctx context.Context, deviceID string, readOnly bool) (string, error) {
-	p.mu.RLock()
-	body, ok := p.lastBody[deviceID]
-	p.mu.RUnlock()
-	if !ok {
-		return "", fmt.Errorf("no SFTP credentials cached for device %s — use 'kcd sftp mount' which requests them automatically", deviceID)
+	return "", fmt.Errorf("sftp: cached credentials are not reused for mounts; request fresh credentials instead")
+}
+
+func (p *SftpPlugin) requestCredentials(ctx context.Context, dev device.Sender) (SftpBody, error) {
+	id := dev.ID()
+	ch := make(chan sftpResult, 1)
+	p.mu.Lock()
+	if _, exists := p.pending[id]; exists {
+		p.mu.Unlock()
+		return SftpBody{}, fmt.Errorf("sftp: a credential request is already pending for device %s", id)
 	}
-	return p.mountWithBody(ctx, deviceID, body, "", readOnly)
+	delete(p.lastBody, id)
+	p.pending[id] = ch
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		if p.pending[id] == ch {
+			delete(p.pending, id)
+		}
+		p.mu.Unlock()
+	}()
+	if err := p.RequestMount(dev); err != nil {
+		return SftpBody{}, fmt.Errorf("sftp: send request: %w", err)
+	}
+	p.logger.Info("sftp: request sent, waiting for phone response", log.String("device_id", id))
+	timeout := p.credentialsTimeout()
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case result := <-ch:
+		if result.err != nil {
+			return SftpBody{}, result.err
+		}
+		return result.body, nil
+	case <-deadline.Done():
+		return SftpBody{}, fmt.Errorf("sftp: timed out after %s waiting for phone credentials", timeout)
+	}
+}
+
+func (p *SftpPlugin) clearPassword(deviceID, password string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	body, ok := p.lastBody[deviceID]
+	if ok && body.Password == password {
+		body.Password = ""
+		p.lastBody[deviceID] = body
+	}
 }
 
 // Info returns cached SFTP details, password only on request: it is a
@@ -205,10 +177,14 @@ func (p *SftpPlugin) MountedPath(deviceID string) string {
 
 	// The kernel is the source of truth: configured location first, then the
 	// previous default, so pre-move mounts are found, not orphaned.
-	if mountPoint = p.adoptIfMounted(deviceID, p.mountPointFor(deviceID)); mountPoint != "" {
+	primary := p.mountPointFor(deviceID)
+	if primary != "" {
+		mountPoint = p.adoptIfMounted(deviceID, primary)
+	}
+	if mountPoint != "" {
 		return mountPoint
 	}
-	if legacy := legacyMountPointFor(deviceID); legacy != "" && legacy != p.mountPointFor(deviceID) {
+	if legacy := legacyMountPointFor(deviceID); legacy != "" && legacy != primary {
 		if mountPoint = p.adoptIfMounted(deviceID, legacy); mountPoint != "" {
 			p.logger.Info("adopted SFTP mount left at the previous default location",
 				log.String("device_id", deviceID),
@@ -223,6 +199,9 @@ func (p *SftpPlugin) MountedPath(deviceID string) string {
 // adoptIfMounted caches mountPoint as this device's mount when the kernel
 // reports it, and returns it; otherwise returns "".
 func (p *SftpPlugin) adoptIfMounted(deviceID, mountPoint string) string {
+	if mountPoint == "" {
+		return ""
+	}
 	if !mountExists(mountPoint) {
 		return ""
 	}

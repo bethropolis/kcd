@@ -89,6 +89,10 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if body.DeviceID == localDeviceID {
 			return
 		}
+		if !protocol.ValidDeviceID(body.DeviceID) {
+			logger.Debug("ignoring discovery with invalid device ID", log.String("device_id", body.DeviceID))
+			return
+		}
 
 		// Never dial garbage ports from unauthenticated announcements.
 		if !validDialPort(tcpPort) {
@@ -227,6 +231,10 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				// has a live session. Pairing traffic always passes through.
 				var preBody protocol.IdentityBody
 				if err := json.Unmarshal(preTlsPkt.Body, &preBody); err == nil {
+					if !protocol.ValidDeviceID(preBody.DeviceID) {
+						protocol.ReleasePacket(preTlsPkt)
+						return
+					}
 					if preBody.TargetDeviceID != "" && preBody.TargetDeviceID != localDeviceID {
 						// Log-only: a stale cached ID on the peer (e.g. our reinstall
 						// minted a new one) must not kill a legitimate inbound.

@@ -76,6 +76,10 @@ func (l *Listener) Run(ctx context.Context) {
 			protocol.ReleasePacket(pkt)
 			continue
 		}
+		if !protocol.ValidDeviceID(identity.DeviceID) {
+			protocol.ReleasePacket(pkt)
+			continue
+		}
 
 		// Don't connect to ourselves
 		if identity.DeviceID == l.localDeviceID {
