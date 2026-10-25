@@ -24,20 +24,24 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return err
 	}
 
-	if pkt.Type == "kdeconnect.mpris.request" && body.AlbumArtUrl != "" && strings.HasPrefix(body.AlbumArtUrl, "file://") {
-		go p.sendAlbumArt(dev, body.Player, body.AlbumArtUrl)
+	switch pkt.Type {
+	case "kdeconnect.mpris.request":
+		if body.AlbumArtUrl != "" && strings.HasPrefix(body.AlbumArtUrl, "file://") {
+			go p.sendAlbumArt(dev, body.Player, body.AlbumArtUrl)
+			return nil
+		}
+	case "kdeconnect.mpris":
+		// The phone responds to requestAlbumArt with a side-channel transfer.
+		if body.TransferringAlbumArt && pkt.PayloadSize > 0 && pkt.PayloadTransferInfo != nil {
+			go p.receiveAlbumArt(ctx, dev, body.Player, body.AlbumArtUrl,
+				pkt.PayloadSize, pkt.PayloadTransferInfo.Port)
+			return nil
+		}
+	default:
 		return nil
 	}
 
-	// Inbound album art payload — the phone responds to requestAlbumArt
-	// with a side-channel transfer carrying the art bytes.
-	if body.TransferringAlbumArt && pkt.PayloadSize > 0 && pkt.PayloadTransferInfo != nil {
-		go p.receiveAlbumArt(ctx, dev, body.Player, body.AlbumArtUrl,
-			pkt.PayloadSize, pkt.PayloadTransferInfo.Port)
-		return nil
-	}
-
-	if body.RequestPlayerList {
+	if pkt.Type == "kdeconnect.mpris.request" && body.RequestPlayerList {
 		// The phone asks for truth: heal drift async first (the answer goes
 		// from the current map), keeping Handle non-blocking per contract.
 		p.requestReconcile()
@@ -45,7 +49,7 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	}
 
 	// Incoming playerList: prune destroyed sessions, refresh the survivors.
-	if body.PlayerList != nil {
+	if pkt.Type == "kdeconnect.mpris" && body.PlayerList != nil {
 		p.logger.Debug("mpris: received player list from remote", log.Strings("players", body.PlayerList))
 		pruned := false
 		p.mu.Lock()
@@ -92,8 +96,11 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	if body.Action != "" || body.Seek != nil || body.SetPosition != nil || body.SetVolume != nil || body.SetShuffle != nil || body.SetLoopStatus != "" {
+	if pkt.Type == "kdeconnect.mpris.request" && (body.Action != "" || body.Seek != nil || body.SetPosition != nil || body.SetVolume != nil || body.SetShuffle != nil || body.SetLoopStatus != "") {
 		go p.handleAction(body.Player, body.Action, body.Seek, body.SetPosition, body.SetVolume, body.SetShuffle, body.SetLoopStatus)
+		return nil
+	}
+	if pkt.Type != "kdeconnect.mpris" {
 		return nil
 	}
 

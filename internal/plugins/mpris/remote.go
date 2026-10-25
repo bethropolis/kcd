@@ -30,8 +30,8 @@ func CanonicalAction(action string) string {
 	return action
 }
 
-// SendAction sends a control request on both mpris packet types (old and
-// receiver plugins); relative seeks resolve to SetPosition or error out.
+// SendAction sends a single control request; relative seeks resolve to
+// SetPosition or error out.
 func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek, setPosition *int64, volume *int) error {
 	if setPosition == nil && seek != nil {
 		state := p.RemoteState(dev.ID())
@@ -65,11 +65,7 @@ func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek,
 	if err := dev.Send(pkt); err != nil {
 		return err
 	}
-	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
-	if err != nil {
-		return err
-	}
-	return dev.Send(pkt2)
+	return nil
 }
 
 // requestPlayerList sends a request for the remote device's active player list.
@@ -79,15 +75,7 @@ func (p *MPRISPlugin) requestPlayerList(dev device.Sender) error {
 	if err != nil {
 		return err
 	}
-	if err := dev.Send(pkt); err != nil {
-		return err
-	}
-	// Also send as kdeconnect.mpris for phone-side MprisReceiverPlugin/MprisPlugin.
-	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
-	if err != nil {
-		return err
-	}
-	return dev.Send(pkt2)
+	return dev.Send(pkt)
 }
 
 // requestPlayerStatus sends a requestNowPlaying + requestVolume for a specific player.

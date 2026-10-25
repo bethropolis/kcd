@@ -35,6 +35,7 @@ func buildNowPlaying(props map[string]dbus.Variant, playerName string) *NowPlayi
 	np := &NowPlaying{
 		Player:     playerName,
 		CanControl: true,
+		Volume:     -1,
 	}
 
 	if v, ok := props["PlaybackStatus"]; ok {
@@ -89,6 +90,14 @@ func buildNowPlaying(props map[string]dbus.Variant, playerName string) *NowPlayi
 }
 
 func fillMetadataFromMap(np *NowPlaying, meta map[string]dbus.Variant) {
+	if trackID, ok := meta["mpris:trackid"]; ok {
+		switch value := trackID.Value().(type) {
+		case dbus.ObjectPath:
+			np.trackID = string(value)
+		case string:
+			np.trackID = value
+		}
+	}
 	if tv, ok := meta["xesam:title"]; ok {
 		np.Title = tv.Value().(string)
 	}

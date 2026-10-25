@@ -55,7 +55,7 @@ type NowPlaying struct {
 	ArtPending  bool   `json:"artPending,omitempty"`
 	Url         string `json:"url,omitempty"`
 	Length      int64  `json:"length"`
-	Pos         int64  `json:"pos,omitempty"`
+	Pos         int64  `json:"pos"`
 	// PosAnchorMs is the Unix-millis wall time of the Pos sample; live position
 	// is Pos + (nowMs - PosAnchorMs) while playing, frozen otherwise.
 	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
@@ -70,6 +70,7 @@ type NowPlaying struct {
 	PlaybackStatus string `json:"playbackStatus"`
 	Shuffle        *bool  `json:"shuffle,omitempty"`
 	LoopStatus     string `json:"loopStatus,omitempty"`
+	trackID        string
 }
 
 // DeepCopy returns a fully independent copy of NowPlaying; pointer fields

@@ -2,6 +2,7 @@ package mpris
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/log"
@@ -36,17 +37,20 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	}
 
 	if seek != nil {
-		if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Seek", (*seek)*1000).Err; err != nil {
+		if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Seek", *seek).Err; err != nil {
 			p.logger.Warn("mpris: seek failed", log.Int64("offset", *seek), log.Error(err))
 		}
 	}
 
 	if setPos != nil {
-		currentPosUs := p.getPlayerPosition(pl.busName)
-		targetPosUs := (*setPos) * 1000
-		seekOffset := targetPosUs - currentPosUs
-		if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.Seek", seekOffset).Err; err != nil {
-			p.logger.Warn("mpris: setPosition seek failed", log.Int64("target", *setPos), log.Error(err))
+		state, err := p.playerState(player)
+		if err != nil || state.trackID == "" {
+			if err == nil {
+				err = fmt.Errorf("track ID unavailable")
+			}
+			p.logger.Warn("mpris: setPosition unavailable", log.String("player", player), log.Error(err))
+		} else if err := dbusCall(obj, "org.mpris.MediaPlayer2.Player.SetPosition", dbus.ObjectPath(state.trackID), (*setPos)*1000).Err; err != nil {
+			p.logger.Warn("mpris: setPosition failed", log.Int64("target", *setPos), log.Error(err))
 		}
 	}
 
@@ -72,20 +76,4 @@ func (p *MPRISPlugin) handleAction(player, action string, seek, setPos *int64, v
 	if state, err := p.playerState(player); err == nil {
 		p.broadcast(state)
 	}
-}
-
-func (p *MPRISPlugin) getPlayerPosition(busName string) int64 {
-	if p.dbus == nil {
-		return 0
-	}
-	obj := p.dbus.Object(busName, "/org/mpris/MediaPlayer2")
-	var v dbus.Variant
-	if err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Position").Store(&v); err != nil {
-		return 0
-	}
-	pos, ok := v.Value().(int64)
-	if !ok {
-		return 0
-	}
-	return pos
 }
