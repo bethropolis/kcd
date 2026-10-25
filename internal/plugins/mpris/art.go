@@ -2,8 +2,10 @@ package mpris
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,7 +17,88 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, player, artUrl string) {
+func cleanArtURL(rawURL string) (string, error) {
+	if !strings.HasPrefix(rawURL, "file://") {
+		return "", fmt.Errorf("not a file:// URL")
+	}
+	clean := rawURL
+	if idx := strings.LastIndex(clean, "?t="); idx != -1 {
+		clean = clean[:idx]
+	}
+	filePath := strings.TrimPrefix(clean, "file://")
+	unescaped, err := url.PathUnescape(filePath)
+	if err != nil {
+		return "", fmt.Errorf("unescape path: %w", err)
+	}
+	filePath = filepath.Clean(unescaped)
+	if !filepath.IsAbs(filePath) {
+		return "", fmt.Errorf("artwork path is not absolute")
+	}
+	return filePath, nil
+}
+
+func (p *MPRISPlugin) authorizeOutboundArt(player, rawRequestedURL string) (string, error) {
+	reqPath, err := cleanArtURL(rawRequestedURL)
+	if err != nil {
+		return "", err
+	}
+
+	var targetDisplayName string
+	if player != "" {
+		pl := p.resolvePlayer(player)
+		if pl == nil {
+			return "", fmt.Errorf("unknown player %q", player)
+		}
+		targetDisplayName = pl.displayName
+	}
+
+	p.mu.RLock()
+	var candidates []*NowPlaying
+	if targetDisplayName != "" {
+		if state := p.lastStates[targetDisplayName]; state != nil {
+			candidates = append(candidates, state)
+		}
+	} else {
+		for _, state := range p.lastStates {
+			if state != nil {
+				candidates = append(candidates, state)
+			}
+		}
+	}
+	p.mu.RUnlock()
+
+	for _, state := range candidates {
+		if state.AlbumArtUrl == "" {
+			continue
+		}
+		advertisedPath, err := cleanArtURL(state.AlbumArtUrl)
+		if err != nil || advertisedPath != reqPath {
+			continue
+		}
+		info, err := os.Lstat(advertisedPath)
+		if err != nil {
+			return "", fmt.Errorf("stat artwork: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("artwork %q is not a regular file", advertisedPath)
+		}
+		if info.Size() > maxAlbumArtBytes {
+			return "", fmt.Errorf("artwork %q exceeds size limit", advertisedPath)
+		}
+		return advertisedPath, nil
+	}
+
+	return "", fmt.Errorf("requested path %q is not advertised by an active player", reqPath)
+}
+
+func (p *MPRISPlugin) sendAlbumArt(dev device.Sender, player, artUrl string) {
+	filePath, err := p.authorizeOutboundArt(player, artUrl)
+	if err != nil {
+		p.logger.Warn("mpris: reject unauthorized album art request",
+			log.String("player", player), log.String("art_url", artUrl), log.Error(err))
+		return
+	}
+
 	p.mu.Lock()
 	reqKey := dev.ID() + "|" + artUrl
 	if lastReq, exists := p.artRequests[reqKey]; exists && time.Since(lastReq) < 5*time.Second {
@@ -24,16 +107,6 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	}
 	p.artRequests[reqKey] = time.Now()
 	p.mu.Unlock()
-
-	cleanUrl := artUrl
-	if idx := strings.LastIndex(cleanUrl, "?t="); idx != -1 {
-		cleanUrl = cleanUrl[:idx]
-	}
-
-	filePath := strings.TrimPrefix(cleanUrl, "file://")
-	if unescaped, err := url.PathUnescape(filePath); err == nil {
-		filePath = unescaped
-	}
 
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -53,6 +126,8 @@ func (p *MPRISPlugin) sendAlbumArt(ctx context.Context, dev device.Sender, playe
 	if portMax == 0 {
 		portMax = protocol.DefaultSidechannelPortMax
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	ln, port, err := transport.ListenSidechannel(ctx, portMin, portMax)
 	if err != nil {
 		return

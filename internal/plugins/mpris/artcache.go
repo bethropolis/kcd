@@ -88,17 +88,40 @@ func (c *ArtCache) Dir() string {
 	return c.dir
 }
 
+func isSafeCacheKey(key string) bool {
+	if len(key) == 0 || len(key) > 64 {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		char := key[i]
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // Key derives the cache filename stem: the kdeArtHash parameter when present,
 // otherwise FNV-1a of the full URI.
 func (c *ArtCache) Key(rawURL string) string {
 	if u, err := url.Parse(rawURL); err == nil {
-		if h := u.Query().Get("kdeArtHash"); h != "" {
+		if h := u.Query().Get("kdeArtHash"); isSafeCacheKey(h) {
 			return h
 		}
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(rawURL))
 	return strconv.FormatUint(uint64(h.Sum32()), 10)
+}
+
+func (c *ArtCache) safePath(key, ext string) (string, error) {
+	dst := filepath.Join(c.dir, key+ext)
+	rel, err := filepath.Rel(c.dir, dst)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || filepath.Dir(rel) != "." {
+		return "", fmt.Errorf("artcache: path traversal rejected")
+	}
+	return dst, nil
 }
 
 // Resolve returns a file:// URL for a cached album art URI, or "" when
@@ -115,7 +138,11 @@ func (c *ArtCache) Resolve(rawURL string) string {
 	}
 
 	// Disk fallback: a previously cached file survives a daemon restart.
-	matches, err := filepath.Glob(filepath.Join(c.dir, c.Key(rawURL)+".*"))
+	pattern, err := c.safePath(c.Key(rawURL), ".*")
+	if err != nil {
+		return ""
+	}
+	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
 		return ""
 	}
@@ -159,7 +186,10 @@ func (c *ArtCache) Commit(rawURL, tmpPath string) (string, error) {
 	}
 
 	// Written in place inside the cache dir: no cross-device rename involved.
-	dst := filepath.Join(c.dir, c.Key(rawURL)+".jpg")
+	dst, err := c.safePath(c.Key(rawURL), ".jpg")
+	if err != nil {
+		return "", err
+	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", err

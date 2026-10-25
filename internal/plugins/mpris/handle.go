@@ -24,8 +24,8 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return err
 	}
 
-	if body.AlbumArtUrl != "" && strings.HasPrefix(body.AlbumArtUrl, "file://") {
-		go p.sendAlbumArt(ctx, dev, body.Player, body.AlbumArtUrl)
+	if pkt.Type == "kdeconnect.mpris.request" && body.AlbumArtUrl != "" && strings.HasPrefix(body.AlbumArtUrl, "file://") {
+		go p.sendAlbumArt(dev, body.Player, body.AlbumArtUrl)
 		return nil
 	}
 
