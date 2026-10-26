@@ -52,7 +52,7 @@ func TestHandleNewConnectionRejectsInvalidPeerID(t *testing.T) {
 	devices := device.NewRegistry(nil)
 	result := make(chan error, 1)
 	go func() {
-		result <- handleNewConnection(context.Background(), transport.NewConn(serverTLS), localIdentity, devices, plugin.NewRegistry(log.Nop()), "0123456789abcdef0123456789abcdef", nil, log.Nop(), config.Defaults())
+		result <- handleNewConnection(context.Background(), transport.NewConn(serverTLS), localIdentity, &protocol.IdentityBody{DeviceID: "peer_id_123456789012345678901234567890", ProtocolVersion: protocol.ProtocolVersion}, "", devices, plugin.NewRegistry(log.Nop()), "0123456789abcdef0123456789abcdef", nil, log.Nop(), config.Defaults())
 	}()
 	clientConn := transport.NewConn(clientTLS)
 	localPkt, err := clientConn.ReadPacket()

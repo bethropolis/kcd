@@ -49,6 +49,11 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return c.tlsConn.SetWriteDeadline(t)
 }
 
+// SetReadDeadline bounds the next packet read, including post-TLS identity.
+func (c *Conn) SetReadDeadline(t time.Time) error {
+	return c.tlsConn.SetReadDeadline(t)
+}
+
 // PeerCert returns the validated client/server certificate presented by the peer.
 // If no certificate was presented (which shouldn't happen with proper tls.Config), it returns nil.
 func (c *Conn) PeerCert() *x509.Certificate {

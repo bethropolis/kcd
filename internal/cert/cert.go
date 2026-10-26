@@ -74,6 +74,9 @@ func GenerateSelfSigned(deviceID string) (*tls.Certificate, error) {
 func LoadOrGenerate(certFile, keyFile, deviceID string) (*tls.Certificate, error) {
 	tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err == nil {
+		if err := validateLoadedCertificate(&tlsCert, deviceID); err != nil {
+			return nil, err
+		}
 		return &tlsCert, nil
 	}
 
@@ -117,6 +120,23 @@ func LoadOrGenerate(certFile, keyFile, deviceID string) (*tls.Certificate, error
 	}
 
 	return newCert, nil
+}
+
+func validateLoadedCertificate(cert *tls.Certificate, deviceID string) error {
+	if len(cert.Certificate) == 0 {
+		return fmt.Errorf("cert: loaded certificate is empty")
+	}
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return fmt.Errorf("cert: parse loaded certificate: %w", err)
+	}
+	if !MatchesDeviceID(parsed, deviceID) {
+		return fmt.Errorf("cert: loaded certificate CN %q does not match device ID %q", parsed.Subject.CommonName, deviceID)
+	}
+	if time.Now().After(parsed.NotAfter) {
+		return fmt.Errorf("cert: loaded certificate expired at %s", parsed.NotAfter.Format(time.RFC3339))
+	}
+	return nil
 }
 
 // Fingerprint returns the SHA256 hex string of the given certificate.

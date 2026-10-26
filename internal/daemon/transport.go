@@ -223,15 +223,21 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					}
 				}()
 
+				_ = c.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout)))
 				preTlsPkt, newConn, err := transport.ReadPlaintextPacket(c)
 				if err != nil {
 					return
 				}
+				_ = c.SetReadDeadline(time.Time{})
 				// Refuse duplicate bursts inside the cooldown: the peer already
 				// has a live session. Pairing traffic always passes through.
 				var preBody protocol.IdentityBody
 				if err := json.Unmarshal(preTlsPkt.Body, &preBody); err == nil {
 					if !protocol.ValidDeviceID(preBody.DeviceID) {
+						protocol.ReleasePacket(preTlsPkt)
+						return
+					}
+					if protocol.SanitizeDeviceName(preBody.DeviceName) == "" {
 						protocol.ReleasePacket(preTlsPkt)
 						return
 					}
@@ -249,6 +255,9 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						protocol.ReleasePacket(preTlsPkt)
 						return
 					}
+				} else {
+					protocol.ReleasePacket(preTlsPkt)
+					return
 				}
 				protocol.ReleasePacket(preTlsPkt)
 
@@ -262,7 +271,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				transConn := transport.NewConn(tlsConn)
 				c = nil // Prevent defer from closing the active connection
 
-				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
+				if err := handleNewConnection(ctx, transConn, identity, &preBody, "", devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
 					logger.Debug("new connection setup failed", log.Error(err))
 					transConn.Close()
 				}

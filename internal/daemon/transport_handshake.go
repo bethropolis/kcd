@@ -17,7 +17,12 @@ import (
 )
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, preTLS *protocol.IdentityBody, expectedPeerID string, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
+	if err := conn.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout))); err != nil {
+		return fmt.Errorf("set handshake read deadline: %w", err)
+	}
+	defer conn.SetReadDeadline(time.Time{})
+
 	if err := conn.WritePacket(identity); err != nil {
 		return fmt.Errorf("failed to send identity: %w", err)
 	}
@@ -31,6 +36,9 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	if peerPkt.Type != protocol.TypeIdentity {
 		return fmt.Errorf("expected identity packet, got %s", peerPkt.Type)
 	}
+	if preTLS == nil {
+		return fmt.Errorf("missing pre-TLS identity")
+	}
 
 	var peerBody protocol.IdentityBody
 	if err := json.Unmarshal(peerPkt.Body, &peerBody); err != nil {
@@ -38,6 +46,13 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	}
 	if !protocol.ValidDeviceID(peerBody.DeviceID) {
 		return fmt.Errorf("invalid device ID %q", peerBody.DeviceID)
+	}
+	if (preTLS.DeviceID != "" && peerBody.DeviceID != preTLS.DeviceID) ||
+		(preTLS.ProtocolVersion > 0 && peerBody.ProtocolVersion != preTLS.ProtocolVersion) {
+		return fmt.Errorf("post-TLS identity differs from pre-TLS identity")
+	}
+	if expectedPeerID != "" && peerBody.DeviceID != expectedPeerID {
+		return fmt.Errorf("post-TLS device ID %q does not match target %q", peerBody.DeviceID, expectedPeerID)
 	}
 
 	peerCert := conn.PeerCert()
@@ -62,11 +77,21 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	dev.SetLastSeen(time.Now())
 
 	certFP := cert.Fingerprint(peerCert)
-	if dev.State() == device.StatePaired && dev.CertFP != "" {
-		if dev.CertFP != certFP {
+	if currentCert := dev.PeerCert(); currentCert != nil && cert.Fingerprint(currentCert) != certFP {
+		return fmt.Errorf("certificate fingerprint mismatch on live link (possible MITM)")
+	}
+	switch dev.State() {
+	case device.StatePaired:
+		if dev.CertFP != "" && dev.CertFP != certFP {
 			return fmt.Errorf("certificate fingerprint mismatch (possible MITM)")
 		}
-	} else {
+	case device.StatePairRequested, device.StatePairRequestedByPeer:
+		if dev.CertFP == "" {
+			dev.CertFP = certFP
+		} else if dev.CertFP != certFP {
+			return fmt.Errorf("certificate fingerprint mismatch during pairing")
+		}
+	default:
 		dev.CertFP = certFP
 	}
 

@@ -4,8 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +79,31 @@ func TestLoadOrGenerate(t *testing.T) {
 
 	if Fingerprint(x509Cert1) != Fingerprint(x509Cert2) {
 		t.Error("loaded certificate mismatch with generated one")
+	}
+}
+
+func TestLoadOrGenerateRejectsCertificateCNMismatch(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	wrong, err := GenerateSelfSigned("other-device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := x509.MarshalPKCS8PrivateKey(wrong.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: wrong.Certificate[0]}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadOrGenerate(certPath, keyPath, "expected-device")
+	if err == nil || !strings.Contains(err.Error(), "does not match device ID") {
+		t.Fatalf("CN mismatch error = %v", err)
 	}
 }
 

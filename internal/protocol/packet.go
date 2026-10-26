@@ -5,6 +5,7 @@ package protocol
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -12,9 +13,18 @@ import (
 	"time"
 )
 
-// MaxPacketSize is the maximum allowed line length for a single packet (4 MB).
-// Lines exceeding this are rejected to prevent memory exhaustion.
-const MaxPacketSize = 4 * 1024 * 1024
+// MaxPacketSize is the maximum allowed line length for an authenticated packet.
+// It matches Android's 32 MiB packet limit for large conversations and contacts.
+const MaxPacketSize = 32 * 1024 * 1024
+
+// MaxIdentityPacketSize limits unauthenticated identity packets. Identity data
+// is small; a lower cap prevents a LAN peer from forcing large allocations
+// before certificate authentication completes.
+const MaxIdentityPacketSize = 512 * 1024
+
+// ErrPacketTooLarge indicates that a complete line exceeded its framing limit.
+// The reader has discarded the rest of that line and can continue safely.
+var ErrPacketTooLarge = errors.New("protocol: packet too large")
 
 // Packet represents a single KDE Connect packet on the wire.
 // Body is kept as json.RawMessage so the router never unmarshals plugin payloads.
@@ -98,32 +108,16 @@ func NewPacket(typ string, body interface{}) (*Packet, error) {
 // ReadPacket reads a single newline-delimited JSON packet from r.
 // The returned Packet is from the pool — call ReleasePacket when done.
 func ReadPacket(r *bufio.Reader) (*Packet, error) {
-	// ReadSlice is zero-allocation: it points directly to the reader's internal buffer.
-	line, err := r.ReadSlice('\n')
-	if err != nil {
-		switch err {
-		case bufio.ErrBufferFull:
-			firstChunk := make([]byte, len(line))
-			copy(firstChunk, line)
-			rest, readErr := r.ReadBytes('\n')
-			if readErr != nil {
-				return nil, fmt.Errorf("protocol: read full line after buffer full: %w", readErr)
-			}
-			line = append(firstChunk, rest...)
-		case io.EOF:
-			if len(line) == 0 {
-				return nil, fmt.Errorf("protocol: read: %w", err)
-			}
-			if len(line) > 0 && line[len(line)-1] != '\n' {
-				return nil, fmt.Errorf("protocol: read: truncated packet missing newline")
-			}
-		default:
-			return nil, fmt.Errorf("protocol: read: %w", err)
-		}
-	}
+	return ReadPacketBounded(r, MaxPacketSize)
+}
 
-	if len(line) > MaxPacketSize {
-		return nil, fmt.Errorf("protocol: packet too large (%d bytes, max %d)", len(line), MaxPacketSize)
+// ReadPacketBounded reads one packet without retaining more than max bytes of
+// an unterminated line. Oversized lines are discarded through their newline so
+// the connection can continue with the next packet.
+func ReadPacketBounded(r *bufio.Reader, max int) (*Packet, error) {
+	line, err := readLineBounded(r, max)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(line) == 0 {
@@ -137,6 +131,48 @@ func ReadPacket(r *bufio.Reader) (*Packet, error) {
 	}
 
 	return pkt, nil
+}
+
+func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
+	if max <= 0 {
+		return nil, fmt.Errorf("protocol: invalid packet limit %d", max)
+	}
+
+	line := make([]byte, 0, min(max, 4096))
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if len(chunk) > max-len(line) {
+			discardLine(r, chunk, err)
+			return nil, fmt.Errorf("%w (%d bytes, max %d)", ErrPacketTooLarge, len(line)+len(chunk), max)
+		}
+		line = append(line, chunk...)
+
+		if err == nil {
+			return line, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if len(line) == 0 {
+				return nil, fmt.Errorf("protocol: read: %w", err)
+			}
+			return nil, fmt.Errorf("protocol: read: truncated packet missing newline")
+		}
+		return nil, fmt.Errorf("protocol: read: %w", err)
+	}
+}
+
+func discardLine(r *bufio.Reader, chunk []byte, err error) {
+	if err == nil || (len(chunk) > 0 && chunk[len(chunk)-1] == '\n') {
+		return
+	}
+	for {
+		chunk, err = r.ReadSlice('\n')
+		if err == nil || (len(chunk) > 0 && chunk[len(chunk)-1] == '\n') || !errors.Is(err, bufio.ErrBufferFull) {
+			return
+		}
+	}
 }
 
 // WritePacket serializes a Packet as a single line of JSON followed by \n.

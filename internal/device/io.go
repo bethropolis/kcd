@@ -65,6 +65,10 @@ func (d *Device) readLoop(ctx context.Context, conn *transport.Conn) {
 
 		pkt, err := conn.ReadPacket()
 		if err != nil {
+			if errors.Is(err, protocol.ErrPacketTooLarge) {
+				d.logger.Warn("dropping oversized packet, keeping connection", log.Error(err))
+				continue
+			}
 			if strings.Contains(err.Error(), "protocol: unmarshal:") {
 				d.logger.Warn("dropping malformed packet, keeping connection", log.Error(err))
 				continue

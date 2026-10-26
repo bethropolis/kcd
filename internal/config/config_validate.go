@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"time"
+
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 // Validate checks required fields and returns an error if any are invalid.
@@ -10,7 +12,7 @@ func (c *Config) Validate() error {
 	if err := c.validateDurations(); err != nil {
 		return err
 	}
-	if c.DeviceName == "" {
+	if protocol.SanitizeDeviceName(c.DeviceName) == "" {
 		return fmt.Errorf("config: device_name is required")
 	}
 	switch c.DeviceType {

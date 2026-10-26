@@ -26,19 +26,9 @@ func (b *bufferedConn) Read(p []byte) (int, error) {
 // returning a conn replaying buffered bytes into the TLS handshake.
 func ReadPlaintextPacket(conn net.Conn) (*protocol.Packet, net.Conn, error) {
 	reader := bufio.NewReader(conn)
-	line, err := reader.ReadBytes('\n')
+	pkt, err := protocol.ReadPacketBounded(reader, protocol.MaxIdentityPacketSize)
 	if err != nil {
-		return nil, conn, err
-	}
-
-	if len(line) > protocol.MaxPacketSize {
-		return nil, conn, fmt.Errorf("transport: plaintext packet too large")
-	}
-
-	pkt := protocol.AcquirePacket()
-	if err := json.Unmarshal(line, pkt); err != nil {
-		protocol.ReleasePacket(pkt)
-		return nil, conn, fmt.Errorf("transport: unmarshal plaintext packet: %w", err)
+		return nil, conn, fmt.Errorf("transport: read plaintext packet: %w", err)
 	}
 
 	// Calculate remaining buffered bytes

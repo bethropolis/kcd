@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
@@ -76,6 +77,7 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 		conn.Close()
 		return
 	}
+	_ = conn.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout)))
 
 	// KDE Connect inverts TLS roles: TCP client acts as TLS server
 	tlsConn := tls.Server(conn, cfg)
@@ -89,7 +91,8 @@ func DialDevice(ctx context.Context, targetIP net.IP, targetPort int, targetID s
 
 	transConn := transport.NewConn(tlsConn)
 	// Ensure the connection is closed if handleNewConnection fails mid-setup
-	if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
+	peerPreTLS := &protocol.IdentityBody{DeviceID: targetID, ProtocolVersion: targetProto}
+	if err := handleNewConnection(ctx, transConn, identity, peerPreTLS, targetID, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
 		logger.Debug("new connection setup failed", log.Error(err))
 		transConn.Close()
 	}

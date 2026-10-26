@@ -42,6 +42,14 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsNameThatSanitizesEmpty(t *testing.T) {
+	cfg := Defaults()
+	cfg.DeviceName = "!!!"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected sanitized-empty device name to be rejected")
+	}
+}
+
 func loadTOML(t *testing.T, text string) (*Config, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kcd.toml")

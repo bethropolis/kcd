@@ -31,7 +31,7 @@ func SanitizeDeviceName(name string) string {
 	clean := DecodeDeviceName(name)
 	clean = stripControlRunes(clean)
 	clean = invalidNameChars.ReplaceAllString(clean, "")
-	if len(clean) > MaxDeviceNameLength {
+	if utf8.RuneCountInString(clean) > MaxDeviceNameLength {
 		clean = truncateRunes(clean, MaxDeviceNameLength)
 	}
 	return clean
@@ -100,19 +100,13 @@ func containsBackslash(s string) bool {
 	return false
 }
 
-// truncateRunes cuts s to at most maxBytes without splitting a UTF-8 rune.
-func truncateRunes(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
+// truncateRunes cuts s to at most maxRunes without splitting a UTF-8 rune.
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
 		return s
 	}
-	cut := 0
-	for i := range s {
-		if i > maxBytes {
-			break
-		}
-		cut = i
-	}
-	return s[:cut]
+	return string(runes[:maxRunes])
 }
 
 // IdentityBody contains the fields of an identity packet body.

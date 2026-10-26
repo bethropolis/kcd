@@ -72,17 +72,14 @@ func TestSanitizeDeviceName(t *testing.T) {
 			t.Errorf("SanitizeDeviceName(%q) invalid UTF-8: %q", in, got)
 		}
 	}
-	// Multibyte truncation must never split a rune nor exceed the cap.
-	long := strings.Repeat("Ö", 40) // 80 bytes
+	// Multibyte truncation must preserve the 32-character protocol limit.
+	long := strings.Repeat("Ö", 40)
 	got := SanitizeDeviceName(long)
-	if len(got) > MaxDeviceNameLength {
-		t.Errorf("truncated name exceeds cap: %d bytes", len(got))
-	}
 	if !utf8.ValidString(got) {
 		t.Errorf("truncated name is invalid UTF-8: %q", got)
 	}
-	if n := len([]rune(got)); n != MaxDeviceNameLength/2 {
-		t.Errorf("expected 16 Ö runes (32 bytes), got %d runes", n)
+	if n := len([]rune(got)); n != MaxDeviceNameLength {
+		t.Errorf("expected %d Ö runes, got %d", MaxDeviceNameLength, n)
 	}
 }
 
