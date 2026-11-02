@@ -195,6 +195,22 @@ func TestHookAndRunCommandConfig(t *testing.T) {
 	}
 }
 
+func TestEnvironmentOverridesAndInstancePaths(t *testing.T) {
+	t.Setenv("KCD_SHARE__ACCEPT", "never")
+	t.Setenv("KCD_PLUGINS__RUNCOMMAND", "false")
+	t.Setenv("KCD_INSTANCE", "test-one")
+	cfg, err := Load(filepath.Join(t.TempDir(), "kcd.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Share.Accept != "never" || cfg.Plugins.RunCommand {
+		t.Fatalf("environment overrides not applied: share=%q runcommand=%v", cfg.Share.Accept, cfg.Plugins.RunCommand)
+	}
+	if !strings.Contains(cfg.SocketPath, "kcd-test-one") || !strings.Contains(cfg.StateDir, "kcd-test-one") {
+		t.Fatalf("instance suffix missing: socket=%q state=%q", cfg.SocketPath, cfg.StateDir)
+	}
+}
+
 func TestPerDevicePluginOverrideOnlyRestrictsGlobalPlugin(t *testing.T) {
 	cfg := Defaults()
 	cfg.Devices["phone"] = DeviceConfig{Plugins: map[string]bool{"runcommand": false}}

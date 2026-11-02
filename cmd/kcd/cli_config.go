@@ -19,7 +19,7 @@ var configCmd = &cli.Command{
 			Name:  "check",
 			Usage: "Parse and validate configuration",
 			Action: func(c *cli.Context) error {
-				cfg, err := config.Load(c.String("config"))
+				cfg, err := config.Load(configPathFor(c))
 				if err != nil {
 					return err
 				}
@@ -37,7 +37,7 @@ var configCmd = &cli.Command{
 			Name:  "path",
 			Usage: "Show configuration lookup paths",
 			Action: func(c *cli.Context) error {
-				path := c.String("config")
+				path := configPathFor(c)
 				fmt.Println(path)
 				fmt.Println(filepath.Clean(path + ".d"))
 				return nil
@@ -51,7 +51,7 @@ var configCmd = &cli.Command{
 				&cli.BoolFlag{Name: "origin", Usage: "Show the primary config path"},
 			},
 			Action: func(c *cli.Context) error {
-				cfg, err := config.Load(c.String("config"))
+				cfg, err := config.Load(configPathFor(c))
 				if err != nil {
 					return err
 				}

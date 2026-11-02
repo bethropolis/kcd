@@ -24,6 +24,9 @@ type Config struct {
 	CertFile      string `toml:"cert_file"`
 	KeyFile       string `toml:"key_file"`
 	SocketPath    string `toml:"socket_path"`
+	StateDir      string `toml:"state_dir" json:"-"`
+	CacheDir      string `toml:"cache_dir" json:"-"`
+	RuntimeDir    string `toml:"runtime_dir" json:"-"`
 	DownloadDir   string `toml:"download_dir"`
 	TCPPort       int    `toml:"tcp_port"`
 	// EnableBroadcast was removed — broadcast starts automatically with `kcd pair` (listen mode)
@@ -77,6 +80,9 @@ func Defaults() *Config {
 	c.CertFile = configPath("cert.pem", false)
 	c.KeyFile = configPath("key.pem", false)
 	c.SocketPath = DefaultSocketPath()
+	c.StateDir = StateDir()
+	c.CacheDir = DefaultCacheDir()
+	c.RuntimeDir = DefaultRuntimeDir()
 	c.DownloadDir = filepath.Join(home, "Downloads", "kcd")
 	c.TCPPort = protocol.DefaultTCPPort
 	c.LogLevel = "info"
@@ -152,6 +158,9 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.Warnings = append(cfg.Warnings, unknownKeyWarnings(candidate, metadata.Undecoded())...)
 	}
+	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
 	cfg.normalizeDurationAliases()
 
 	if data, err := os.ReadFile(deviceIDPath(path)); err == nil {
@@ -170,6 +179,9 @@ func Load(path string) (*Config, error) {
 	}
 	return cfg, nil
 }
+
+// StatePath returns the configured device registry path.
+func (c *Config) StatePath() string { return filepath.Join(c.StateDir, "devices.json") }
 
 func (c *Config) normalizeDurationAliases() {
 	if c.Share.AcceptTimeout != 0 {

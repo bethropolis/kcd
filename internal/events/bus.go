@@ -71,6 +71,16 @@ func All() []EventType {
 	}
 }
 
+// AllTypes returns event names for IPC capability discovery.
+func AllTypes() []string {
+	types := All()
+	result := make([]string, len(types))
+	for i, typ := range types {
+		result[i] = string(typ)
+	}
+	return result
+}
+
 const (
 	// DefaultSubscriberCap is the channel buffer size for plugin-internal
 	// subscribers (battery test waits, sftp credential waits, etc.).

@@ -11,6 +11,7 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -19,7 +20,43 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
+func eventNames(types []events.EventType) []string {
+	names := make([]string, len(types))
+	for i, typ := range types {
+		names[i] = string(typ)
+	}
+	return names
+}
+
 func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger log.Logger, startedAt time.Time) {
+	handler.Register(ipc.CmdHello, func(req ipc.Request) ipc.Response {
+		var payload ipc.HelloPayload
+		if len(req.Payload) > 0 {
+			if err := json.Unmarshal(req.Payload, &payload); err != nil {
+				return ipc.Response{OK: false, Error: "invalid payload"}
+			}
+		}
+		pluginState := make(map[string]bool)
+		for _, name := range []string{"Pair", "Battery", "Clipboard", "Notification", "Share", "RunCommand", "MPRIS", "Ping", "Telephony", "Connectivity", "Mousepad", "SFTP", "FindMyPhone", "LockDevice", "SystemVolume", "SMS", "Contacts", "Presenter", "FindThisDevice", "RemoteSystemVolume"} {
+			pluginState[name] = cfg.PluginEnabledForDevice("", name)
+		}
+		for _, p := range plugins.All() {
+			pluginState[p.Name()] = true
+		}
+		data, err := json.Marshal(ipc.HelloResponse{
+			APIVersion:    2,
+			DaemonVersion: Version,
+			Commands:      handler.Commands(),
+			Events:        events.AllTypes(),
+			OptInEvents:   eventNames(events.OptInOnly()),
+			Plugins:       pluginState,
+			Features:      []string{"errorCodes", "keepAlive", "prompts", "config"},
+		})
+		if err != nil {
+			return ipc.Response{OK: false, Error: "failed to build capability response"}
+		}
+		return ipc.Response{OK: true, Data: data}
+	})
 	if cfg.Plugins.Notification {
 		if notifPl, ok := plugins.GetByName("Notification"); ok {
 			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications.Filters())

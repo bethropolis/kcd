@@ -98,7 +98,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// 2. Event Bus & Device Registry
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
-	statePath := config.StatePath()
+	statePath := cfg.StatePath()
 	if err := devices.Load(statePath, logger); err != nil {
 		logger.Warn("failed to load devices", log.Error(err))
 	}

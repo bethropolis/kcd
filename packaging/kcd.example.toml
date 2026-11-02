@@ -63,6 +63,12 @@
 # Default: $XDG_RUNTIME_DIR/kcd/kcd.sock  (e.g. /run/user/1000/kcd/kcd.sock)
 # socket_path = "/run/user/1000/kcd/kcd.sock"
 
+# Base directories for device state, cache, and runtime files.
+# state_dir = "~/.local/state/kcd"
+# cache_dir = "~/.cache/kcd"
+# runtime_dir = "/run/user/1000/kcd"
+# Use `kcd --instance NAME daemon` to isolate all default paths.
+
 # TLS certificate and key generated on first run.
 # Default: $XDG_CONFIG_HOME/kcd/cert.pem and key.pem
 # cert_file = "~/.config/kcd/cert.pem"

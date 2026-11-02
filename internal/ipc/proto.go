@@ -47,6 +47,7 @@ const (
 	CmdRemoteVolumeList     = "remote_volume_list"
 	CmdRemoteVolumeSet      = "remote_volume_set"
 	CmdRemoteVolumeMute     = "remote_volume_mute"
+	CmdHello                = "hello"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -58,6 +59,24 @@ type ConnectPayload struct {
 type Request struct {
 	Command string          `json:"cmd"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// HelloPayload identifies a client asking for capability discovery.
+type HelloPayload struct {
+	Client        string `json:"client,omitempty"`
+	ClientVersion string `json:"clientVersion,omitempty"`
+	APIVersions   []int  `json:"apiVersions,omitempty"`
+}
+
+// HelloResponse describes the additive IPC surface supported by the daemon.
+type HelloResponse struct {
+	APIVersion    int             `json:"apiVersion"`
+	DaemonVersion string          `json:"daemonVersion"`
+	Commands      []string        `json:"commands"`
+	Events        []string        `json:"events"`
+	OptInEvents   []string        `json:"optInEvents"`
+	Plugins       map[string]bool `json:"plugins"`
+	Features      []string        `json:"features"`
 }
 
 // WatchPayload is used for CmdWatch to configure event streaming.

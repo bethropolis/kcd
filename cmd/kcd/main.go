@@ -13,6 +13,8 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/daemon"
 	"github.com/bethropolis/kcd/internal/doctor"
+	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/pkg/client"
 	"github.com/urfave/cli/v2"
 )
@@ -24,7 +26,7 @@ var (
 )
 
 func getClient(c *cli.Context) (*client.Client, error) {
-	cfgPath := c.String("config")
+	cfgPath := configPathFor(c)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -36,6 +38,13 @@ func getClient(c *cli.Context) (*client.Client, error) {
 		PairListenTimeout: pairListenDeadline(config.Duration(cfg.Pairing.ListenTimeout)),
 		SftpTimeout:       sftpCredentialDeadline(cfg.SFTP.CredentialsTimeoutSecs),
 	}, nil
+}
+
+func configPathFor(c *cli.Context) string {
+	if c.IsSet("config") {
+		return c.String("config")
+	}
+	return config.DefaultConfigPath()
 }
 
 func reportConfigWarnings(cfg *config.Config) {
@@ -74,12 +83,18 @@ func main() {
 
 	daemon.Version = version
 
-	app := &cli.App{
+	var app *cli.App
+	app = &cli.App{
 		Name:                 "kcd",
 		Usage:                "KDE Connect daemon and client",
 		Version:              fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
 		EnableBashCompletion: true,
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "instance",
+				Usage:   "Named isolated daemon instance",
+				EnvVars: []string{"KCD_INSTANCE"},
+			},
 			&cli.StringFlag{
 				Name:    "config",
 				Value:   config.DefaultConfigPath(),
@@ -92,14 +107,57 @@ func main() {
 				EnvVars: []string{"KCD_LOG_LEVEL"},
 			},
 		},
+		Before: func(c *cli.Context) error {
+			if instance := c.String("instance"); instance != "" {
+				return os.Setenv("KCD_INSTANCE", instance)
+			}
+			return nil
+		},
 		Commands: []*cli.Command{
 			configCmd,
+			{
+				Name:  "version",
+				Usage: "Show daemon and IPC capability information",
+				Flags: []cli.Flag{&cli.BoolFlag{Name: "json", Usage: "Output capability JSON"}},
+				Action: func(c *cli.Context) error {
+					if !c.Bool("json") {
+						fmt.Println(app.Version)
+						return nil
+					}
+					cfg, err := config.Load(configPathFor(c))
+					if err != nil {
+						return err
+					}
+					pluginState := map[string]bool{}
+					for _, name := range []string{"Pair", "Battery", "Clipboard", "Notification", "Share", "RunCommand", "MPRIS", "Ping", "Telephony", "Connectivity", "Mousepad", "SFTP", "FindMyPhone", "LockDevice", "SystemVolume", "SMS", "Contacts", "Presenter", "FindThisDevice", "RemoteSystemVolume"} {
+						pluginState[name] = cfg.PluginEnabledForDevice("", name)
+					}
+					commands := make([]string, 0, len(app.Commands))
+					for _, command := range app.Commands {
+						commands = append(commands, command.Name)
+					}
+					data, err := json.MarshalIndent(ipc.HelloResponse{
+						APIVersion:    2,
+						DaemonVersion: version,
+						Commands:      commands,
+						Events:        events.AllTypes(),
+						OptInEvents:   []string{string(events.TypeSMSIncoming), string(events.TypeSMSAttachment)},
+						Plugins:       pluginState,
+						Features:      []string{"errorCodes", "keepAlive", "prompts", "config"},
+					}, "", "  ")
+					if err != nil {
+						return err
+					}
+					fmt.Println(string(data))
+					return nil
+				},
+			},
 			{
 
 				Name:  "daemon",
 				Usage: "Run the kcd daemon",
 				Action: func(c *cli.Context) error {
-					configPath := c.String("config")
+					configPath := configPathFor(c)
 					cfg, err := config.Load(configPath)
 					if err != nil {
 						return fmt.Errorf("failed to load config: %w", err)

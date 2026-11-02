@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -119,12 +121,31 @@ func StateDir() string {
 		home, _ := os.UserHomeDir()
 		stateHome = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(stateHome, "kcd")
+	return instanceDir(filepath.Join(stateHome, "kcd"))
 }
 
 // StatePath returns the path to the device state file.
 func StatePath() string {
 	return filepath.Join(StateDir(), "devices.json")
+}
+
+// DefaultCacheDir returns the cache base directory for the active instance.
+func DefaultCacheDir() string {
+	cacheHome := os.Getenv("XDG_CACHE_HOME")
+	if cacheHome == "" {
+		home, _ := os.UserHomeDir()
+		cacheHome = filepath.Join(home, ".cache")
+	}
+	return instanceDir(filepath.Join(cacheHome, "kcd"))
+}
+
+// DefaultRuntimeDir returns the runtime base directory for the active instance.
+func DefaultRuntimeDir() string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = filepath.Join("/run/user", fmt.Sprintf("%d", os.Getuid()))
+	}
+	return instanceDir(filepath.Join(runtimeDir, "kcd"))
 }
 
 // DefaultMountDir puts mounts where nothing routinely deletes them: mounts
@@ -144,17 +165,87 @@ func DefaultConfigPath() string {
 		home, _ := os.UserHomeDir()
 		configHome = filepath.Join(home, ".config")
 	}
-	return filepath.Join(configHome, "kcd", "kcd.toml")
+	return filepath.Join(instanceDir(filepath.Join(configHome, "kcd")), "kcd.toml")
 }
 
 // DefaultSocketPath returns the default IPC socket path.
 func DefaultSocketPath() string {
-	uid := fmt.Sprintf("%d", os.Getuid())
-	rtDir := os.Getenv("XDG_RUNTIME_DIR")
-	if rtDir == "" {
-		rtDir = filepath.Join("/run/user", uid)
+	return filepath.Join(DefaultRuntimeDir(), "kcd.sock")
+}
+
+func instanceDir(base string) string {
+	instance := strings.TrimSpace(os.Getenv("KCD_INSTANCE"))
+	if instance == "" {
+		return base
 	}
-	return filepath.Join(rtDir, "kcd", "kcd.sock")
+	instance = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, instance)
+	return base + "-" + instance
+}
+
+func applyEnvOverrides(cfg *Config) error {
+	for _, entry := range os.Environ() {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 || !strings.HasPrefix(parts[0], "KCD_") || parts[0] == "KCD_CONFIG" || parts[0] == "KCD_LOG_LEVEL" || parts[0] == "KCD_INSTANCE" {
+			continue
+		}
+		path := strings.SplitN(strings.ToLower(strings.TrimPrefix(parts[0], "KCD_")), "__", 2)
+		if len(path) != 2 {
+			continue
+		}
+		if err := setEnvField(reflect.ValueOf(cfg).Elem(), path[0], path[1], parts[1]); err != nil {
+			return fmt.Errorf("config: environment override %s: %w", parts[0], err)
+		}
+	}
+	return nil
+}
+
+func setEnvField(root reflect.Value, section, key, raw string) error {
+	for i := 0; i < root.NumField(); i++ {
+		field := root.Type().Field(i)
+		if strings.Split(field.Tag.Get("toml"), ",")[0] != section {
+			continue
+		}
+		target := root.Field(i)
+		if target.Kind() != reflect.Struct {
+			return fmt.Errorf("%s is not a section", section)
+		}
+		for j := 0; j < target.NumField(); j++ {
+			child := target.Type().Field(j)
+			if strings.Split(child.Tag.Get("toml"), ",")[0] != key {
+				continue
+			}
+			return setReflectValue(target.Field(j), raw)
+		}
+		return fmt.Errorf("unknown key %s.%s", section, key)
+	}
+	return fmt.Errorf("unknown section %s", section)
+}
+
+func setReflectValue(target reflect.Value, raw string) error {
+	switch target.Kind() {
+	case reflect.String:
+		target.SetString(raw)
+	case reflect.Bool:
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return err
+		}
+		target.SetBool(value)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		value, err := strconv.ParseInt(raw, 10, target.Type().Bits())
+		if err != nil {
+			return err
+		}
+		target.SetInt(value)
+	default:
+		return fmt.Errorf("unsupported value type %s", target.Type())
+	}
+	return nil
 }
 
 // configPath returns a path in the kcd config directory.

@@ -1,3 +1,10 @@
+# Capability Discovery
+
+Clients may send `{"cmd":"hello"}` to receive the additive IPC capability
+document. It includes `apiVersion`, daemon version, supported commands and
+events, opt-in event names, enabled plugin states, and feature flags. The same
+document is available locally through `kcd version --json`.
+
 # IPC Protocol Reference
 
 kcd exposes a Unix socket for inter-process communication. This document is the

@@ -3,6 +3,7 @@ package ipc
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
@@ -48,6 +49,16 @@ func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *
 // Register adds a custom handler for a given command.
 func (h *Handler) Register(command string, fn func(Request) Response) {
 	h.routes[command] = fn
+}
+
+// Commands returns the registered and built-in IPC command names.
+func (h *Handler) Commands() []string {
+	commands := []string{CmdDevices, CmdPair, CmdPairListen, CmdUnpair, CmdPing}
+	for command := range h.routes {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+	return commands
 }
 
 // SetPairDialHook sets the hook used to connect to a disconnected device on
