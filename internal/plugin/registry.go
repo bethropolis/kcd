@@ -16,11 +16,19 @@ const defaultDispatchTimeout = 15 * time.Second
 
 // Registry manages the set of active plugins and routes packets to them.
 type Registry struct {
-	plugins map[string]Plugin // keyed by packet type string
-	byName  map[string]Plugin // keyed by plugin.Name()
-	list    []Plugin          // ordered list for iteration
-	mu      sync.RWMutex
-	logger  log.Logger
+	plugins             map[string]Plugin // keyed by packet type string
+	byName              map[string]Plugin // keyed by plugin.Name()
+	list                []Plugin          // ordered list for iteration
+	mu                  sync.RWMutex
+	logger              log.Logger
+	devicePluginEnabled func(deviceID, pluginName string) bool
+}
+
+// SetDevicePluginPolicy installs per-device inbound plugin gating.
+func (r *Registry) SetDevicePluginPolicy(policy func(string, string) bool) {
+	r.mu.Lock()
+	r.devicePluginEnabled = policy
+	r.mu.Unlock()
 }
 
 // NewRegistry creates a new plugin registry.
@@ -65,6 +73,13 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 	if !ok {
 		// No plugin registered for this type — safely ignore
 		r.logger.Debug("unhandled packet type", log.String("type", pkt.Type))
+		return true
+	}
+	r.mu.RLock()
+	allowed := r.devicePluginEnabled == nil || r.devicePluginEnabled(dev.ID(), p.Name())
+	r.mu.RUnlock()
+	if !allowed {
+		r.logger.Debug("plugin disabled for device", log.String("plugin", p.Name()), log.String("device_id", dev.ID()))
 		return true
 	}
 

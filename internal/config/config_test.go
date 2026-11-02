@@ -181,6 +181,21 @@ func TestDurationAliasesPreserveLegacyValues(t *testing.T) {
 	}
 }
 
+func TestPerDevicePluginOverrideOnlyRestrictsGlobalPlugin(t *testing.T) {
+	cfg := Defaults()
+	cfg.Devices["phone"] = DeviceConfig{Plugins: map[string]bool{"runcommand": false}}
+	if cfg.PluginEnabledForDevice("phone", "RunCommand") {
+		t.Fatal("per-device disabled plugin was allowed")
+	}
+	if !cfg.PluginEnabledForDevice("tablet", "RunCommand") {
+		t.Fatal("unconfigured device lost globally enabled plugin")
+	}
+	cfg.Plugins.RunCommand = false
+	if cfg.PluginEnabledForDevice("tablet", "RunCommand") {
+		t.Fatal("per-device override re-enabled globally disabled plugin")
+	}
+}
+
 func fileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)

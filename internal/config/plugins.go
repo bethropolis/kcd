@@ -54,6 +54,15 @@ type PluginConfig struct {
 	RemoteSystemVolume bool `toml:"remotesystemvolume"`
 }
 
+// DeviceConfig restricts globally enabled features for one paired device.
+type DeviceConfig struct {
+	Alias         string             `toml:"alias"`
+	DownloadDir   string             `toml:"download_dir"`
+	Plugins       map[string]bool    `toml:"plugins"`
+	Notifications NotificationConfig `toml:"notifications"`
+	Commands      map[string]string  `toml:"commands"`
+}
+
 type BatteryConfig struct {
 	NotifyLow   bool   `toml:"notify_low"`
 	NotifyFull  bool   `toml:"notify_full"`
@@ -97,6 +106,9 @@ type ShareConfig struct {
 	AutoOpen          bool         `toml:"auto_open"`
 	OpenCommand       string       `toml:"open_command"`
 	Overwrite         bool         `toml:"overwrite"`
+	Accept            string       `toml:"accept" json:"-"`
+	TextAction        string       `toml:"text_action" json:"-"`
+	URLAction         string       `toml:"url_action" json:"-"`
 }
 
 type SFTPConfig struct {
@@ -121,10 +133,12 @@ type PingConfig struct {
 }
 
 type PairingConfig struct {
-	TimeoutSecs   int          `toml:"timeout_secs"`
-	Timeout       FlexDuration `toml:"timeout" json:"-"`
-	IntentTTL     string       `toml:"intent_ttl"`
-	ListenTimeout string       `toml:"listen_timeout"`
+	TimeoutSecs    int          `toml:"timeout_secs"`
+	Timeout        FlexDuration `toml:"timeout" json:"-"`
+	IntentTTL      string       `toml:"intent_ttl"`
+	ListenTimeout  string       `toml:"listen_timeout"`
+	AcceptRequests string       `toml:"accept_requests" json:"-"`
+	AskFallback    string       `toml:"ask_fallback" json:"-"`
 }
 
 type MousepadConfig struct {
@@ -196,6 +210,9 @@ func (c *ShareConfig) Defaults() {
 	c.PortMax = protocol.DefaultSidechannelPortMax
 	c.AcceptTimeoutSecs = 120
 	c.OpenCommand = "xdg-open"
+	c.Accept = "always"
+	c.TextAction = "clipboard"
+	c.URLAction = "open"
 }
 
 func (c *SFTPConfig) Defaults() {
@@ -217,6 +234,8 @@ func (c *PairingConfig) Defaults() {
 	c.TimeoutSecs = 30
 	c.IntentTTL = "5m"
 	c.ListenTimeout = "60s"
+	c.AcceptRequests = "ask"
+	c.AskFallback = "reject"
 }
 
 func (c *MousepadConfig) Defaults() {

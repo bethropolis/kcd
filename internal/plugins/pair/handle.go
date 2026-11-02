@@ -44,6 +44,10 @@ func (p *PairPlugin) handlePairRequest(_ context.Context, dev *device.Device, bo
 		return nil
 
 	case device.StatePaired, device.StateUnpaired, device.StateUnknown:
+		if state != device.StateUnknown && p.cfg.AcceptRequests == "never" {
+			p.sendPairReject(dev)
+			return nil
+		}
 		if !p.validateRequestTimestamp(dev, body.Timestamp) {
 			return nil
 		}

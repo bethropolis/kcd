@@ -19,6 +19,10 @@ import (
 )
 
 func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+	if p.cfg.Accept == "never" {
+		p.Logger.Debug("share: inbound share disabled")
+		return nil
+	}
 	var body ShareBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return fmt.Errorf("share: parse body: %w", err)
@@ -29,11 +33,13 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareText, dev.ID(), map[string]string{"text": body.Text})
 		}
-		go func() {
-			if err := desktopclipboard.SetText(context.Background(), body.Text, nil); err != nil {
-				p.Logger.Warn("share: clipboard update failed", log.Error(err))
-			}
-		}()
+		if p.cfg.TextAction == "clipboard" {
+			go func() {
+				if err := desktopclipboard.SetText(context.Background(), body.Text, nil); err != nil {
+					p.Logger.Warn("share: clipboard update failed", log.Error(err))
+				}
+			}()
+		}
 		return nil
 	}
 
@@ -44,7 +50,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		}
 		// Only http(s) may reach xdg-open (other schemes hit unrelated
 		// handlers); the URL event still emits either way.
-		if isOpenableURL(body.Url) {
+		if p.cfg.URLAction == "open" && isOpenableURL(body.Url) {
 			sysexec.RunAsync(p.Logger, "xdg-open", body.Url)
 		} else {
 			p.Logger.Warn("share: refusing to open non-http(s) URL",

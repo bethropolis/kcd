@@ -43,6 +43,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	}
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
+	plugins.SetDevicePluginPolicy(cfg.PluginEnabledForDevice)
 	pairPlugin.SetLifecycleCallbacks(plugins.OnConnect, plugins.OnDisconnect)
 	if cfg.Plugins.Battery {
 		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger, cfg.Notifications))

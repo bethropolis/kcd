@@ -37,6 +37,7 @@ type Config struct {
 	Plugins             PluginConfig                 `toml:"plugins"`
 	Commands            map[string]string            `toml:"commands"`
 	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
+	Devices             map[string]DeviceConfig      `toml:"devices" json:"-"`
 	Notifications       NotificationConfig           `toml:"notifications"`
 	Battery             BatteryConfig                `toml:"battery"`
 	MPRIS               MPRISConfig                  `toml:"mpris"`
@@ -82,6 +83,7 @@ func Defaults() *Config {
 	c.Plugins.Defaults()
 	c.Commands = make(map[string]string)
 	c.CommandsPerDevice = make(map[string]map[string]string)
+	c.Devices = make(map[string]DeviceConfig)
 	c.Battery.Defaults()
 	c.MPRIS = MPRISConfig{PollWhilePlaying: true, PositionInterval: "2s"}
 	c.Notification.Defaults()
@@ -95,6 +97,33 @@ func Defaults() *Config {
 	c.PruneStaleThreshold = "15m"
 
 	return c
+}
+
+// PluginEnabledForDevice reports whether a globally enabled plugin is allowed
+// for a device. Per-device configuration can only restrict global settings.
+func (c *Config) PluginEnabledForDevice(deviceID, pluginName string) bool {
+	if !globalPluginEnabled(c.Plugins, strings.ToLower(pluginName)) {
+		return false
+	}
+	override, ok := c.Devices[deviceID]
+	if !ok || override.Plugins == nil {
+		return true
+	}
+	enabled, ok := override.Plugins[strings.ToLower(pluginName)]
+	return !ok || enabled
+}
+
+func globalPluginEnabled(p PluginConfig, name string) bool {
+	values := map[string]bool{
+		"battery": p.Battery, "clipboard": p.Clipboard, "notification": p.Notification,
+		"share": p.Share, "runcommand": p.RunCommand, "mpris": p.MPRIS, "ping": p.Ping,
+		"telephony": p.Telephony, "connectivity": p.Connectivity, "mousepad": p.Mousepad,
+		"sftp": p.SFTP, "findmyphone": p.FindMyPhone, "lockdevice": p.LockDevice,
+		"systemvolume": p.SystemVolume, "pausemusic": p.PauseMusic, "sms": p.SMS,
+		"contacts": p.Contacts, "presenter": p.Presenter, "findthisdevice": p.FindThisDevice,
+		"remotesystemvolume": p.RemoteSystemVolume,
+	}
+	return values[name]
 }
 
 // Load reads a TOML config file and merges it with defaults.
