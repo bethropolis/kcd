@@ -13,6 +13,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/netutil"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
@@ -206,15 +207,20 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 
 	// Accept loop
 	go func() {
+		var acceptBackoff netutil.ErrorBackoff
 		for {
 			conn, err := tcpListener.Accept()
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				logger.Error("accept error", log.Error(err))
+				logger.Warn("accept error", log.Error(err))
+				if !acceptBackoff.Wait(ctx) {
+					return
+				}
 				continue
 			}
+			acceptBackoff.Reset()
 
 			go func(c net.Conn) {
 				defer func() {

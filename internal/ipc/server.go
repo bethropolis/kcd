@@ -12,6 +12,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/netutil"
 )
 
 // Server handles listening for JSON IPC requests over a Unix socket.
@@ -100,15 +101,20 @@ func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) erro
 		log.Bool("socket_activated", activated),
 	)
 
+	var acceptBackoff netutil.ErrorBackoff
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			s.logger.Error("ipc socket accept error", log.Error(err))
+			s.logger.Warn("ipc socket accept error", log.Error(err))
+			if !acceptBackoff.Wait(ctx) {
+				return nil
+			}
 			continue
 		}
+		acceptBackoff.Reset()
 
 		go s.handleConnection(conn)
 	}
