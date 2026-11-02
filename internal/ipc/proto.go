@@ -58,6 +58,7 @@ type ConnectPayload struct {
 // Request is sent from the client to the local daemon.
 type Request struct {
 	Command string          `json:"cmd"`
+	ID      json.RawMessage `json:"id,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
@@ -66,6 +67,7 @@ type HelloPayload struct {
 	Client        string `json:"client,omitempty"`
 	ClientVersion string `json:"clientVersion,omitempty"`
 	APIVersions   []int  `json:"apiVersions,omitempty"`
+	KeepAlive     bool   `json:"keepAlive,omitempty"`
 }
 
 // HelloResponse describes the additive IPC surface supported by the daemon.
@@ -86,9 +88,36 @@ type WatchPayload struct {
 
 // Response is sent from the daemon back to the client.
 type Response struct {
-	OK    bool            `json:"ok"`
-	Error string          `json:"error,omitempty"`
-	Data  json.RawMessage `json:"data,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	OK      bool            `json:"ok"`
+	Error   string          `json:"error,omitempty"`
+	Code    string          `json:"code,omitempty"`
+	Details json.RawMessage `json:"details,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+const (
+	CodeInvalidPayload       = "invalid_payload"
+	CodeUnknownCommand       = "unknown_command"
+	CodeDeviceNotFound       = "device_not_found"
+	CodeDeviceNotConnected   = "device_not_connected"
+	CodeDeviceNotPaired      = "device_not_paired"
+	CodePluginDisabled       = "plugin_disabled"
+	CodePluginDisabledDevice = "plugin_disabled_for_device"
+	CodeTimeout              = "timeout"
+	CodeBusy                 = "busy"
+	CodeNotSupported         = "not_supported"
+	CodePermissionDenied     = "permission_denied"
+	CodeInternal             = "internal"
+)
+
+// Err creates a stable, machine-readable IPC error response.
+func Err(code, message string, details any) Response {
+	response := Response{OK: false, Code: code, Error: message}
+	if details != nil {
+		response.Details, _ = json.Marshal(details)
+	}
+	return response
 }
 
 // PairListenResult is returned by CmdPairListen on success.

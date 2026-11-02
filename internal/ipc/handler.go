@@ -85,7 +85,7 @@ func (h *Handler) HandleRequest(req Request) Response {
 	case CmdPing:
 		return h.handlePing(req.Payload)
 	default:
-		return Response{OK: false, Error: "unknown command"}
+		return Err(CodeUnknownCommand, "unknown command", map[string]string{"command": req.Command})
 	}
 }
 
@@ -116,7 +116,7 @@ func (h *Handler) saveDevices() error {
 func (h *Handler) handlePair(payload []byte) Response {
 	var p PairPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return Response{OK: false, Error: "invalid payload"}
+		return Err(CodeInvalidPayload, "invalid payload", nil)
 	}
 	// Declining a request and unpairing send the same pair=false packet.
 	if p.Reject {
@@ -125,7 +125,7 @@ func (h *Handler) handlePair(payload []byte) Response {
 
 	dev, ok := h.devices.Get(p.DeviceID)
 	if !ok {
-		return Response{OK: false, Error: "device not found"}
+		return Err(CodeDeviceNotFound, "device not found", map[string]string{"deviceId": p.DeviceID})
 	}
 
 	// Pairing needs a live TLS connection, which background dial never opens
@@ -174,12 +174,12 @@ func (h *Handler) handlePair(payload []byte) Response {
 func (h *Handler) handleUnpair(payload []byte) Response {
 	var p DevicePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return Response{OK: false, Error: "invalid payload"}
+		return Err(CodeInvalidPayload, "invalid payload", nil)
 	}
 
 	dev, ok := h.devices.Get(p.DeviceID)
 	if !ok {
-		return Response{OK: false, Error: "device not found"}
+		return Err(CodeDeviceNotFound, "device not found", map[string]string{"deviceId": p.DeviceID})
 	}
 
 	if h.pairPlugin != nil {

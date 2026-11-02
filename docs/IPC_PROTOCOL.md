@@ -25,6 +25,11 @@ daemon without importing Go packages.
   socket buffer is the practical bound). Do not send payloads exceeding ~1 MiB
   over IPC; use the side-channel TLS port for file transfers instead.
 
+Sending `hello` with `{"keepAlive":true}` keeps the socket open. Each request
+may include an `id` (string or number), which is echoed in its response.
+Requests after the handshake may be processed concurrently and responses can
+arrive out of order. Legacy requests remain one request per connection.
+
 ---
 
 ## 2. Request / Response Format
@@ -60,6 +65,11 @@ change between releases. Do not parse it programmatically beyond logging.
 ```json
 {"ok": false, "error": "device not found"}
 ```
+
+Stable codes include `invalid_payload`, `unknown_command`,
+`device_not_found`, `device_not_connected`, `device_not_paired`,
+`plugin_disabled`, `plugin_disabled_for_device`, `timeout`, `busy`,
+`not_supported`, `permission_denied`, and `internal`.
 
 ---
 

@@ -80,6 +80,9 @@ func (c *Client) callWithTimeout(cmd string, payload interface{}, timeout time.D
 	}
 
 	if !res.OK {
+		if res.Code != "" {
+			return nil, &Error{Code: res.Code, Message: res.Error, Details: res.Details}
+		}
 		return nil, fmt.Errorf("daemon error: %s", res.Error)
 	}
 
