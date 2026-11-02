@@ -24,6 +24,26 @@ type Registry struct {
 	devicePluginEnabled func(deviceID, pluginName string) bool
 }
 
+type policySender struct {
+	device.Sender
+	allowed    func(string, string) bool
+	pluginName string
+	logger     log.Logger
+}
+
+func (s *policySender) Send(pkt *protocol.Packet) error {
+	if s.allowed != nil && !s.allowed(s.ID(), s.pluginName) {
+		s.logger.Debug("dropping outbound packet for disabled plugin",
+			log.String("plugin", s.pluginName),
+			log.String("device_id", s.ID()),
+			log.String("type", pkt.Type),
+		)
+		protocol.ReleasePacket(pkt)
+		return nil
+	}
+	return s.Sender.Send(pkt)
+}
+
 // SetDevicePluginPolicy installs per-device inbound plugin gating.
 func (r *Registry) SetDevicePluginPolicy(policy func(string, string) bool) {
 	r.mu.Lock()
@@ -93,6 +113,7 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	pluginDev := r.senderFor(p, dev)
 
 	done := make(chan error, 1)
 	go func() {
@@ -106,7 +127,7 @@ func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protoco
 				done <- nil // unblock select
 			}
 		}()
-		done <- p.Handle(ctx, dev, pkt)
+		done <- p.Handle(ctx, pluginDev, pkt)
 	}()
 
 	select {
@@ -155,14 +176,26 @@ func (r *Registry) All() []Plugin {
 // OnConnect is called when a device connects. It calls OnConnect on all registered plugins.
 func (r *Registry) OnConnect(dev device.Sender) {
 	for _, p := range r.All() {
-		p.OnConnect(dev)
+		p.OnConnect(r.senderFor(p, dev))
 	}
 }
 
 // OnDisconnect is called when a device disconnects. It calls OnDisconnect on all registered plugins.
 func (r *Registry) OnDisconnect(dev device.Sender) {
 	for _, p := range r.All() {
-		p.OnDisconnect(dev)
+		p.OnDisconnect(r.senderFor(p, dev))
+	}
+}
+
+func (r *Registry) senderFor(p Plugin, dev device.Sender) device.Sender {
+	r.mu.RLock()
+	policy := r.devicePluginEnabled
+	r.mu.RUnlock()
+	return &policySender{
+		Sender:     dev,
+		allowed:    policy,
+		pluginName: p.Name(),
+		logger:     r.logger,
 	}
 }
 

@@ -114,6 +114,39 @@ func (c *Config) Save(path string) error {
 	return nil
 }
 
+// WriteAPIDropIn atomically writes configuration values from the IPC API.
+func WriteAPIDropIn(path string, values map[string]any) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("config: create drop-in directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".ipc-*.toml")
+	if err != nil {
+		return fmt.Errorf("config: create drop-in: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: chmod drop-in: %w", err)
+	}
+	if err := toml.NewEncoder(tmp).Encode(values); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: encode drop-in: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: sync drop-in: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config: close drop-in: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("config: install drop-in: %w", err)
+	}
+	return nil
+}
+
 // StateDir returns kcd's state directory.
 func StateDir() string {
 	stateHome := os.Getenv("XDG_STATE_HOME")

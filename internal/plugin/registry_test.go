@@ -37,7 +37,8 @@ func (m *mockPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 }
 
 type mockSender struct {
-	id string
+	id   string
+	sent int
 }
 
 func (m *mockSender) ID() string                     { return m.id }
@@ -45,7 +46,7 @@ func (m *mockSender) Name() string                   { return "mock" }
 func (m *mockSender) SetName(_ string)               {}
 func (m *mockSender) State() device.PairingState     { return device.StatePaired }
 func (m *mockSender) SetState(_ device.PairingState) {}
-func (m *mockSender) Send(_ *protocol.Packet) error  { return nil }
+func (m *mockSender) Send(_ *protocol.Packet) error  { m.sent++; return nil }
 func (m *mockSender) IsConnected() bool              { return true }
 func (m *mockSender) RemoteIP() net.IP               { return nil }
 func (m *mockSender) PeerCert() *x509.Certificate    { return nil }
@@ -120,5 +121,32 @@ func TestDispatch_UnregisteredType_ReturnsTrue(t *testing.T) {
 	ok := r.Dispatch(context.Background(), &mockSender{id: "dev3"}, pkt)
 	if !ok {
 		t.Error("Dispatch returned false for unregistered type, expected true")
+	}
+}
+
+func TestDispatch_OutboundPolicyBlocksPluginSender(t *testing.T) {
+	logger := log.NewDevelopment()
+	r := NewRegistry(logger)
+	r.SetDevicePluginPolicy(func(deviceID, pluginName string) bool {
+		return deviceID != "blocked" || pluginName != "restricted"
+	})
+	sender := &mockSender{id: "blocked"}
+	r.Register(&mockPlugin{
+		name:          "restricted",
+		incomingTypes: []string{"test.restricted"},
+		handle: func(_ context.Context, dev device.Sender, _ *protocol.Packet) error {
+			pkt := protocol.AcquirePacket()
+			pkt.Type = "test.outbound"
+			return dev.Send(pkt)
+		},
+	})
+
+	pkt := protocol.AcquirePacket()
+	pkt.Type = "test.restricted"
+	if !r.Dispatch(context.Background(), sender, pkt) {
+		t.Fatal("Dispatch returned false for a fast plugin")
+	}
+	if sender.sent != 0 {
+		t.Fatalf("blocked plugin sent %d packets", sender.sent)
 	}
 }

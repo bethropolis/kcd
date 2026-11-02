@@ -18,6 +18,7 @@ type recordingRunner struct {
 	mu    sync.Mutex
 	calls []string
 	args  [][]string
+	env   [][]string
 	done  chan struct{}
 }
 
@@ -25,9 +26,18 @@ func (r *recordingRunner) Run(context.Context, string, ...string) ([]byte, error
 func (r *recordingRunner) Output(context.Context, string, ...string) ([]byte, error) { return nil, nil }
 func (r *recordingRunner) LookPath(string) (string, error)                           { return "/bin/true", nil }
 func (r *recordingRunner) RunInput(_ context.Context, input, name string, args ...string) ([]byte, error) {
+	return r.record(input, name, nil, args...)
+}
+
+func (r *recordingRunner) RunInputEnv(_ context.Context, input, name string, env []string, args ...string) ([]byte, error) {
+	return r.record(input, name, env, args...)
+}
+
+func (r *recordingRunner) record(input, name string, env []string, args ...string) ([]byte, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, input)
 	r.args = append(r.args, append([]string{name}, args...))
+	r.env = append(r.env, append([]string(nil), env...))
 	r.mu.Unlock()
 	select {
 	case r.done <- struct{}{}:
@@ -57,6 +67,9 @@ func TestRunnerRunsHookWithEventInputAndPlaceholders(t *testing.T) {
 	defer runner.mu.Unlock()
 	if got := runner.args[0]; strings.Join(got, " ") != "notify battery.threshold dev1 12" {
 		t.Fatalf("argv = %#v", got)
+	}
+	if got := strings.Join(runner.env[0], " "); got != "KCD_EVENT_TYPE=battery.threshold KCD_DEVICE_ID=dev1" {
+		t.Fatalf("env = %q", got)
 	}
 	var event events.Event
 	if err := json.Unmarshal([]byte(runner.calls[0]), &event); err != nil {

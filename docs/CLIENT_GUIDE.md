@@ -72,6 +72,25 @@ if resp["ok"]:
 
 ## 3. Device Lifecycle
 
+### Go client package
+
+Go integrations can use `github.com/bethropolis/kcd/pkg/client`. The package
+keeps the existing exported `Client` fields and also provides a constructor
+and capability handshake:
+
+```go
+cl := client.New(socketPath)
+hello, err := cl.Hello()
+if err != nil {
+    return err
+}
+fmt.Println(hello.APIVersion, hello.Features)
+```
+
+`client.APIVersion` is the IPC contract version. Additive capabilities are
+listed by `Hello`; callers should check those feature names rather than parse
+the daemon version string.
+
 ### 3.1 Listing Devices
 
 The `devices` command returns all known devices (paired and unpaired).

@@ -71,6 +71,16 @@ func (m *PromptManager) Respond(promptID, choice string) bool {
 	if !ok {
 		return false
 	}
+	valid := false
+	for _, option := range waiter.prompt.Options {
+		if option == choice {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return false
+	}
 	select {
 	case waiter.choice <- choice:
 		return true

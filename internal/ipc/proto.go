@@ -4,6 +4,9 @@ package ipc
 
 import "encoding/json"
 
+// APIVersion changes only when the IPC contract makes a breaking change.
+const APIVersion = 2
+
 // Supported IPC command constants.
 const (
 	CmdDevices              = "devices"
@@ -50,6 +53,7 @@ const (
 	CmdHello                = "hello"
 	CmdConfigGet            = "config_get"
 	CmdConfigSchema         = "config_schema"
+	CmdConfigSet            = "config_set"
 	CmdReload               = "reload"
 	CmdPromptRespond        = "prompt_respond"
 )
@@ -89,6 +93,11 @@ type HelloResponse struct {
 // supported API-visible settings.
 type ConfigGetPayload struct {
 	Keys []string `json:"keys,omitempty"`
+}
+
+// ConfigSetPayload contains allowlisted API configuration values.
+type ConfigSetPayload struct {
+	Values map[string]json.RawMessage `json:"values"`
 }
 
 // ReloadResponse reports which settings were applied without restart.

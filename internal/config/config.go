@@ -17,18 +17,19 @@ import (
 
 // Config holds all daemon configuration.
 type Config struct {
-	ConfigVersion int    `toml:"config_version"`
-	DeviceID      string `toml:"device_id"`
-	DeviceName    string `toml:"device_name"`
-	DeviceType    string `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
-	CertFile      string `toml:"cert_file"`
-	KeyFile       string `toml:"key_file"`
-	SocketPath    string `toml:"socket_path"`
-	StateDir      string `toml:"state_dir" json:"-"`
-	CacheDir      string `toml:"cache_dir" json:"-"`
-	RuntimeDir    string `toml:"runtime_dir" json:"-"`
-	DownloadDir   string `toml:"download_dir"`
-	TCPPort       int    `toml:"tcp_port"`
+	ConfigVersion int       `toml:"config_version"`
+	DeviceID      string    `toml:"device_id"`
+	DeviceName    string    `toml:"device_name"`
+	DeviceType    string    `toml:"device_type"` // "desktop", "laptop", "phone", "tablet"
+	CertFile      string    `toml:"cert_file"`
+	KeyFile       string    `toml:"key_file"`
+	SocketPath    string    `toml:"socket_path"`
+	StateDir      string    `toml:"state_dir" json:"-"`
+	CacheDir      string    `toml:"cache_dir" json:"-"`
+	RuntimeDir    string    `toml:"runtime_dir" json:"-"`
+	IPC           IPCConfig `toml:"ipc" json:"-"`
+	DownloadDir   string    `toml:"download_dir"`
+	TCPPort       int       `toml:"tcp_port"`
 	// EnableBroadcast was removed — broadcast starts automatically with `kcd pair` (listen mode)
 	LogLevel string `toml:"log_level"` // "debug", "info", "warn", "error" (or "quiet")
 	// AutoAcceptPairing was removed in favor of `kcd pair` (listen mode).
@@ -61,6 +62,11 @@ type Config struct {
 
 	ConfigPath string   `toml:"-"` // populated at load time, never written to disk
 	Warnings   []string `toml:"-" json:"-"`
+}
+
+// IPCConfig controls optional local IPC access tiers.
+type IPCConfig struct {
+	ReadOnlySocket string `toml:"readonly_socket"`
 }
 
 // PluginConfig toggles individual plugins on or off.
@@ -129,6 +135,7 @@ func (c *Config) PluginEnabledForDevice(deviceID, pluginName string) bool {
 
 func globalPluginEnabled(p PluginConfig, name string) bool {
 	values := map[string]bool{
+		"pair":    true,
 		"battery": p.Battery, "clipboard": p.Clipboard, "notification": p.Notification,
 		"share": p.Share, "runcommand": p.RunCommand, "mpris": p.MPRIS, "ping": p.Ping,
 		"telephony": p.Telephony, "connectivity": p.Connectivity, "mousepad": p.Mousepad,

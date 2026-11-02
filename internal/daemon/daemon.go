@@ -99,6 +99,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
 	statePath := cfg.StatePath()
+	stateLock, err := config.AcquireStateLock(statePath)
+	if err != nil {
+		return err
+	}
+	defer stateLock.Close() //nolint:errcheck
 	if err := devices.Load(statePath, logger); err != nil {
 		logger.Warn("failed to load devices", log.Error(err))
 	}
@@ -275,6 +280,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			logger.Error("ipc server error", log.Error(err))
 		}
 	}()
+	if cfg.IPC.ReadOnlySocket != "" && cfg.IPC.ReadOnlySocket != cfg.SocketPath {
+		readOnlyServer := ipc.NewReadOnlyServer(cfg.IPC.ReadOnlySocket, handler, logger)
+		go func() {
+			if err := readOnlyServer.Listen(ctx); err != nil {
+				logger.Error("read-only ipc server error", log.Error(err))
+			}
+		}()
+	}
 
 	// 6. Transport Layer
 	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg)

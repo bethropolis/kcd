@@ -138,13 +138,13 @@ func main() {
 						commands = append(commands, command.Name)
 					}
 					data, err := json.MarshalIndent(ipc.HelloResponse{
-						APIVersion:    2,
+						APIVersion:    ipc.APIVersion,
 						DaemonVersion: version,
 						Commands:      commands,
 						Events:        events.AllTypes(),
 						OptInEvents:   []string{string(events.TypeSMSIncoming), string(events.TypeSMSAttachment)},
 						Plugins:       pluginState,
-						Features:      []string{"errorCodes", "keepAlive", "prompts", "config"},
+						Features:      []string{"errorCodes", "keepAlive", "watchResume", "prompts", "config", "schemas"},
 					}, "", "  ")
 					if err != nil {
 						return err

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
@@ -53,6 +55,21 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		data, _ := json.Marshal(configAPISchema())
 		return ipc.Response{OK: true, Data: data}
 	})
+	handler.Register(ipc.CmdConfigSet, func(req ipc.Request) ipc.Response {
+		var payload ipc.ConfigSetPayload
+		if err := json.Unmarshal(req.Payload, &payload); err != nil {
+			return ipc.Err(ipc.CodeInvalidPayload, "invalid payload", nil)
+		}
+		values, err := configAPIWritableValues(payload.Values)
+		if err != nil {
+			return ipc.Err(ipc.CodePermissionDenied, err.Error(), nil)
+		}
+		path := filepath.Join(filepath.Dir(cfg.ConfigPath), "kcd.toml.d", "90-ipc.toml")
+		if err := config.WriteAPIDropIn(path, values); err != nil {
+			return ipc.Err(ipc.CodeInternal, "failed to write configuration", nil)
+		}
+		return ipc.Response{OK: true}
+	})
 	handler.Register(ipc.CmdReload, func(req ipc.Request) ipc.Response {
 		data, _ := json.Marshal(ipc.ReloadResponse{Applied: []string{}, RestartRequired: []string{"config reload requires daemon SIGHUP"}})
 		return ipc.Response{OK: true, Data: data}
@@ -72,13 +89,13 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 			pluginState[p.Name()] = true
 		}
 		data, err := json.Marshal(ipc.HelloResponse{
-			APIVersion:    2,
+			APIVersion:    ipc.APIVersion,
 			DaemonVersion: Version,
 			Commands:      handler.Commands(),
 			Events:        events.AllTypes(),
 			OptInEvents:   eventNames(events.OptInOnly()),
 			Plugins:       pluginState,
-			Features:      []string{"errorCodes", "keepAlive", "prompts", "config"},
+			Features:      []string{"errorCodes", "keepAlive", "watchResume", "prompts", "config", "schemas"},
 		})
 		if err != nil {
 			return ipc.Response{OK: false, Error: "failed to build capability response"}
@@ -133,7 +150,7 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 
 		go func() {
 			incomingCaps, outgoingCaps := plugins.Capabilities()
-			identityPkt, err := protocol.NewIdentityPacket(cfg.DeviceID, cfg.DeviceName, "desktop", cfg.TCPPort, incomingCaps, outgoingCaps)
+			identityPkt, err := buildIdentity(cfg, incomingCaps, outgoingCaps)
 			if err != nil {
 				return
 			}
@@ -263,5 +280,51 @@ func configAPISchema() []map[string]any {
 		{"key": "clipboard.send", "type": "bool", "live": false},
 		{"key": "popups.enabled", "type": "bool", "live": false},
 		{"key": "popups.backend", "type": "string", "enum": []string{"auto", "notify-send", "dbus", "none"}, "live": false},
+		{"key": "ipc.readonly_socket", "type": "string", "live": false},
 	}
+}
+
+func configAPIWritableValues(raw map[string]json.RawMessage) (map[string]any, error) {
+	allowed := map[string]string{
+		"log_level":                  "string",
+		"share.accept":               "string",
+		"clipboard.receive":          "bool",
+		"clipboard.send":             "bool",
+		"popups.enabled":             "bool",
+		"popups.backend":             "string",
+		"runcommand.default_timeout": "string",
+	}
+	result := make(map[string]any)
+	for key, data := range raw {
+		expected, ok := allowed[key]
+		if !ok {
+			return nil, fmt.Errorf("configuration key %q is not writable through IPC", key)
+		}
+		var value any
+		if err := json.Unmarshal(data, &value); err != nil {
+			return nil, fmt.Errorf("invalid value for %s", key)
+		}
+		switch expected {
+		case "string":
+			if _, ok := value.(string); !ok {
+				return nil, fmt.Errorf("configuration key %q requires a string", key)
+			}
+		case "bool":
+			if _, ok := value.(bool); !ok {
+				return nil, fmt.Errorf("configuration key %q requires a boolean", key)
+			}
+		}
+		parts := strings.SplitN(key, ".", 2)
+		if len(parts) == 1 {
+			result[key] = value
+			continue
+		}
+		section, ok := result[parts[0]].(map[string]any)
+		if !ok {
+			section = make(map[string]any)
+			result[parts[0]] = section
+		}
+		section[parts[1]] = value
+	}
+	return result, nil
 }

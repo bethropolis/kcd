@@ -3,6 +3,7 @@ package sysexec
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -33,6 +34,13 @@ func (OSRunner) Output(ctx context.Context, name string, args ...string) ([]byte
 func (OSRunner) RunInput(ctx context.Context, input, name string, args ...string) ([]byte, error) {
 	cmd := newCommand(ctx, name, args...)
 	cmd.Stdin = strings.NewReader(input)
+	return cmd.CombinedOutput()
+}
+
+func (OSRunner) RunInputEnv(ctx context.Context, input, name string, env []string, args ...string) ([]byte, error) {
+	cmd := newCommand(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Env = append(os.Environ(), env...)
 	return cmd.CombinedOutput()
 }
 
@@ -75,6 +83,17 @@ func (e *Exec) Output(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 func (e *Exec) RunInput(ctx context.Context, input, name string, args ...string) ([]byte, error) {
+	return e.runner.RunInput(ctx, input, name, args...)
+}
+
+// RunInputEnv runs a command with additional environment entries when the
+// configured runner supports environment-aware execution.
+func (e *Exec) RunInputEnv(ctx context.Context, input, name string, env []string, args ...string) ([]byte, error) {
+	if runner, ok := e.runner.(interface {
+		RunInputEnv(context.Context, string, string, []string, ...string) ([]byte, error)
+	}); ok {
+		return runner.RunInputEnv(ctx, input, name, env, args...)
+	}
 	return e.runner.RunInput(ctx, input, name, args...)
 }
 

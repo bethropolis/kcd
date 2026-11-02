@@ -4,6 +4,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +94,11 @@ func (r *Runner) run(parent context.Context, event events.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
-	if _, err := r.exec.RunInput(ctx, string(payload), command[0], command[1:]...); err != nil {
+	env := []string{
+		fmt.Sprintf("KCD_EVENT_TYPE=%s", event.Type),
+		fmt.Sprintf("KCD_DEVICE_ID=%s", event.DeviceID),
+	}
+	if _, err := r.exec.RunInputEnv(ctx, string(payload), command[0], env, command[1:]...); err != nil {
 		r.log.Warn("hook command failed", log.String("event", string(event.Type)), log.String("command", command[0]), log.Error(err))
 	}
 }
