@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -114,6 +115,7 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.Warnings = append(cfg.Warnings, unknownKeyWarnings(candidate, metadata.Undecoded())...)
 	}
+	cfg.normalizeDurationAliases()
 
 	if data, err := os.ReadFile(deviceIDPath(path)); err == nil {
 		fileID := strings.TrimSpace(string(data))
@@ -130,6 +132,39 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func (c *Config) normalizeDurationAliases() {
+	if c.Share.AcceptTimeout != 0 {
+		c.Share.AcceptTimeoutSecs = int(c.Share.AcceptTimeout.duration() / time.Second)
+	} else {
+		c.Share.AcceptTimeout = FlexDuration(time.Duration(c.Share.AcceptTimeoutSecs) * time.Second)
+	}
+	if c.SFTP.CredentialsTimeout != 0 {
+		c.SFTP.CredentialsTimeoutSecs = int(c.SFTP.CredentialsTimeout.duration() / time.Second)
+	} else {
+		c.SFTP.CredentialsTimeout = FlexDuration(time.Duration(c.SFTP.CredentialsTimeoutSecs) * time.Second)
+	}
+	if c.SFTP.KeepaliveInterval != 0 {
+		c.SFTP.KeepaliveIntervalSecs = int(c.SFTP.KeepaliveInterval.duration() / time.Second)
+	} else {
+		c.SFTP.KeepaliveInterval = FlexDuration(time.Duration(c.SFTP.KeepaliveIntervalSecs) * time.Second)
+	}
+	if c.Pairing.Timeout != 0 {
+		c.Pairing.TimeoutSecs = int(c.Pairing.Timeout.duration() / time.Second)
+	} else {
+		c.Pairing.Timeout = FlexDuration(time.Duration(c.Pairing.TimeoutSecs) * time.Second)
+	}
+	if c.Notification.Expire != 0 {
+		c.Notification.ExpireMS = int(c.Notification.Expire.duration() / time.Millisecond)
+	} else {
+		c.Notification.Expire = FlexDuration(time.Duration(c.Notification.ExpireMS) * time.Millisecond)
+	}
+	if c.Notification.CancelGrace != 0 {
+		c.Notification.CancelGraceMS = int(c.Notification.CancelGrace.duration() / time.Millisecond)
+	} else {
+		c.Notification.CancelGrace = FlexDuration(time.Duration(c.Notification.CancelGraceMS) * time.Millisecond)
+	}
 }
 
 func configFiles(path string) []string {

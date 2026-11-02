@@ -1,8 +1,35 @@
 package config
 
 import (
+	"time"
+
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+// FlexDuration accepts Go duration strings and bare seconds for config aliases.
+type FlexDuration time.Duration
+
+// UnmarshalText decodes a duration string or a bare number of seconds.
+func (d *FlexDuration) UnmarshalText(text []byte) error {
+	value := string(text)
+	if seconds, err := time.ParseDuration(value); err == nil {
+		*d = FlexDuration(seconds)
+		return nil
+	}
+	seconds, err := time.ParseDuration(value + "s")
+	if err != nil {
+		return err
+	}
+	*d = FlexDuration(seconds)
+	return nil
+}
+
+// MarshalText preserves duration aliases as readable TOML values.
+func (d FlexDuration) MarshalText() ([]byte, error) {
+	return []byte(time.Duration(d).String()), nil
+}
+
+func (d FlexDuration) duration() time.Duration { return time.Duration(d) }
 
 type PluginConfig struct {
 	Battery            bool `toml:"battery"`
@@ -37,12 +64,13 @@ type BatteryConfig struct {
 }
 
 type NotificationPluginConfig struct {
-	Urgency          string `toml:"urgency"`
-	FetchIcons       bool   `toml:"fetch_icons"`
-	IconCacheDir     string `toml:"icon_cache_dir"`
-	MaxBodyLength    int    `toml:"max_body_length"`
-	ExpireMS         int    `toml:"expire_ms"`
-	SkipNonClearable bool   `toml:"skip_non_clearable"`
+	Urgency          string       `toml:"urgency"`
+	FetchIcons       bool         `toml:"fetch_icons"`
+	IconCacheDir     string       `toml:"icon_cache_dir"`
+	MaxBodyLength    int          `toml:"max_body_length"`
+	ExpireMS         int          `toml:"expire_ms"`
+	Expire           FlexDuration `toml:"expire" json:"-"`
+	SkipNonClearable bool         `toml:"skip_non_clearable"`
 	// ReplaceNotifications replaces the popup on same-id re-posts instead of
 	// stacking a new one each time. On by default.
 	ReplaceNotifications bool `toml:"replace_notifications"`
@@ -51,7 +79,8 @@ type NotificationPluginConfig struct {
 	ShowIcons bool `toml:"show_icons"`
 	// CancelGraceMS holds a cancelled popup briefly so a same-id re-post
 	// updates it in place; 0 closes immediately.
-	CancelGraceMS int `toml:"cancel_grace_ms"`
+	CancelGraceMS int          `toml:"cancel_grace_ms"`
+	CancelGrace   FlexDuration `toml:"cancel_grace" json:"-"`
 }
 
 // LockDeviceConfig controls actions a paired peer may request on this session.
@@ -60,23 +89,26 @@ type LockDeviceConfig struct {
 }
 
 type ShareConfig struct {
-	MaxFileSize       int64  `toml:"max_file_size"`
-	PortMin           int    `toml:"port_min"`
-	PortMax           int    `toml:"port_max"`
-	AcceptTimeoutSecs int    `toml:"accept_timeout_secs"`
-	AutoOpen          bool   `toml:"auto_open"`
-	OpenCommand       string `toml:"open_command"`
-	Overwrite         bool   `toml:"overwrite"`
+	MaxFileSize       int64        `toml:"max_file_size"`
+	PortMin           int          `toml:"port_min"`
+	PortMax           int          `toml:"port_max"`
+	AcceptTimeoutSecs int          `toml:"accept_timeout_secs"`
+	AcceptTimeout     FlexDuration `toml:"accept_timeout" json:"-"`
+	AutoOpen          bool         `toml:"auto_open"`
+	OpenCommand       string       `toml:"open_command"`
+	Overwrite         bool         `toml:"overwrite"`
 }
 
 type SFTPConfig struct {
-	MountDir               string   `toml:"mount_dir"`
-	CredentialsTimeoutSecs int      `toml:"credentials_timeout_secs"`
-	KeepaliveIntervalSecs  int      `toml:"keepalive_interval_secs"`
-	KeepaliveCount         int      `toml:"keepalive_count"`
-	AutoOpen               bool     `toml:"auto_open"`
-	OpenCommand            string   `toml:"open_command"`
-	ExtraSshfsOpts         []string `toml:"extra_sshfs_opts"`
+	MountDir               string       `toml:"mount_dir"`
+	CredentialsTimeoutSecs int          `toml:"credentials_timeout_secs"`
+	CredentialsTimeout     FlexDuration `toml:"credentials_timeout" json:"-"`
+	KeepaliveIntervalSecs  int          `toml:"keepalive_interval_secs"`
+	KeepaliveInterval      FlexDuration `toml:"keepalive_interval" json:"-"`
+	KeepaliveCount         int          `toml:"keepalive_count"`
+	AutoOpen               bool         `toml:"auto_open"`
+	OpenCommand            string       `toml:"open_command"`
+	ExtraSshfsOpts         []string     `toml:"extra_sshfs_opts"`
 	// ReadOnly mounts the device's filesystem read-only by default. --ro on a
 	// single mount request overrides this either way.
 	ReadOnly bool `toml:"read_only"`
@@ -89,9 +121,10 @@ type PingConfig struct {
 }
 
 type PairingConfig struct {
-	TimeoutSecs   int    `toml:"timeout_secs"`
-	IntentTTL     string `toml:"intent_ttl"`
-	ListenTimeout string `toml:"listen_timeout"`
+	TimeoutSecs   int          `toml:"timeout_secs"`
+	Timeout       FlexDuration `toml:"timeout" json:"-"`
+	IntentTTL     string       `toml:"intent_ttl"`
+	ListenTimeout string       `toml:"listen_timeout"`
 }
 
 type MousepadConfig struct {

@@ -164,6 +164,23 @@ func TestLoadReportsUnknownKeysWithSuggestion(t *testing.T) {
 	}
 }
 
+func TestDurationAliasesPreserveLegacyValues(t *testing.T) {
+	legacy, err := loadTOML(t, "[share]\naccept_timeout_secs = 300\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Share.AcceptTimeoutSecs != 300 || legacy.Share.AcceptTimeout != FlexDuration(5*time.Minute) {
+		t.Fatalf("legacy duration = %d/%v", legacy.Share.AcceptTimeoutSecs, legacy.Share.AcceptTimeout)
+	}
+	modern, err := loadTOML(t, "[share]\naccept_timeout_secs = 300\naccept_timeout = '45s'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modern.Share.AcceptTimeoutSecs != 45 {
+		t.Fatalf("modern alias did not win: %d", modern.Share.AcceptTimeoutSecs)
+	}
+}
+
 func fileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)
