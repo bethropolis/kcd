@@ -181,6 +181,20 @@ func TestDurationAliasesPreserveLegacyValues(t *testing.T) {
 	}
 }
 
+func TestHookAndRunCommandConfig(t *testing.T) {
+	cfg, err := loadTOML(t, "[hooks]\n\"battery.threshold\" = ['notify-send', '{payload.charge}']\n[runcommand]\ndefault_timeout = '2m'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook, ok := cfg.Hooks["battery.threshold"]
+	if !ok || len(hook.Command) != 2 || hook.Command[1] != "{payload.charge}" {
+		t.Fatalf("hooks = %#v", cfg.Hooks)
+	}
+	if time.Duration(cfg.RunCommand.DefaultTimeout) != 2*time.Minute {
+		t.Fatalf("runcommand timeout = %v", cfg.RunCommand.DefaultTimeout)
+	}
+}
+
 func TestPerDevicePluginOverrideOnlyRestrictsGlobalPlugin(t *testing.T) {
 	cfg := Defaults()
 	cfg.Devices["phone"] = DeviceConfig{Plugins: map[string]bool{"runcommand": false}}

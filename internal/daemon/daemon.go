@@ -16,6 +16,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/hooks"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
@@ -130,6 +131,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, requestSave, plugins)
+	hooks.New(cfg.Hooks, bus, logger).Start(ctx)
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()

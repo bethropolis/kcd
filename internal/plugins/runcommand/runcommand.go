@@ -32,11 +32,21 @@ type RunCommandPlugin struct {
 	bus     *events.Bus
 	logger  log.Logger
 	wg      sync.WaitGroup // exported for tests to synchronize with background goroutines
+	timeout time.Duration
 }
 
-func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, bus *events.Bus, logger log.Logger) *RunCommandPlugin {
+// Options controls runcommand execution defaults.
+type Options struct {
+	Timeout time.Duration
+}
+
+func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, bus *events.Bus, logger log.Logger, options ...Options) *RunCommandPlugin {
 	if commandsPerDevice == nil {
 		commandsPerDevice = make(map[string]map[string]string)
+	}
+	timeout := 15 * time.Second
+	if len(options) > 0 && options[0].Timeout > 0 {
+		timeout = options[0].Timeout
 	}
 	return &RunCommandPlugin{
 		Commands:          commands,
@@ -45,6 +55,7 @@ func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[strin
 		running:           make(map[string]map[int32]context.CancelFunc),
 		bus:               bus,
 		logger:            logger.With(log.String("plugin", "runcommand")),
+		timeout:           timeout,
 	}
 }
 
@@ -145,7 +156,7 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			execCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			execCtx, cancel := context.WithTimeout(context.Background(), p.timeout)
 			defer cancel()
 
 			p.Mu.Lock()

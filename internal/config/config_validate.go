@@ -12,6 +12,17 @@ func (c *Config) Validate() error {
 	if err := c.validateDurations(); err != nil {
 		return err
 	}
+	if c.RunCommand.DefaultTimeout <= 0 {
+		return fmt.Errorf("config: runcommand default_timeout must be positive")
+	}
+	for event, hook := range c.Hooks {
+		if event == "" || len(hook.Command) == 0 || hook.Command[0] == "" {
+			return fmt.Errorf("config: hook %q must have a command", event)
+		}
+		if hook.Timeout < 0 || hook.Debounce < 0 {
+			return fmt.Errorf("config: hook %q durations cannot be negative", event)
+		}
+	}
 	if c.Backends.Volume != "auto" && c.Backends.Volume != "pactl" && c.Backends.Volume != "wpctl" && c.Backends.Volume != "none" {
 		return fmt.Errorf("config: invalid volume backend %q", c.Backends.Volume)
 	}

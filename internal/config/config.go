@@ -37,6 +37,8 @@ type Config struct {
 	Plugins             PluginConfig                 `toml:"plugins"`
 	Commands            map[string]string            `toml:"commands"`
 	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
+	Hooks               map[string]HookConfig        `toml:"hooks" json:"-"`
+	RunCommand          RunCommandConfig             `toml:"runcommand" json:"-"`
 	Backends            BackendsConfig               `toml:"backends" json:"-"`
 	Devices             map[string]DeviceConfig      `toml:"devices" json:"-"`
 	Notifications       NotificationConfig           `toml:"notifications"`
@@ -85,6 +87,8 @@ func Defaults() *Config {
 	c.Plugins.Defaults()
 	c.Commands = make(map[string]string)
 	c.CommandsPerDevice = make(map[string]map[string]string)
+	c.Hooks = make(map[string]HookConfig)
+	c.RunCommand.Defaults()
 	c.Backends.Defaults()
 	c.Devices = make(map[string]DeviceConfig)
 	c.Battery.Defaults()

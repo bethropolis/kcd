@@ -184,6 +184,21 @@ remotesystemvolume = true
 # sound_command = ["pw-play", "{file}"]
 # sound_file = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
 
+# Event hooks receive the complete event JSON on stdin. Arguments are argv
+# elements, not shell text; payload placeholders are replaced per argument.
+[hooks]
+# "battery.threshold" = ["notify-send", "Phone battery", "{payload.charge}%"]
+# [hooks."device.connected"]
+# command = ["systemctl", "--user", "start", "phone-home.target"]
+# devices = ["device-id"]
+# timeout = "10s"
+# debounce = "30s"
+
+# Remote command execution keeps the historical 15-second default unless
+# changed here. Per-command table options remain compatible work in progress.
+[runcommand]
+# default_timeout = "15s"
+
 # Lock behavior for incoming requests from paired peers.
 [lockdevice]
 # Allow paired peers to unlock this desktop session. Remote locking remains enabled.

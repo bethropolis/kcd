@@ -1,10 +1,84 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+// HookConfig describes a command run for a matching event.
+type HookConfig struct {
+	Command  []string     `toml:"command"`
+	Devices  []string     `toml:"devices"`
+	Timeout  FlexDuration `toml:"timeout" json:"-"`
+	Debounce FlexDuration `toml:"debounce" json:"-"`
+}
+
+// UnmarshalTOML accepts both an argv array and an extended hook table.
+func (h *HookConfig) UnmarshalTOML(value any) error {
+	switch v := value.(type) {
+	case []string:
+		h.Command = append([]string(nil), v...)
+		return nil
+	case []any:
+		h.Command = make([]string, len(v))
+		for i, arg := range v {
+			text, ok := arg.(string)
+			if !ok {
+				return fmt.Errorf("hook command argument %d is not a string", i)
+			}
+			h.Command[i] = text
+		}
+		return nil
+	case map[string]any:
+		if command, ok := v["command"]; ok {
+			if err := h.UnmarshalTOML(command); err != nil {
+				return err
+			}
+		}
+		if devices, ok := v["devices"].([]any); ok {
+			for _, device := range devices {
+				text, ok := device.(string)
+				if !ok {
+					return fmt.Errorf("hook device is not a string")
+				}
+				h.Devices = append(h.Devices, text)
+			}
+		}
+		if timeout, ok := v["timeout"]; ok {
+			text, ok := timeout.(string)
+			if !ok {
+				return fmt.Errorf("hook timeout is not a duration")
+			}
+			if err := h.Timeout.UnmarshalText([]byte(text)); err != nil {
+				return err
+			}
+		}
+		if debounce, ok := v["debounce"]; ok {
+			text, ok := debounce.(string)
+			if !ok {
+				return fmt.Errorf("hook debounce is not a duration")
+			}
+			if err := h.Debounce.UnmarshalText([]byte(text)); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("hook must be an argv array or table")
+	}
+}
+
+// RunCommandConfig controls the default lifetime of remote commands.
+type RunCommandConfig struct {
+	DefaultTimeout FlexDuration `toml:"default_timeout" json:"-"`
+}
+
+// Defaults preserves the historical fifteen-second command timeout.
+func (c *RunCommandConfig) Defaults() {
+	c.DefaultTimeout = FlexDuration(15 * time.Second)
+}
 
 // FlexDuration accepts Go duration strings and bare seconds for config aliases.
 type FlexDuration time.Duration
