@@ -33,16 +33,36 @@ var Version = "dev"
 // can hit 13s, so the budget — not the cost — fits TimeoutStopSec.
 const shutdownUnmountBudget = 5 * time.Second
 
-// syncReconnectBroadcast runs UDP broadcast (reconnect owner) while any pair
-// is offline, else withdraws it. Pure state, no timers; callers drive it.
+// syncReconnectBroadcast runs UDP broadcast while any paired device is offline.
 func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController) {
+	syncReconnectBroadcastUntil(ctx, devices, bc, 0)
+}
+
+func syncReconnectBroadcastUntil(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController, staleAfter time.Duration) time.Time {
+	var earliest time.Time
+	wanted := false
 	for _, dev := range devices.List() {
 		if dev.State() == device.StatePaired && !dev.IsConnected() {
+			lastSeen := dev.LastSeen()
+			if staleAfter > 0 && !lastSeen.IsZero() && time.Since(lastSeen) >= staleAfter {
+				continue
+			}
+			wanted = true
 			bc.StartOwned(ctx, discovery.OwnerReconnect)
-			return
+			if staleAfter > 0 && !lastSeen.IsZero() {
+				expires := lastSeen.Add(staleAfter)
+				if earliest.IsZero() || expires.Before(earliest) {
+					earliest = expires
+				}
+			}
 		}
 	}
-	bc.StopOwned(discovery.OwnerReconnect)
+	if !wanted {
+		bc.StopOwned(discovery.OwnerReconnect)
+	} else {
+		return earliest
+	}
+	return time.Time{}
 }
 
 // Run starts the core daemon lifecycle.
@@ -136,6 +156,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	go discovery.WatchNetworkChanges(ctx, bc.ResetBackoff)
 
 	// mDNS advertisement is always on: responder-only means zero idle timers,
 	// so phones keep a standing path while UDP broadcast is stopped.
@@ -147,10 +168,50 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	go func() {
 		sub := bus.Subscribe(0, events.TypeDeviceConnected, events.TypeDeviceDisconnected)
 		defer sub.Close()
-		sync := func() { syncReconnectBroadcast(ctx, devices, bc) }
-		sync()
-		for range sub.C {
-			sync()
+		var timer *time.Timer
+		var timerC <-chan time.Time
+		reset := func() {
+			expires := syncReconnectBroadcastUntil(ctx, devices, bc, config.Duration(cfg.Reconnect.StaleAfter))
+			if expires.IsZero() {
+				if timer != nil {
+					timer.Stop()
+				}
+				timerC = nil
+				return
+			}
+			if timer == nil {
+				timer = time.NewTimer(time.Until(expires))
+			} else if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			delay := time.Until(expires)
+			if delay < 0 {
+				delay = 0
+			}
+			timer.Reset(delay)
+			timerC = timer.C
+		}
+		defer func() {
+			if timer != nil {
+				timer.Stop()
+			}
+		}()
+		reset()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-sub.C:
+				if !ok {
+					return
+				}
+				reset()
+			case <-timerC:
+				reset()
+			}
 		}
 	}()
 

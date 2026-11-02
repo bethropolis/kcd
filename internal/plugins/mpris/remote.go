@@ -221,7 +221,7 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 func (p *MPRISPlugin) syncRemotePoller() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.bus.HasSubscribers(events.TypeMprisUpdate) {
+	if p.bus.HasExplicitSubscribers(events.TypeMprisUpdate) {
 		if p.remotePollCancel == nil {
 			ctx, cancel := context.WithCancel(p.watchCtx)
 			p.remotePollCancel = cancel
@@ -253,7 +253,7 @@ func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
 // pollRemoteStates refreshes cached, actively-playing players; stopped ones
 // go stale by design, and nothing is requested with no subscribers listening.
 func (p *MPRISPlugin) pollRemoteStates() {
-	if !p.bus.HasSubscribers(events.TypeMprisUpdate) {
+	if !p.bus.HasExplicitSubscribers(events.TypeMprisUpdate) {
 		return
 	}
 	p.mu.RLock()

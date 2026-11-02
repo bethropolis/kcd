@@ -125,6 +125,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// disconnected or roamed, ignore same-IP (read-idle cannot tell
 			// zombies from healthy sessions). Setup re-verifies the cert.
 			dev.SetLastSeen(time.Now())
+			syncReconnectBroadcastUntil(ctx, devices, bc, config.Duration(opts.Reconnect.StaleAfter))
+			bc.ResetBackoff()
 			if dev.NoteSighting(ip) {
 				dev.ResetReconnectAttempt()
 			}

@@ -17,6 +17,7 @@ type Broadcaster struct {
 	interval       time.Duration
 	idleInterval   time.Duration
 	logger         log.Logger
+	resetCh        <-chan struct{}
 }
 
 // NewBroadcaster creates a UDP discovery broadcaster targeting port.
@@ -29,8 +30,10 @@ func NewBroadcaster(identity *protocol.Packet, port int, interval time.Duration,
 	}
 }
 
-// Run sends identity to broadcast; shouldReduce drops frequency to 60s when
-// idle. mDNS advertisement runs separately (see AdvertiseMDNS).
+const maxReconnectInterval = 15 * time.Minute
+
+// Run sends identity to broadcast with exponential backoff; shouldReduce
+// retains the quiet interval when all connected devices are idle.
 func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 	normalInterval := b.interval
 	reducedInterval := b.idleInterval
@@ -54,11 +57,21 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 
 	timer := time.NewTimer(0) // Fire immediately on start
 	defer timer.Stop()
+	currentInterval := normalInterval
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-b.resetCh:
+			currentInterval = normalInterval
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(0)
 		case <-timer.C:
 			// 1. Attempt global broadcast
 			globalAddr := &net.UDPAddr{IP: net.IPv4bcast, Port: b.port}
@@ -91,9 +104,16 @@ func (b *Broadcaster) Run(ctx context.Context, shouldReduce func() bool) {
 				}
 			}
 
-			nextInterval := normalInterval
+			nextInterval := currentInterval
 			if shouldReduce != nil && shouldReduce() {
 				nextInterval = reducedInterval
+			} else {
+				if currentInterval < maxReconnectInterval {
+					currentInterval *= 2
+					if currentInterval > maxReconnectInterval {
+						currentInterval = maxReconnectInterval
+					}
+				}
 			}
 			timer.Reset(nextInterval)
 		}

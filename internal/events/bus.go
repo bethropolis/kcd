@@ -227,6 +227,21 @@ func (b *Bus) HasSubscribers(typ EventType) bool {
 	return false
 }
 
+// HasExplicitSubscribers reports whether a subscriber named typ directly in
+// its filter list. Bare subscribers intentionally do not count.
+func (b *Bus) HasExplicitSubscribers(typ EventType) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, sub := range b.subscribers {
+		for _, filter := range sub.filters {
+			if filter == typ {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Publish broadcasts an event to all interested subscribers.
 func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
 	ev := Event{

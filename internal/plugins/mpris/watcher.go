@@ -54,6 +54,7 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 				dbus.WithMatchSender(e.busName),
 				dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 				dbus.WithMatchMember("PropertiesChanged"),
+				dbus.WithMatchObjectPath("/org/mpris/MediaPlayer2"),
 			); err != nil {
 				p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
 			}
@@ -68,11 +69,12 @@ func (p *MPRISPlugin) runDBusWatcher(ctx context.Context) error {
 		}
 	}
 
-	// Watch every name change; match rules lack prefix keys, and non-MPRIS
-	// signals are cheaply rejected on a prefix check before blocking work.
+	// Restrict NameOwnerChanged to the MPRIS namespace so unrelated session-bus
+	// clients do not wake the watcher.
 	if err := conn.AddMatchSignal(
 		dbus.WithMatchInterface("org.freedesktop.DBus"),
 		dbus.WithMatchMember("NameOwnerChanged"),
+		dbus.WithMatchArg0Namespace("org.mpris.MediaPlayer2"),
 	); err != nil {
 		return err
 	}

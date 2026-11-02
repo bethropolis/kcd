@@ -64,6 +64,7 @@ func (p *MPRISPlugin) reconcilePlayers(conn *dbus.Conn, uniqueToDisplay map[stri
 			dbus.WithMatchSender(e.busName),
 			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
 			dbus.WithMatchMember("PropertiesChanged"),
+			dbus.WithMatchObjectPath("/org/mpris/MediaPlayer2"),
 		); err != nil {
 			p.logger.Warn("mpris: match rule rejected", log.String("busName", e.busName), log.Error(err))
 		}
