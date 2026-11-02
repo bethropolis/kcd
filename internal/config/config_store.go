@@ -11,10 +11,21 @@ import (
 )
 
 // EnsureDeviceID generates a UUIDv4-style device ID if one is not already set,
-// and writes the updated config back to the given path.
+// and persists it separately from the user's TOML file.
 func (c *Config) EnsureDeviceID(configPath string) error {
 	if c.DeviceID != "" {
 		return nil
+	}
+	if configPath != "" {
+		idPath := deviceIDPath(configPath)
+		if data, err := os.ReadFile(idPath); err == nil {
+			if id := strings.TrimSpace(string(data)); id != "" {
+				c.DeviceID = id
+				return nil
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("config: read device id %s: %w", idPath, err)
+		}
 	}
 
 	id, err := generateDeviceID()
@@ -23,11 +34,46 @@ func (c *Config) EnsureDeviceID(configPath string) error {
 	}
 	c.DeviceID = id
 
-	// Persist the generated ID if a config path is provided.
 	if configPath != "" {
-		if err := c.Save(configPath); err != nil {
-			return fmt.Errorf("config: save after generating device id: %w", err)
+		if err := writeDeviceID(deviceIDPath(configPath), id); err != nil {
+			return fmt.Errorf("config: save device id: %w", err)
 		}
+	}
+	return nil
+}
+
+func deviceIDPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), "device_id")
+}
+
+func writeDeviceID(path, id string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("config: create dir %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".device-id-*")
+	if err != nil {
+		return fmt.Errorf("config: temp device id: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: chmod device id: %w", err)
+	}
+	if _, err := tmp.WriteString(id + "\n"); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: write device id: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("config: sync device id: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config: close device id: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("config: rename device id: %w", err)
 	}
 	return nil
 }

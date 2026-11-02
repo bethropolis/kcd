@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -47,7 +50,8 @@ type Config struct {
 	SMS                 SMSConfig                    `toml:"sms"`
 	PruneStaleThreshold string                       `toml:"prune_stale_threshold"` // auto-remove stale unpaired devices; Go duration, "0" = disable
 
-	ConfigPath string `toml:"-"` // populated at load time, never written to disk
+	ConfigPath string   `toml:"-"` // populated at load time, never written to disk
+	Warnings   []string `toml:"-" json:"-"`
 }
 
 // PluginConfig toggles individual plugins on or off.
@@ -95,23 +99,138 @@ func Defaults() *Config {
 // Load reads a TOML config file and merges it with defaults.
 func Load(path string) (*Config, error) {
 	cfg := Defaults()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// No config file — use all defaults.
-			return cfg, nil
-		}
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
-	}
-
-	if err := toml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
-	}
-
 	cfg.ConfigPath = path
+	for _, candidate := range configFiles(path) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("config: read %s: %w", candidate, err)
+		}
+		metadata, err := toml.Decode(string(data), cfg)
+		if err != nil {
+			return nil, fmt.Errorf("config: parse %s: %w", candidate, err)
+		}
+		cfg.Warnings = append(cfg.Warnings, unknownKeyWarnings(candidate, metadata.Undecoded())...)
+	}
+
+	if data, err := os.ReadFile(deviceIDPath(path)); err == nil {
+		fileID := strings.TrimSpace(string(data))
+		if cfg.DeviceID == "" {
+			cfg.DeviceID = fileID
+		} else if fileID != "" && fileID != cfg.DeviceID {
+			cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("%s: device_id overrides adjacent device_id file", path))
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("config: read device id: %w", err)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func configFiles(path string) []string {
+	var files []string
+	if path == DefaultConfigPath() {
+		files = append(files, "/etc/kcd/kcd.toml")
+		files = append(files, tomlFiles("/etc/kcd/kcd.toml.d")...)
+	}
+	files = append(files, path)
+	files = append(files, tomlFiles(filepath.Join(filepath.Dir(path), "kcd.toml.d"))...)
+	return files
+}
+
+func tomlFiles(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".toml") {
+			files = append(files, filepath.Join(dir, entry.Name()))
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func unknownKeyWarnings(path string, keys []toml.Key) []string {
+	warnings := make([]string, 0, len(keys))
+	for _, key := range keys {
+		name := strings.Join(key, ".")
+		warning := fmt.Sprintf("%s: unknown config key %q", path, name)
+		if suggestion := nearestConfigKey(name); suggestion != "" {
+			warning += fmt.Sprintf("; did you mean %q?", suggestion)
+		}
+		warnings = append(warnings, warning)
+	}
+	return warnings
+}
+
+func nearestConfigKey(name string) string {
+	best := ""
+	bestDistance := len(name)
+	for _, candidate := range configKeyNames(reflect.TypeOf(Config{}), "") {
+		distance := levenshtein(name, candidate)
+		if distance < bestDistance {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+	if bestDistance <= 2 || bestDistance*3 <= len(name) {
+		return best
+	}
+	return ""
+}
+
+func configKeyNames(typ reflect.Type, prefix string) []string {
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	var names []string
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		tag := strings.Split(field.Tag.Get("toml"), ",")[0]
+		if tag == "" {
+			tag = strings.ToLower(field.Name)
+		}
+		if tag == "-" || field.Type.Kind() == reflect.Map || field.Type.Kind() == reflect.Slice {
+			continue
+		}
+		name := tag
+		if prefix != "" {
+			name = prefix + "." + tag
+		}
+		if field.Type.Kind() == reflect.Struct {
+			names = append(names, name)
+			names = append(names, configKeyNames(field.Type, name)...)
+		} else {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func levenshtein(left, right string) int {
+	previous := make([]int, len(right)+1)
+	for i := range previous {
+		previous[i] = i
+	}
+	for i, leftRune := range left {
+		current := make([]int, len(right)+1)
+		current[0] = i + 1
+		for j, rightRune := range right {
+			cost := 0
+			if leftRune != rightRune {
+				cost = 1
+			}
+			current[j+1] = min(current[j]+1, previous[j+1]+1, previous[j]+cost)
+		}
+		previous = current
+	}
+	return previous[len(right)]
 }

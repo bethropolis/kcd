@@ -79,6 +79,100 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestEnsureDeviceIDPreservesConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kcd.toml")
+	original := "# keep this comment\ndevice_name = 'legacy'\n"
+	if err := os.WriteFile(path, []byte(original), 0400); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.EnsureDeviceID(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf("config changed after device ID generation: %q", data)
+	}
+	id, err := os.ReadFile(filepath.Join(dir, "device_id"))
+	if err != nil || strings.TrimSpace(string(id)) != cfg.DeviceID {
+		t.Fatalf("device_id = %q, cfg = %q, err = %v", id, cfg.DeviceID, err)
+	}
+	if mode := fileMode(t, filepath.Join(dir, "device_id")); mode != 0600 {
+		t.Fatalf("device_id mode = %o, want 600", mode)
+	}
+}
+
+func TestLoadDeviceIDPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kcd.toml")
+	if err := os.WriteFile(path, []byte("device_id = 'from-config'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "device_id"), []byte("from-file\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || cfg.DeviceID != "from-config" {
+		t.Fatalf("Load device ID = %q, err = %v", cfg.DeviceID, err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "overrides adjacent") {
+		t.Fatalf("warnings = %#v", cfg.Warnings)
+	}
+}
+
+func TestLoadDropInsOverrideLexicallyAndMergeMaps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kcd.toml")
+	if err := os.WriteFile(path, []byte("device_name = 'base'\n[commands]\nfirst = 'one'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dropins := filepath.Join(dir, "kcd.toml.d")
+	if err := os.Mkdir(dropins, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"90-later.toml":   "device_name = 'later'\n[commands]\nsecond = 'two'\n",
+		"50-earlier.toml": "device_name = 'earlier'\n[commands]\nfirst = 'updated'\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dropins, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeviceName != "later" || cfg.Commands["first"] != "updated" || cfg.Commands["second"] != "two" {
+		t.Fatalf("drop-in merge = name %q commands %#v", cfg.DeviceName, cfg.Commands)
+	}
+}
+
+func TestLoadReportsUnknownKeysWithSuggestion(t *testing.T) {
+	cfg, err := loadTOML(t, "notification_plugn = true\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "notification_plugin") {
+		t.Fatalf("warnings = %#v", cfg.Warnings)
+	}
+}
+
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
+}
+
 func TestConfigVersionIsOptionalAndNonRejecting(t *testing.T) {
 	cfg, err := loadTOML(t, "config_version = 42\n")
 	if err != nil {

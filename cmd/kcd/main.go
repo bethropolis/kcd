@@ -29,12 +29,19 @@ func getClient(c *cli.Context) (*client.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	reportConfigWarnings(cfg)
 	return &client.Client{
 		SocketPath:        cfg.SocketPath,
 		Timeout:           5 * time.Second,
 		PairListenTimeout: pairListenDeadline(config.Duration(cfg.Pairing.ListenTimeout)),
 		SftpTimeout:       sftpCredentialDeadline(cfg.SFTP.CredentialsTimeoutSecs),
 	}, nil
+}
+
+func reportConfigWarnings(cfg *config.Config) {
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+	}
 }
 
 // sftpCredentialDeadline outlasts the daemon's wait so failures report the
@@ -96,6 +103,7 @@ func main() {
 					if err != nil {
 						return fmt.Errorf("failed to load config: %w", err)
 					}
+					reportConfigWarnings(cfg)
 
 					if logLevel := c.String("log-level"); logLevel != "" {
 						cfg.LogLevel = logLevel
