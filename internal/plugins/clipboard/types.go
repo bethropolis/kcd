@@ -21,6 +21,8 @@ const (
 type ClipboardPlugin struct {
 	sidechannel       transport.SidechannelOptions
 	pushOnConnect     bool
+	receive           bool
+	send              bool
 	lastTimestamp     int64
 	tlsConfig         *tls.Config
 	logger            log.Logger
@@ -42,9 +44,19 @@ func NewClipboardPlugin(tlsConfig *tls.Config, logger log.Logger, pushOnConnect 
 		sidechannel:   sidechannel,
 		tlsConfig:     tlsConfig,
 		pushOnConnect: pushOnConnect,
+		receive:       true,
+		send:          true,
 		logger:        logger.With(log.String("plugin", "clipboard")),
 		probe:         probeBackend,
 	}
+}
+
+// SetPolicy updates the global clipboard direction policy.
+func (p *ClipboardPlugin) SetPolicy(receive, send bool) {
+	p.mu.Lock()
+	p.receive = receive
+	p.send = send
+	p.mu.Unlock()
 }
 
 // clipboardTimeout bounds every wl-copy/wl-paste/xclip subprocess so a hung

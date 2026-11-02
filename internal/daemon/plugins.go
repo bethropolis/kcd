@@ -53,7 +53,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(notification.NewNotificationPluginWithPopup(cfg.Notification, bus, tlsCfg, logger, cfg.Popups, cfg.Backends.Notify, sidechannel))
 	}
 	if cfg.Plugins.Clipboard {
-		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel))
+		clipboardPlugin := clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel)
+		clipboardPlugin.SetPolicy(cfg.Clipboard.Receive, cfg.Clipboard.Send)
+		plugins.Register(clipboardPlugin)
 	}
 	if cfg.Plugins.Share {
 		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger, sidechannel))

@@ -335,12 +335,18 @@ func (c *NotificationPluginConfig) Defaults() {
 }
 
 type ClipboardConfig struct {
+	// Receive accepts clipboard content and clipboard files from the phone.
+	Receive bool `toml:"receive" json:"-"`
+	// Send allows explicit pushes and connect-time clipboard pushes to the phone.
+	Send bool `toml:"send" json:"-"`
 	// PushOnConnect sends the local clipboard to a device when it
 	// connects/reconnects. Off by default to avoid spurious pushes.
 	PushOnConnect bool `toml:"push_on_connect"`
 }
 
 func (c *ClipboardConfig) Defaults() {
+	c.Receive = true
+	c.Send = true
 	c.PushOnConnect = false
 }
 

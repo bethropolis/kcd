@@ -1,3 +1,11 @@
+# Configuration
+
+`kcd config check` parses and validates the effective configuration, reporting
+unknown-key warnings. `kcd config show` prints the effective TOML; add
+`--json` for machine-readable output and `--origin` to print the source path.
+`kcd config defaults` prints default TOML, and `kcd config path` prints the
+primary config and drop-in directory.
+
 # kcd CLI Reference
 
 `kcd` is both the daemon and the command-line client. Sub-commands that interact with a running daemon communicate over a Unix socket (`/run/user/$UID/kcd/kcd.sock`). The daemon itself is started with `kcd daemon`.

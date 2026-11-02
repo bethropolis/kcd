@@ -93,6 +93,7 @@ func main() {
 			},
 		},
 		Commands: []*cli.Command{
+			configCmd,
 			{
 
 				Name:  "daemon",

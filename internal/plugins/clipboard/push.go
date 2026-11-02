@@ -14,6 +14,12 @@ import (
 
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
 func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
+	p.mu.Lock()
+	send := p.send
+	p.mu.Unlock()
+	if !send {
+		return nil
+	}
 	var cmd *exec.Cmd
 	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
@@ -85,7 +91,10 @@ func (p *ClipboardPlugin) readClipboard() string {
 }
 
 func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
-	if !p.pushOnConnect {
+	p.mu.Lock()
+	send := p.send
+	p.mu.Unlock()
+	if !p.pushOnConnect || !send {
 		return
 	}
 	content := p.readClipboard()

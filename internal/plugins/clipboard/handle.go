@@ -19,6 +19,12 @@ import (
 
 // Handle processes incoming clipboard packets.
 func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+	p.mu.Lock()
+	receive := p.receive
+	p.mu.Unlock()
+	if !receive {
+		return nil
+	}
 	if pkt.Type == "kdeconnect.clipboard.file" {
 		return p.handleClipboardFile(ctx, dev, pkt)
 	}

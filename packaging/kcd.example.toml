@@ -251,6 +251,8 @@ allow_remote_unlock = false
 # Changing a path does not migrate existing files.
 
 [clipboard]
+# receive = true                    # phone -> desktop
+# send = true                       # desktop -> phone
 # Push the local clipboard on connection/reconnection. Off by default.
 # push_on_connect = false
 
