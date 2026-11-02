@@ -115,6 +115,7 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			configCmd,
+			dbusCmd,
 			{
 				Name:  "version",
 				Usage: "Show daemon and IPC capability information",
