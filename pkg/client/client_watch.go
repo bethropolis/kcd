@@ -13,13 +13,18 @@ import (
 
 // Watch subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
+	return c.WatchSince(ctx, filter, 0, ch)
+}
+
+// WatchSince resumes a watch after the supplied event sequence when retained.
+func (c *Client) WatchSince(ctx context.Context, filter []string, since uint64, ch chan<- events.Event) error {
 	dialer := net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
 		return fmt.Errorf("kcd daemon not running or socket error: %w", err)
 	}
 
-	payload, _ := json.Marshal(ipc.WatchPayload{Events: filter})
+	payload, _ := json.Marshal(ipc.WatchPayload{Events: filter, Since: since})
 	req := ipc.Request{
 		Command: ipc.CmdWatch,
 		Payload: payload,

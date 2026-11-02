@@ -77,6 +77,15 @@ Stable codes include `invalid_payload`, `unknown_command`,
 
 Every command, its request payload, and its response data shape.
 
+`watch` accepts an optional `since` sequence number. The daemon replays
+retained events after that sequence before continuing live delivery. If the
+sequence is older than the replay window, it emits `stream.gap`; clients must
+request a fresh snapshot. Events include a monotonic `seq` field.
+
+The additive `config_get`, `config_schema`, and `reload` commands expose
+effective settings, supported setting metadata, and reload status to local
+clients.
+
 ### 3.1 Built-in Commands (handler.go)
 
 #### `devices`

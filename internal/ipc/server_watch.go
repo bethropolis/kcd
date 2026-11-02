@@ -131,6 +131,21 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 
 	sub := bus.Subscribe(events.WatchSubscriberCap, filters...)
 	defer sub.Close()
+	if p.Since > 0 {
+		replay, gap := bus.EventsSince(p.Since, filters...)
+		if gap {
+			gapEvent, _ := json.Marshal(events.Event{Type: events.TypeStreamGap, Payload: map[string]any{"since": p.Since}})
+			if _, err := conn.Write(append(gapEvent, '\n')); err != nil {
+				return
+			}
+		}
+		for _, ev := range replay {
+			data, _ := json.Marshal(ev)
+			if _, err := conn.Write(append(data, '\n')); err != nil {
+				return
+			}
+		}
+	}
 
 	for ev := range sub.C {
 		data, err := json.Marshal(ev)

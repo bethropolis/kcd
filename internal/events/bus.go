@@ -48,6 +48,7 @@ const (
 	TypeContactsUpdated      EventType = "contacts.updated"
 	TypeMprisUpdate          EventType = "mpris.update"
 	TypeStateSnapshot        EventType = "state.snapshot"
+	TypeStreamGap            EventType = "stream.gap"
 )
 
 // All returns every known event type. TestAllMatchesConstants keeps it in step
@@ -67,7 +68,7 @@ func All() []EventType {
 		TypeLockState,
 		TypeSMSIncoming, TypeSMSAttachment,
 		TypeRingReceived, TypeContactsUpdated,
-		TypeMprisUpdate, TypeStateSnapshot,
+		TypeMprisUpdate, TypeStateSnapshot, TypeStreamGap,
 	}
 }
 
@@ -99,6 +100,7 @@ func OptInOnly() []EventType {
 
 // Event represents a single occurrence of something interesting in the daemon.
 type Event struct {
+	Seq       uint64    `json:"seq,omitempty"`
 	Type      EventType `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	DeviceID  string    `json:"deviceId,omitempty"`
@@ -152,7 +154,11 @@ type Bus struct {
 	// changeHooks run lock-free after every subscribe/unsubscribe, so producers
 	// start/stop with the audience instead of polling HasSubscribers on a timer.
 	changeHooks []func()
+	seq         uint64
+	ring        []Event
 }
+
+const eventReplayCapacity = 256
 
 // NewBus creates a new event bus.
 func NewBus(logger log.Logger) *Bus {
@@ -254,15 +260,20 @@ func (b *Bus) HasExplicitSubscribers(typ EventType) bool {
 
 // Publish broadcasts an event to all interested subscribers.
 func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
+	b.mu.Lock()
+	b.seq++
 	ev := Event{
+		Seq:       b.seq,
 		Type:      typ,
 		Timestamp: time.Now().UTC(),
 		DeviceID:  deviceID,
 		Payload:   payload,
 	}
 
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.ring = append(b.ring, ev)
+	if len(b.ring) > eventReplayCapacity {
+		b.ring = b.ring[len(b.ring)-eventReplayCapacity:]
+	}
 
 	for _, sub := range b.subscribers {
 		if sub.matches(typ) {
@@ -277,4 +288,36 @@ func (b *Bus) Publish(typ EventType, deviceID string, payload any) {
 			}
 		}
 	}
+	b.mu.Unlock()
+}
+
+// EventsSince returns buffered matching events after since and reports whether
+// the requested sequence predates the retained replay window.
+func (b *Bus) EventsSince(since uint64, filters ...EventType) ([]Event, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if len(b.ring) == 0 || since == 0 {
+		return nil, false
+	}
+	gap := since+1 < b.ring[0].Seq
+	result := make([]Event, 0)
+	for _, ev := range b.ring {
+		if ev.Seq <= since || !matchesFilters(ev.Type, filters) {
+			continue
+		}
+		result = append(result, ev)
+	}
+	return result, gap
+}
+
+func matchesFilters(typ EventType, filters []EventType) bool {
+	if len(filters) == 0 {
+		return !isOptInOnly(typ)
+	}
+	for _, filter := range filters {
+		if filter == typ {
+			return true
+		}
+	}
+	return false
 }

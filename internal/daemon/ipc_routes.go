@@ -29,6 +29,34 @@ func eventNames(types []events.EventType) []string {
 }
 
 func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger log.Logger, startedAt time.Time) {
+	handler.Register(ipc.CmdConfigGet, func(req ipc.Request) ipc.Response {
+		var payload ipc.ConfigGetPayload
+		if len(req.Payload) > 0 {
+			if err := json.Unmarshal(req.Payload, &payload); err != nil {
+				return ipc.Err(ipc.CodeInvalidPayload, "invalid payload", nil)
+			}
+		}
+		values := configAPIValues(cfg)
+		if len(payload.Keys) > 0 {
+			selected := make(map[string]any, len(payload.Keys))
+			for _, key := range payload.Keys {
+				if value, ok := values[key]; ok {
+					selected[key] = value
+				}
+			}
+			values = selected
+		}
+		data, _ := json.Marshal(values)
+		return ipc.Response{OK: true, Data: data}
+	})
+	handler.Register(ipc.CmdConfigSchema, func(req ipc.Request) ipc.Response {
+		data, _ := json.Marshal(configAPISchema())
+		return ipc.Response{OK: true, Data: data}
+	})
+	handler.Register(ipc.CmdReload, func(req ipc.Request) ipc.Response {
+		data, _ := json.Marshal(ipc.ReloadResponse{Applied: []string{}, RestartRequired: []string{"config reload requires daemon SIGHUP"}})
+		return ipc.Response{OK: true, Data: data}
+	})
 	handler.Register(ipc.CmdHello, func(req ipc.Request) ipc.Response {
 		var payload ipc.HelloPayload
 		if len(req.Payload) > 0 {
@@ -207,4 +235,33 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		status := pl.(*mpris.MPRISPlugin).DebugStatus()
 		return jsonOK(status)
 	})
+}
+
+func configAPIValues(cfg *config.Config) map[string]any {
+	return map[string]any{
+		"log_level":                  cfg.LogLevel,
+		"device_name":                cfg.DeviceName,
+		"device_type":                cfg.DeviceType,
+		"share.accept":               cfg.Share.Accept,
+		"share.text_action":          cfg.Share.TextAction,
+		"share.url_action":           cfg.Share.URLAction,
+		"clipboard.receive":          cfg.Clipboard.Receive,
+		"clipboard.send":             cfg.Clipboard.Send,
+		"popups.enabled":             cfg.Popups.Enabled,
+		"popups.backend":             cfg.Popups.Backend,
+		"runcommand.default_timeout": time.Duration(cfg.RunCommand.DefaultTimeout).String(),
+	}
+}
+
+func configAPISchema() []map[string]any {
+	return []map[string]any{
+		{"key": "log_level", "type": "string", "live": true},
+		{"key": "device_name", "type": "string", "live": false},
+		{"key": "device_type", "type": "string", "live": false},
+		{"key": "share.accept", "type": "string", "enum": []string{"always", "ask", "never"}, "live": false},
+		{"key": "clipboard.receive", "type": "bool", "live": false},
+		{"key": "clipboard.send", "type": "bool", "live": false},
+		{"key": "popups.enabled", "type": "bool", "live": false},
+		{"key": "popups.backend", "type": "string", "enum": []string{"auto", "notify-send", "dbus", "none"}, "live": false},
+	}
 }

@@ -48,6 +48,9 @@ const (
 	CmdRemoteVolumeSet      = "remote_volume_set"
 	CmdRemoteVolumeMute     = "remote_volume_mute"
 	CmdHello                = "hello"
+	CmdConfigGet            = "config_get"
+	CmdConfigSchema         = "config_schema"
+	CmdReload               = "reload"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -81,9 +84,22 @@ type HelloResponse struct {
 	Features      []string        `json:"features"`
 }
 
+// ConfigGetPayload selects effective configuration keys; empty means all
+// supported API-visible settings.
+type ConfigGetPayload struct {
+	Keys []string `json:"keys,omitempty"`
+}
+
+// ReloadResponse reports which settings were applied without restart.
+type ReloadResponse struct {
+	Applied         []string `json:"applied"`
+	RestartRequired []string `json:"restartRequired"`
+}
+
 // WatchPayload is used for CmdWatch to configure event streaming.
 type WatchPayload struct {
 	Events []string `json:"events,omitempty"`
+	Since  uint64   `json:"since,omitempty"`
 }
 
 // Response is sent from the daemon back to the client.
