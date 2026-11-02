@@ -13,15 +13,24 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/netutil"
 )
 
 // Server handles listening for JSON IPC requests over a Unix socket.
 type Server struct {
-	path    string
-	handler *Handler
-	logger  log.Logger
+	path     string
+	handler  *Handler
+	logger   log.Logger
+	readOnly bool
+}
+
+// NewReadOnlyServer creates a socket that rejects state-changing commands.
+func NewReadOnlyServer(path string, handler *Handler, logger log.Logger) *Server {
+	server := NewServer(path, handler, logger)
+	server.readOnly = true
+	return server
 }
 
 const (
@@ -142,6 +151,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 	if req.Command == CmdWatch {
+		if s.readOnly && !watchIsReadOnly(req.Payload) {
+			s.writeResponse(conn, Err(CodePermissionDenied, "read-only socket permits only non-opt-in watch events", nil))
+			return
+		}
 		s.handleWatch(conn, req.Payload)
 		return
 	}
@@ -160,6 +173,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				s.writeResponseID(conn, Err(CodeInternal, "internal error", nil), request.ID, &writeMu)
 			}
 		}()
+		if s.readOnly && !readOnlyCommand(request.Command) {
+			s.writeResponseID(conn, Err(CodePermissionDenied, "command is not available on read-only socket", map[string]string{"command": request.Command}), request.ID, &writeMu)
+			return
+		}
 		s.writeResponseID(conn, s.handler.HandleRequest(request), request.ID, &writeMu)
 	}
 	write(req)
@@ -189,6 +206,28 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}(next)
 	}
 	workers.Wait()
+}
+
+func readOnlyCommand(command string) bool {
+	switch command {
+	case CmdHello, CmdDevices, CmdStatus, CmdBattery, CmdConnectivity, CmdMprisStatus:
+		return true
+	default:
+		return false
+	}
+}
+
+func watchIsReadOnly(payload []byte) bool {
+	var request WatchPayload
+	if len(payload) > 0 && json.Unmarshal(payload, &request) != nil {
+		return false
+	}
+	for _, typ := range request.Events {
+		if typ == string(events.TypeSMSIncoming) || typ == string(events.TypeSMSAttachment) || typ == string(events.TypePrompt) {
+			return false
+		}
+	}
+	return true
 }
 
 func readIPCLine(reader *bufio.Reader) ([]byte, error) {

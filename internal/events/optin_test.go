@@ -74,15 +74,15 @@ func TestNamingOptInTypeMatchesIt(t *testing.T) {
 	}
 }
 
-// OptInOnly exists for SMS and nothing else; widening it silently would make
-// more event types unlistenable by accident.
-func TestOptInOnlyIsOnlySMS(t *testing.T) {
+// OptInOnly keeps SMS and prompts explicit so unfiltered subscribers cannot
+// accidentally arm the phone or receive interactive decisions.
+func TestOptInOnlyIncludesConsentEvents(t *testing.T) {
 	if len(OptInOnly()) == 0 {
 		t.Fatal("OptInOnly() is empty; SMS would reach unfiltered subscribers")
 	}
 	for _, typ := range OptInOnly() {
 		switch typ {
-		case TypeSMSIncoming, TypeSMSAttachment:
+		case TypeSMSIncoming, TypeSMSAttachment, TypePrompt:
 		default:
 			t.Errorf("OptInOnly() contains %q, which is not an SMS event", typ)
 		}

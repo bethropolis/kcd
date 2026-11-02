@@ -86,6 +86,14 @@ The additive `config_get`, `config_schema`, and `reload` commands expose
 effective settings, supported setting metadata, and reload status to local
 clients.
 
+Machine-readable definitions are checked in at
+`docs/schema/ipc.schema.json` and `docs/schema/events.schema.json`.
+
+`prompt` events are opt-in. Clients resolve them with `prompt_respond` using
+the `promptId` and one of the advertised choices. A read-only IPC socket, when
+configured by an embedding daemon, permits only inspection commands and
+non-opt-in watch events.
+
 ### 3.1 Built-in Commands (handler.go)
 
 #### `devices`

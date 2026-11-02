@@ -28,6 +28,7 @@ type Handler struct {
 	routes            map[string]func(Request) Response
 	pruneThreshold    time.Duration
 	pairListenTimeout time.Duration
+	prompts           *PromptManager
 	// pairDialHook dials a disconnected device on explicit pair request via
 	// its last-seen address, independent of background auto-dial.
 	pairDialHook func(deviceID string) error
@@ -43,6 +44,7 @@ func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *
 		bus:            bus,
 		routes:         make(map[string]func(Request) Response),
 		pruneThreshold: pruneThreshold,
+		prompts:        NewPromptManager(bus),
 	}
 }
 
@@ -84,9 +86,22 @@ func (h *Handler) HandleRequest(req Request) Response {
 		return h.handleUnpair(req.Payload)
 	case CmdPing:
 		return h.handlePing(req.Payload)
+	case CmdPromptRespond:
+		return h.handlePromptRespond(req.Payload)
 	default:
 		return Err(CodeUnknownCommand, "unknown command", map[string]string{"command": req.Command})
 	}
+}
+
+func (h *Handler) handlePromptRespond(payload []byte) Response {
+	var response PromptRespondPayload
+	if err := json.Unmarshal(payload, &response); err != nil || response.PromptID == "" || response.Choice == "" {
+		return Err(CodeInvalidPayload, "invalid prompt response", nil)
+	}
+	if h.prompts == nil || !h.prompts.Respond(response.PromptID, response.Choice) {
+		return Err(CodeDeviceNotFound, "prompt not found", map[string]string{"promptId": response.PromptID})
+	}
+	return Response{OK: true}
 }
 
 func (h *Handler) handleDevices() Response {

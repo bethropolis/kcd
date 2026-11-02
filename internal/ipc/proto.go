@@ -51,6 +51,7 @@ const (
 	CmdConfigGet            = "config_get"
 	CmdConfigSchema         = "config_schema"
 	CmdReload               = "reload"
+	CmdPromptRespond        = "prompt_respond"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -94,6 +95,12 @@ type ConfigGetPayload struct {
 type ReloadResponse struct {
 	Applied         []string `json:"applied"`
 	RestartRequired []string `json:"restartRequired"`
+}
+
+// PromptRespondPayload resolves a pending interactive decision.
+type PromptRespondPayload struct {
+	PromptID string `json:"promptId"`
+	Choice   string `json:"choice"`
 }
 
 // WatchPayload is used for CmdWatch to configure event streaming.

@@ -49,6 +49,7 @@ const (
 	TypeMprisUpdate          EventType = "mpris.update"
 	TypeStateSnapshot        EventType = "state.snapshot"
 	TypeStreamGap            EventType = "stream.gap"
+	TypePrompt               EventType = "prompt"
 )
 
 // All returns every known event type. TestAllMatchesConstants keeps it in step
@@ -68,7 +69,7 @@ func All() []EventType {
 		TypeLockState,
 		TypeSMSIncoming, TypeSMSAttachment,
 		TypeRingReceived, TypeContactsUpdated,
-		TypeMprisUpdate, TypeStateSnapshot, TypeStreamGap,
+		TypeMprisUpdate, TypeStateSnapshot, TypeStreamGap, TypePrompt,
 	}
 }
 
@@ -95,7 +96,7 @@ const (
 // OptInOnly lists types a subscriber must name: unfiltered Subscribe skips
 // them, which keeps bare watch from receiving bodies and arming the phone.
 func OptInOnly() []EventType {
-	return []EventType{TypeSMSIncoming, TypeSMSAttachment}
+	return []EventType{TypeSMSIncoming, TypeSMSAttachment, TypePrompt}
 }
 
 // Event represents a single occurrence of something interesting in the daemon.
