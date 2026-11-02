@@ -97,6 +97,33 @@ func TestNotificationPlugin_Handle_Silent(t *testing.T) {
 	}
 }
 
+func TestNotificationPlugin_PopupPolicySuppressesDelivery(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	p.popups.Enabled = false
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
+	pkt, _ := protocol.NewPacket("kdeconnect.notification", NotificationBody{
+		AppName: "TestApp",
+		Title:   "Hello",
+		Text:    "World",
+	})
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	if got := f.lastCall(); got != nil {
+		t.Fatalf("popup was delivered while globally disabled: %v", got)
+	}
+}
+
+func TestNotificationPlugin_NoneBackendSuppressesDelivery(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	p.backend = "none"
+	dev := device.NewDevice("dev1", "Test", "phone", log.NewTest(t))
+	p.sendDesktopNotification(dev.ID(), "TestApp", "id", "Hello", "World", "")
+	if got := f.lastCall(); got != nil {
+		t.Fatalf("popup was delivered with none backend: %v", got)
+	}
+}
+
 // fakeNotifier records the notify-send invocations and fakes a print-id.
 type fakeNotifier struct {
 	mu     sync.Mutex

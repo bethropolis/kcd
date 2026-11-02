@@ -31,11 +31,24 @@ type NotificationPlugin struct {
 	mu             sync.RWMutex
 	filters        config.NotificationConfig
 	newExec        func(ctx context.Context, name string, args ...string) *exec.Cmd
+	popups         config.PopupsConfig
+	backend        string
 }
 
 // NewNotificationPlugin creates a NotificationPlugin; nil tlsConfig disables
 // icon fetching over the side-channel.
 func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
+	popups := config.PopupsConfig{}
+	popups.Defaults()
+	return newNotificationPlugin(cfg, bus, tlsConfig, logger, popups, "auto", options...)
+}
+
+// NewNotificationPluginWithPopup creates a notification plugin with popup policy.
+func NewNotificationPluginWithPopup(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, popups config.PopupsConfig, backend string, options ...transport.SidechannelOptions) *NotificationPlugin {
+	return newNotificationPlugin(cfg, bus, tlsConfig, logger, popups, backend, options...)
+}
+
+func newNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, popups config.PopupsConfig, backend string, options ...transport.SidechannelOptions) *NotificationPlugin {
 	var sidechannel transport.SidechannelOptions
 	if len(options) > 0 {
 		sidechannel = options[0]
@@ -47,6 +60,8 @@ func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus,
 		tlsConfig:   tlsConfig,
 		logger:      logger.With(log.String("plugin", "notification")),
 		newExec:     exec.CommandContext,
+		popups:      popups,
+		backend:     backend,
 	}
 
 	// Probe --print-id support by checking --help output.

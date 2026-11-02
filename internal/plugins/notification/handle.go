@@ -18,6 +18,9 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
 	}
+	if !p.popups.Allows("notification") {
+		return nil
+	}
 
 	// Handle cancellation — close the corresponding desktop notification.
 	if body.IsCancel {

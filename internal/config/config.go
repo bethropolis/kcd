@@ -37,8 +37,10 @@ type Config struct {
 	Plugins             PluginConfig                 `toml:"plugins"`
 	Commands            map[string]string            `toml:"commands"`
 	CommandsPerDevice   map[string]map[string]string `toml:"commands_per_device"`
+	Backends            BackendsConfig               `toml:"backends" json:"-"`
 	Devices             map[string]DeviceConfig      `toml:"devices" json:"-"`
 	Notifications       NotificationConfig           `toml:"notifications"`
+	Popups              PopupsConfig                 `toml:"popups" json:"-"`
 	Battery             BatteryConfig                `toml:"battery"`
 	MPRIS               MPRISConfig                  `toml:"mpris"`
 	Notification        NotificationPluginConfig     `toml:"notification_plugin"`
@@ -83,10 +85,12 @@ func Defaults() *Config {
 	c.Plugins.Defaults()
 	c.Commands = make(map[string]string)
 	c.CommandsPerDevice = make(map[string]map[string]string)
+	c.Backends.Defaults()
 	c.Devices = make(map[string]DeviceConfig)
 	c.Battery.Defaults()
 	c.MPRIS = MPRISConfig{PollWhilePlaying: true, PositionInterval: "2s"}
 	c.Notification.Defaults()
+	c.Popups.Defaults()
 	c.Share.Defaults()
 	c.SFTP.Defaults()
 	c.Ping.Defaults()

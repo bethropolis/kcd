@@ -12,6 +12,15 @@ func (c *Config) Validate() error {
 	if err := c.validateDurations(); err != nil {
 		return err
 	}
+	if c.Backends.Volume != "auto" && c.Backends.Volume != "pactl" && c.Backends.Volume != "wpctl" && c.Backends.Volume != "none" {
+		return fmt.Errorf("config: invalid volume backend %q", c.Backends.Volume)
+	}
+	if c.Backends.Notify != "auto" && c.Backends.Notify != "notify-send" && c.Backends.Notify != "dbus" && c.Backends.Notify != "none" {
+		return fmt.Errorf("config: invalid notify backend %q", c.Backends.Notify)
+	}
+	if c.Popups.Backend != "auto" && c.Popups.Backend != "notify-send" && c.Popups.Backend != "dbus" && c.Popups.Backend != "none" {
+		return fmt.Errorf("config: invalid popup backend %q", c.Popups.Backend)
+	}
 	if protocol.SanitizeDeviceName(c.DeviceName) == "" {
 		return fmt.Errorf("config: device_name is required")
 	}

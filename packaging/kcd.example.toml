@@ -158,6 +158,32 @@ presenter = true
 # See `kcd volume --help`.
 remotesystemvolume = true
 
+# ─── Desktop popups ───────────────────────────────────────────────────────────
+
+# Popup events still flow to IPC watchers when delivery is disabled.
+[popups]
+# enabled = true
+# backend = "auto"                 # auto | notify-send | dbus | none
+# app_name = "KDE Connect"
+# battery = true
+# ping = true
+# telephony = true
+# sms = true
+# notifications = true
+# runcommand = true
+
+# External desktop commands are argv arrays, never shell strings. Commands may
+# use {file} and {text} placeholders as individual arguments.
+[backends]
+# lock_command = ["loginctl", "lock-session"]
+# unlock_command = ["loginctl", "unlock-session"]
+# clipboard_get = ["wl-paste", "--no-newline"]
+# clipboard_set = ["wl-copy"]
+# volume = "auto"                 # auto | pactl | wpctl | none
+# notify = "auto"                 # auto | notify-send | dbus | none
+# sound_command = ["pw-play", "{file}"]
+# sound_file = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
+
 # Lock behavior for incoming requests from paired peers.
 [lockdevice]
 # Allow paired peers to unlock this desktop session. Remote locking remains enabled.

@@ -49,7 +49,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger, sidechannel))
+		plugins.Register(notification.NewNotificationPluginWithPopup(cfg.Notification, bus, tlsCfg, logger, cfg.Popups, cfg.Backends.Notify, sidechannel))
 	}
 	if cfg.Plugins.Clipboard {
 		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel))

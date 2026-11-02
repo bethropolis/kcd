@@ -54,6 +54,72 @@ type PluginConfig struct {
 	RemoteSystemVolume bool `toml:"remotesystemvolume"`
 }
 
+// BackendsConfig defines external desktop tools as argv templates.
+type BackendsConfig struct {
+	LockCommand   []string `toml:"lock_command"`
+	UnlockCommand []string `toml:"unlock_command"`
+	ClipboardGet  []string `toml:"clipboard_get"`
+	ClipboardSet  []string `toml:"clipboard_set"`
+	Volume        string   `toml:"volume"`
+	Notify        string   `toml:"notify"`
+	SoundCommand  []string `toml:"sound_command"`
+	SoundFile     string   `toml:"sound_file"`
+}
+
+// Defaults fills backend selectors without overriding command templates.
+func (c *BackendsConfig) Defaults() {
+	c.Volume = "auto"
+	c.Notify = "auto"
+}
+
+// PopupsConfig controls desktop popup delivery independently of event flow.
+type PopupsConfig struct {
+	Enabled       bool   `toml:"enabled"`
+	Backend       string `toml:"backend"`
+	AppName       string `toml:"app_name"`
+	Battery       bool   `toml:"battery"`
+	Ping          bool   `toml:"ping"`
+	Telephony     bool   `toml:"telephony"`
+	SMS           bool   `toml:"sms"`
+	Notifications bool   `toml:"notifications"`
+	RunCommand    bool   `toml:"runcommand"`
+}
+
+// Defaults enables the existing popup behavior for every source.
+func (c *PopupsConfig) Defaults() {
+	c.Enabled = true
+	c.Backend = "auto"
+	c.Battery = true
+	c.Ping = true
+	c.Telephony = true
+	c.SMS = true
+	c.Notifications = true
+	c.RunCommand = true
+}
+
+// Allows reports whether a popup source is enabled by the popup policy.
+func (c PopupsConfig) Allows(source string) bool {
+	if !c.Enabled {
+		return false
+	}
+	switch source {
+	case "battery":
+		return c.Battery
+	case "ping":
+		return c.Ping
+	case "telephony":
+		return c.Telephony
+	case "sms":
+		return c.SMS
+	case "notification":
+		return c.Notifications
+	case "runcommand":
+		return c.RunCommand
+	default:
+		return true
+	}
+}
+
 // DeviceConfig restricts globally enabled features for one paired device.
 type DeviceConfig struct {
 	Alias         string             `toml:"alias"`
