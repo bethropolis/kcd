@@ -35,7 +35,12 @@ which is how the [projects in Community](#community) are built.
 | **Ping** | Simple connectivity check |
 | **Connectivity** | Phone signal strength and network type reporting |
 | **System Volume** | Control desktop audio volume from the phone |
-| **Send Notification** | Push a notification from the PC to the phone |
+| **Remote Volume** | Control phone media and notification volume from desktop |
+| **Find This Device** | Sound desktop alarm from the phone |
+| **Presenter** | Navigate presentation slides and pointer from the phone |
+| **Digitizer** | Virtual drawing tablet and stylus input emulation via uinput |
+| **Event Hooks** | Run direct commands on daemon events without external watchers |
+| **D-Bus Adapter** | Optional compatibility bridge (`kcd dbus`) for KDE Plasma widgets |
 | **Auto-reconnect** | Paired devices reconnect automatically after dropping |
 
 Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
@@ -317,6 +322,9 @@ kcd watch --json | while read -r event; do
 done
 ```
 
+> [!TIP]
+> For simple event triggers, you can also configure native `[hooks]` directly in `kcd.toml` (e.g. run a script when a device connects or battery drops below a threshold) without keeping a background watcher script running. See [`packaging/kcd.example.toml`](packaging/kcd.example.toml).
+
 ---
 
 ## Events
@@ -368,9 +376,13 @@ kcd connect 192.168.1.100
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, plugin system, event bus |
 | [`docs/CLI.md`](docs/CLI.md) | Full CLI reference and sub-commands |
 | [`docs/IPC_PROTOCOL.md`](docs/IPC_PROTOCOL.md) | Daemon socket protocol: commands, events, packet reference |
-| [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python examples) |
+| [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python and Go examples) |
+| [`docs/PROTOCOL_COMPAT.md`](docs/PROTOCOL_COMPAT.md) | KDE Connect v8 protocol matrix and intentional deviations |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Real-world continuous profiling dossiers and resource benchmarks |
+| [`docs/DBUS.md`](docs/DBUS.md) | D-Bus compatibility adapter guide |
 | [`docs/CONTAINER.md`](docs/CONTAINER.md) | Running kcd in Docker / Podman |
 | [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes and version history |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup, checks, commit and PR conventions |
 | [`SECURITY.md`](SECURITY.md) | Threat model, hardening, private vulnerability reporting |
 

@@ -1,11 +1,3 @@
-# Configuration
-
-`kcd config check` parses and validates the effective configuration, reporting
-unknown-key warnings. `kcd config show` prints the effective TOML; add
-`--json` for machine-readable output and `--origin` to print the source path.
-`kcd config defaults` prints default TOML, and `kcd config path` prints the
-primary config and drop-in directory.
-
 # kcd CLI Reference
 
 `kcd` is both the daemon and the command-line client. Sub-commands that interact with a running daemon communicate over a Unix socket (`/run/user/$UID/kcd/kcd.sock`). The daemon itself is started with `kcd daemon`.
@@ -18,12 +10,13 @@ These flags apply to every command:
 
 | Flag | Default | Description |
 |---|---|---|
+| `--instance <name>` | — | Named isolated daemon instance (`$XDG_RUNTIME_DIR/kcd/<name>/kcd.sock`) |
 | `--config <path>` | `~/.config/kcd/kcd.toml` | Path to config file |
 | `--log-level <level>` | `info` | Log verbosity: `debug`, `info`, `warn`, `error`, `quiet` |
 | `--help`, `-h` | — | Show help |
 | `--version`, `-v` | — | Show version, commit, and build date |
 
-`--config` and `--log-level` can also be set via environment variables `KCD_CONFIG` and `KCD_LOG_LEVEL`.
+`--instance`, `--config`, and `--log-level` can also be set via environment variables `KCD_INSTANCE`, `KCD_CONFIG`, and `KCD_LOG_LEVEL`.
 
 Flags must come before positional arguments (`kcd battery --json <device-id>`, not `kcd battery <device-id> --json`). Anything after the first positional is treated as an argument, so a trailing flag is silently ignored rather than rejected.
 
@@ -80,6 +73,26 @@ override even after changing the global name; remove it or set it to `""` to
 inherit. Protocol version, payload limits, packet buffers and queues
 remain fixed implementation settings, not configuration knobs. TCP
 keepalive is tunable via `[network] keepalive_idle` (minimum `"10s"`).
+
+---
+
+## config
+
+Inspect and validate configuration.
+
+    kcd config check
+    kcd config show [--json] [--origin]
+    kcd config defaults
+    kcd config path
+
+**Subcommands**
+
+- `check`: Parse and validate the effective configuration from the main file and any `.d` drop-ins, reporting unknown-key warnings and validation errors.
+- `show`: Print the merged effective configuration in TOML format. Flags:
+  - `--json`: Output indented JSON.
+  - `--origin`: Print the primary configuration file path to stderr.
+- `defaults`: Output the built-in default configuration in TOML format.
+- `path`: Print the configuration lookup paths (primary config file and `.d` drop-in directory).
 
 ---
 
@@ -172,6 +185,34 @@ Show daemon runtime information.
     Old Laptop deadbeef  laptop  UNPAIRED  —                   —        never
 
     Plugins (20): Pair, Battery, Clipboard, Notification, Share, ...
+
+---
+
+## dbus
+
+Run the optional KDE Connect D-Bus compatibility adapter.
+
+    kcd dbus
+
+Launches a headless D-Bus bridge that claims `org.kde.kdeconnect` on the session bus and exports `/modules/kdeconnect` for desktop applets (such as KDE Plasma widgets). Queries the local `kcd` daemon via IPC to report daemon status and known device IDs. See [docs/DBUS.md](DBUS.md).
+
+---
+
+## version
+
+Show daemon and IPC capability information.
+
+    kcd version [--json]
+
+Without flags, prints the CLI version, git commit hash, and build date.
+
+**Flags**
+
+| Flag | Description |
+|---|---|
+| `--json` | Output machine-readable JSON discovery payload |
+
+With `--json`, outputs an `ipc.HelloResponse` payload including the IPC API version (`2.0`), daemon version, supported commands, event types, opt-in events, plugin enable states, and supported feature flags (`errorCodes`, `keepAlive`, `watchResume`, `prompts`, `config`, `schemas`).
 
 ---
 

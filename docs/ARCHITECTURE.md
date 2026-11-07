@@ -312,7 +312,8 @@ Plugins depend on these neutral packages, never on each other.
 | `connectivity` | `kdeconnect.connectivity_report` | Fires `connectivity.update` |
 | `contacts` | `kdeconnect.contacts.response_uids_timestamps`, `kdeconnect.contacts.response_vcards` | Synchronizes contact list and vCard details on demand |
 | `findthisdevice` | `kdeconnect.findthisdevice.request` | Plays alarm sound on the local machine when requested by the phone |
-| `sendnotifications` | `kdeconnect.notification` (outbound) | Forwards desktop notifications to the phone |
+| `presenter` | `kdeconnect.presenter` | Slide navigation and pointer control (Wayland `ydotool` / X11 `xdotool`) |
+| `remotesystemvolume` | `kdeconnect.systemvolume.request` | Controls audio sink volumes and mute state on remote peer via IPC or CLI |
 | `digitizer` | `kdeconnect.digitizer`, `kdeconnect.digitizer.session` | Emulates a virtual drawing tablet via Linux uinput |
 
 ### SFTP mounts
@@ -508,7 +509,7 @@ kcd/
 
 **No CGo.** The entire daemon is pure Go. This keeps cross-compilation trivial and the binary fully static-linkable.
 
-**No GUI / D-Bus session bus dependency.** D-Bus is used optionally by the MPRIS and SystemVolume plugins (both fail gracefully if the session bus is unavailable). The MPRIS plugin uses native Go D-Bus bindings (`godbus`) — not the `playerctl` CLI — for full media player discovery and control. Other plugins use subprocess calls (`wpctl`, `notify-send`, `wl-copy`, `ydotool`, etc.) so the daemon can run in a headless session or inside a container.
+**No GUI / D-Bus session bus dependency.** D-Bus is used optionally by the MPRIS plugin and the `kcd dbus` compatibility adapter (both fail gracefully if the session bus is unavailable). The MPRIS plugin uses native Go D-Bus bindings (`godbus`) — not the `playerctl` CLI — for full media player discovery and control. Other plugins use subprocess calls (`wpctl`, `notify-send`, `wl-copy`, `ydotool`, etc.) so the daemon can run in a headless session or inside a container.
 
 **Pool-based packet allocation.** `protocol.PacketPool` eliminates per-packet heap allocation on the TCP read loop — important when receiving high-frequency events like mousepad movement.
 

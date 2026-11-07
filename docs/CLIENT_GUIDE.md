@@ -80,16 +80,32 @@ and capability handshake:
 
 ```go
 cl := client.New(socketPath)
+
+// Capability negotiation
 hello, err := cl.Hello()
 if err != nil {
     return err
 }
 fmt.Println(hello.APIVersion, hello.Features)
+
+// Persistent keepalive session for request pipelining
+session, err := cl.OpenKeepAlive()
+if err != nil {
+    return err
+}
+defer session.Close()
+
+res, err := session.Call("ping", map[string]string{"deviceId": "a1b2..."}, time.Second)
+
+// Stream live events, optionally resuming from a previous sequence token
+ch := make(chan events.Event, 64)
+err = cl.WatchSince(ctx, []string{"battery.update", "device.connected"}, lastSeq, ch)
 ```
 
 `client.APIVersion` is the IPC contract version. Additive capabilities are
 listed by `Hello`; callers should check those feature names rather than parse
-the daemon version string.
+the daemon version string. Use `OpenKeepAlive()` for long-lived interactive
+sessions to pipeline requests without per-call socket reconnects.
 
 ### 3.1 Listing Devices
 

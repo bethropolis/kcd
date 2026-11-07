@@ -96,6 +96,66 @@ non-opt-in watch events.
 
 ### 3.1 Built-in Commands (handler.go)
 
+#### `hello`
+
+Negotiate protocol capabilities and keepalive on a new or persistent IPC connection.
+
+**Request payload:** `HelloPayload` (optional)
+
+```json
+{
+  "client": "my-client",
+  "clientVersion": "1.0.0",
+  "apiVersions": [2],
+  "keepAlive": true
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `client` | string (optional) | Client application identifier |
+| `clientVersion` | string (optional) | Client version string |
+| `apiVersions` | `[]int` (optional) | Array of IPC API versions supported by the client |
+| `keepAlive` | bool (optional) | When `true`, enables persistent request/response pipelining on the connection |
+
+**Response data:** `HelloResponse`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "apiVersion": 2,
+    "daemonVersion": "2.0.0",
+    "commands": ["battery", "config_get", "config_schema", "config_set", "devices", "hello", "pair", "reload", "status", "watch"],
+    "events": ["battery.threshold", "battery.update", "device.connected", "notification"],
+    "optInEvents": ["sms.incoming", "sms.attachment"],
+    "plugins": {
+      "Battery": true,
+      "Clipboard": true,
+      "Connectivity": true,
+      "Digitizer": true,
+      "FindMyPhone": true,
+      "FindThisDevice": true,
+      "LockDevice": true,
+      "MPRIS": true,
+      "Mousepad": true,
+      "Notification": true,
+      "Pair": true,
+      "Ping": true,
+      "Presenter": true,
+      "RemoteSystemVolume": true,
+      "RunCommand": true,
+      "SFTP": true,
+      "SMS": true,
+      "Share": true,
+      "SystemVolume": true,
+      "Telephony": true
+    },
+    "features": ["errorCodes", "keepAlive", "watchResume", "prompts", "config", "schemas"]
+  }
+}
+```
+
 #### `devices`
 
 List all known devices (paired + unpaired).
@@ -259,17 +319,100 @@ Return daemon status info.
 {
   "ok": true,
   "data": {
-    "version": "1.13.0",
-    "startedAt": "2026-05-27T10:00:00Z",
+    "version": "2.0.0",
+    "startedAt": "2026-11-07T10:00:00Z",
     "uptimeHuman": "2h34m",
     "socketPath": "/run/user/1000/kcd/kcd.sock",
     "configPath": "/home/user/.config/kcd/kcd.toml",
-    "plugins": ["pair", "ping", "battery", "share", "sftp", "clipboard", "mpris", "notification", "sms", "telephony", "connectivity", "systemvolume", "mousepad", "lockdevice", "findmyphone", "runcommand"],
+    "plugins": ["battery", "clipboard", "connectivity", "contacts", "digitizer", "findmyphone", "findthisdevice", "lockdevice", "mousepad", "mpris", "notification", "pair", "ping", "presenter", "remotesystemvolume", "runcommand", "sftp", "share", "sms", "systemvolume", "telephony"],
     "deviceCount": 3,
     "connectedCount": 1
   }
 }
 ```
+
+#### `prompt_respond`
+
+Respond to an interactive prompt event emitted by the daemon (e.g. pairing authorization or file transfer confirmation).
+
+**Request payload:** `PromptRespondPayload`
+
+```json
+{
+  "promptId": "prompt-1234",
+  "choice": "accept"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `promptId` | string | Unique prompt identifier from the `prompt` event |
+| `choice` | string | Selected choice matching one of the prompt's advertised options |
+
+**Response data:** none (`{"ok": true}`)
+
+#### `config_get`
+
+Query effective configuration settings.
+
+**Request payload:** `ConfigGetPayload` (optional)
+
+```json
+{
+  "keys": ["network.dial_timeout", "battery.notify_low"]
+}
+```
+
+If `keys` is empty or omitted, returns all API-visible configuration settings.
+
+**Response data:** Object mapping configuration keys to their current effective values.
+
+#### `config_schema`
+
+Return JSON schemas describing writable and inspectable configuration settings.
+
+**Request payload:** none
+
+**Response data:** Object containing schema definitions and type constraints for API-configurable settings.
+
+#### `config_set`
+
+Persist runtime configuration overrides to the daemon's API drop-in directory (`kcd.toml.d/90-ipc.toml`).
+
+**Request payload:** `ConfigSetPayload`
+
+```json
+{
+  "values": {
+    "battery.notify_low": false,
+    "notifications.app_name": "Custom Name"
+  }
+}
+```
+
+Only allowlisted configuration keys are accepted. Writable values are validated before writing.
+
+**Response data:** none (`{"ok": true}`)
+
+#### `reload`
+
+Trigger a daemon configuration reload.
+
+**Request payload:** none
+
+**Response data:** `ReloadResponse`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "applied": [],
+    "restartRequired": ["config reload requires daemon SIGHUP"]
+  }
+}
+```
+
+Reports settings that were applied immediately and settings that require a process reload or restart.
 
 #### `battery`
 

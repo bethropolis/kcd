@@ -214,6 +214,14 @@ digitizer = true
 # Allow paired peers to unlock this desktop session. Remote locking remains enabled.
 allow_remote_unlock = false
 
+# ─── IPC Access Tiers ─────────────────────────────────────────────────────────
+
+[ipc]
+# Optional secondary read-only Unix socket path for sandboxed or untrusted readers
+# (permits only inspection commands such as devices, status, battery, and non-opt-in watch events).
+# Default: "" (disabled)
+# readonly_socket = "/run/user/1000/kcd/kcd-ro.sock"
+
 # ─── Connection timing and storage ────────────────────────────────────────────
 
 # Durations use Go syntax (e.g. "750ms", "10s", "5m") and must be positive.
