@@ -14,7 +14,7 @@ other subcommand), built on `urfave/cli/v2`.
 
 - The daemon serves a Unix socket (newline-delimited JSON). The CLI, `pkg/client` and third-party tools are all clients of it.
 - There's no GUI. The daemon links D-Bus (`godbus`) only in the MPRIS plugin. Other desktop integration goes through external tools (`notify-send`, `gdbus`, `pactl`/`wpctl`, `loginctl`…). Every desktop dependency must degrade gracefully (log and continue) when it's missing.
-- **Language:** Go 1.25 (pinned in `mise.toml`, with golangci-lint and hk).
+- **Language:** Go 1.26 (pinned in `mise.toml`, with golangci-lint and hk).
 - **Module:** `github.com/bethropolis/kcd`. **License:** MIT.
 - **Core constraints:** a static binary (`CGO_ENABLED=0`), memory efficiency (stream, never buffer payloads), and zero idle cost (no timers or polling when nothing is happening).
 
