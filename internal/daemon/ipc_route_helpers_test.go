@@ -14,15 +14,27 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-type stubRoutePlugin struct{ name string }
+type stubRoutePlugin struct {
+	name         string
+	onConnect    func(device.Peer)
+	onDisconnect func(device.Peer)
+}
 
-func (s *stubRoutePlugin) Name() string               { return s.name }
-func (s *stubRoutePlugin) IncomingTypes() []string    { return nil }
-func (s *stubRoutePlugin) OutgoingTypes() []string    { return nil }
-func (s *stubRoutePlugin) Timeout() time.Duration     { return 0 }
-func (s *stubRoutePlugin) OnConnect(device.Sender)    {}
-func (s *stubRoutePlugin) OnDisconnect(device.Sender) {}
-func (s *stubRoutePlugin) Handle(context.Context, device.Sender, *protocol.Packet) error {
+func (s *stubRoutePlugin) Name() string            { return s.name }
+func (s *stubRoutePlugin) IncomingTypes() []string { return nil }
+func (s *stubRoutePlugin) OutgoingTypes() []string { return nil }
+func (s *stubRoutePlugin) Timeout() time.Duration  { return 0 }
+func (s *stubRoutePlugin) OnConnect(dev device.Peer) {
+	if s.onConnect != nil {
+		s.onConnect(dev)
+	}
+}
+func (s *stubRoutePlugin) OnDisconnect(dev device.Peer) {
+	if s.onDisconnect != nil {
+		s.onDisconnect(dev)
+	}
+}
+func (s *stubRoutePlugin) Handle(context.Context, device.Peer, *protocol.Packet) error {
 	return nil
 }
 

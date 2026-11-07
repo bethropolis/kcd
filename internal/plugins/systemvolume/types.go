@@ -3,41 +3,24 @@
 package systemvolume
 
 import (
-	"os/exec"
-	"time"
-
+	"github.com/bethropolis/kcd/internal/desktop/audio"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 )
 
 // SystemVolumePlugin handles volume control packets from the phone.
 type SystemVolumePlugin struct {
-	logger  log.Logger
-	bus     *events.Bus
-	backend string // "wpctl" or "pactl"
-}
-
-func NewSystemVolumePlugin(bus *events.Bus, logger log.Logger) *SystemVolumePlugin {
-	p := &SystemVolumePlugin{
-		logger: logger.With(log.String("plugin", "systemvolume")),
-		bus:    bus,
-	}
-	// Detect available audio backend at init time.
-	if _, err := exec.LookPath("wpctl"); err == nil {
-		p.backend = "wpctl"
-	} else if _, err := exec.LookPath("pactl"); err == nil {
-		p.backend = "pactl"
-	} else {
-		p.logger.Warn("systemvolume: no audio backend found (wpctl or pactl required)")
-	}
-	return p
+	logger log.Logger
+	bus    *events.Bus
+	audio  *audio.Backend
 }
 
 type VolumeBody struct {
 	RequestSinks bool   `json:"requestSinks,omitempty"`
 	Name         string `json:"name,omitempty"`
-	Volume       int    `json:"volume,omitempty"`
-	Muted        bool   `json:"muted,omitempty"`
+	Volume       *int   `json:"volume,omitempty"`
+	Muted        *bool  `json:"muted,omitempty"`
+	Enabled      *bool  `json:"enabled,omitempty"`
 	MaxVolume    int    `json:"maxVolume,omitempty"`
 }
 
@@ -53,10 +36,3 @@ type SinkInfo struct {
 type sinkListBody struct {
 	SinkList []SinkInfo `json:"sinkList"`
 }
-
-func (p *SystemVolumePlugin) Name() string           { return "SystemVolume" }
-func (p *SystemVolumePlugin) Timeout() time.Duration { return 5 * time.Second }
-func (p *SystemVolumePlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.systemvolume.request"}
-}
-func (p *SystemVolumePlugin) OutgoingTypes() []string { return []string{"kdeconnect.systemvolume"} }

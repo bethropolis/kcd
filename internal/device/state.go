@@ -172,5 +172,13 @@ func SaveDevices(path string, devices []DeviceInfo) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("device: rename %s: %w", path, err)
 	}
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("device: open state directory %s: %w", dir, err)
+	}
+	defer dirFile.Close()
+	if err := dirFile.Sync(); err != nil {
+		return fmt.Errorf("device: sync state directory %s: %w", dir, err)
+	}
 	return nil
 }

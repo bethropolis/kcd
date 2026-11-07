@@ -35,7 +35,7 @@ end
 
 # All top-level subcommands (for "don't complete subcommands twice" guards)
 set -l __kcd_cmds daemon devices connect pair unpair ping battery connectivity watch \
-    sftp reply dismiss call findmyphone lock unlock share clipboard run sms contacts \
+    sftp reply dismiss notify call findmyphone lock unlock share clipboard run sms contacts \
     mpris volume doctor status
 
 # ---------------------------------------------------------------------------
@@ -93,6 +93,8 @@ complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a run         -d 'Execute and manage remote commands on the device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a dismiss     -d 'Dismiss a notification on a device'
+complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
+    -a notify      -d 'Interact with notifications on a device'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
     -a contacts    -d 'Sync and browse the device address book'
 complete -c kcd -n "not __fish_seen_subcommand_from $__kcd_cmds" \
@@ -279,6 +281,18 @@ complete -c kcd -n "__fish_seen_subcommand_from contacts && __fish_seen_subcomma
 complete -c kcd -n "__fish_seen_subcommand_from dismiss && __kcd_at_arg 2" \
     -a '(__kcd_connected_devices)' -d 'Device ID'
 # notification-id at position 3 is free-form
+
+# ---------------------------------------------------------------------------
+# notify  action|reply|dismiss
+# ---------------------------------------------------------------------------
+complete -c kcd -n "__fish_seen_subcommand_from notify && not __fish_seen_subcommand_from action reply dismiss" \
+    -a action   -d 'Trigger a notification action'
+complete -c kcd -n "__fish_seen_subcommand_from notify && not __fish_seen_subcommand_from action reply dismiss" \
+    -a reply    -d 'Send a text reply to a smartphone notification'
+complete -c kcd -n "__fish_seen_subcommand_from notify && not __fish_seen_subcommand_from action reply dismiss" \
+    -a dismiss  -d 'Dismiss a notification on a device'
+complete -c kcd -n "__fish_seen_subcommand_from notify && __fish_seen_subcommand_from action reply dismiss && __kcd_at_arg 3" \
+    -a '(__kcd_connected_devices)' -d 'Device ID'
 
 # ---------------------------------------------------------------------------
 # volume  list|set|mute  [device-id]  ...

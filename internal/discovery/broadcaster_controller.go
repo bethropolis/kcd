@@ -33,6 +33,7 @@ type BroadcasterController struct {
 	// attach to a running owner instead of waiting out the cycle.
 	ownedCtx context.Context
 	owners   map[string]struct{}
+	resetCh  chan struct{}
 	// browseStarter launches mDNS browsing on the owned context: both discovery
 	// directions share one lifetime — pairing/reconnect only, never steady state.
 	browseStarter func(ctx context.Context)
@@ -57,6 +58,7 @@ func NewBroadcasterController(identity *protocol.Packet, port int, interval time
 		shouldReduce:   shouldReduce,
 		logger:         logger.With(log.String("component", "broadcaster")),
 		owners:         make(map[string]struct{}),
+		resetCh:        make(chan struct{}, 1),
 	}
 }
 
@@ -104,6 +106,7 @@ func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner str
 		interval:       bc.interval,
 		idleInterval:   bc.idleInterval,
 		logger:         bc.logger,
+		resetCh:        bc.resetCh,
 	}
 	go func() {
 		b.Run(ctx, bc.shouldReduce)
@@ -113,6 +116,19 @@ func (bc *BroadcasterController) StartOwned(parentCtx context.Context, owner str
 	}()
 	if bc.browseStarter != nil {
 		go bc.browseStarter(ctx)
+	}
+}
+
+// ResetBackoff restarts the broadcast cadence after a fresh network sighting.
+func (bc *BroadcasterController) ResetBackoff() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if !bc.running {
+		return
+	}
+	select {
+	case bc.resetCh <- struct{}{}:
+	default:
 	}
 }
 

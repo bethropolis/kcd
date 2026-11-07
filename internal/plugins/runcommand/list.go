@@ -31,21 +31,21 @@ type commandEntry struct {
 // RequestList asks the device for its command list, registering the waiter
 // first so a fast phone cannot answer into a void. Fails on disconnect,
 // send error, or listTimeout.
-func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) ([]Command, error) {
+func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Peer) ([]Command, error) {
 	waiter := make(chan []Command, 1)
 
-	p.Mu.Lock()
+	p.mu.Lock()
 	if p.pendingLists == nil {
 		p.pendingLists = make(map[string]chan []Command)
 	}
 	// A second concurrent request for the same device would race for the
 	// single reply; fail loudly rather than silently dropping one.
 	if _, busy := p.pendingLists[dev.ID()]; busy {
-		p.Mu.Unlock()
+		p.mu.Unlock()
 		return nil, fmt.Errorf("runcommand: a command list request for %s is already in flight", dev.ID())
 	}
 	p.pendingLists[dev.ID()] = waiter
-	p.Mu.Unlock()
+	p.mu.Unlock()
 
 	defer p.clearListWaiter(dev.ID())
 
@@ -71,17 +71,17 @@ func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) (
 // clearListWaiter drops a registered waiter so a later request is not
 // blocked by an abandoned one.
 func (p *RunCommandPlugin) clearListWaiter(deviceID string) {
-	p.Mu.Lock()
-	defer p.Mu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	delete(p.pendingLists, deviceID)
 }
 
 // deliverCommandList hands a decoded reply to the waiter, non-blocking: a
 // waiterless reply must not stall the device's read loop.
 func (p *RunCommandPlugin) deliverCommandList(deviceID string, commands []Command) {
-	p.Mu.RLock()
+	p.mu.RLock()
 	waiter := p.pendingLists[deviceID]
-	p.Mu.RUnlock()
+	p.mu.RUnlock()
 
 	if waiter == nil {
 		p.logger.Debug("runcommand: command list with no waiter, dropping",
@@ -120,7 +120,7 @@ func parseCommandList(raw string) ([]Command, error) {
 
 // handleListReply processes a kdeconnect.runcommand packet carrying the
 // peer's command list.
-func (p *RunCommandPlugin) handleListReply(dev device.Sender, pkt *protocol.Packet) {
+func (p *RunCommandPlugin) handleListReply(dev device.Peer, pkt *protocol.Packet) {
 	var body struct {
 		CommandList string `json:"commandList"`
 	}

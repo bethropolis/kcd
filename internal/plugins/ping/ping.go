@@ -11,7 +11,10 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*PingPlugin)(nil)
 
 type PingPlugin struct {
 	cfg    config.PingConfig
@@ -43,7 +46,7 @@ func (p *PingPlugin) Timeout() time.Duration  { return 5 * time.Second }
 func (p *PingPlugin) IncomingTypes() []string { return []string{"kdeconnect.ping"} }
 func (p *PingPlugin) OutgoingTypes() []string { return []string{"kdeconnect.ping"} }
 
-func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *PingPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body PingBody
 	_ = json.Unmarshal(pkt.Body, &body)
 
@@ -62,7 +65,7 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 	}
 
 	// Do not block - spawn goroutine
-	plugin.RunCommandAsync(p.logger, "notify-send",
+	sysexec.RunAsync(p.logger, "notify-send",
 		"-a", p.cfg.AppName,
 		"-i", p.cfg.Icon,
 		"Ping from "+dev.Name(), msg,
@@ -71,5 +74,20 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 	return nil
 }
 
-func (p *PingPlugin) OnConnect(dev device.Sender)    {}
-func (p *PingPlugin) OnDisconnect(dev device.Sender) {}
+func (p *PingPlugin) OnConnect(dev device.Peer)    {}
+func (p *PingPlugin) OnDisconnect(dev device.Peer) {}
+
+// Ping sends a ping packet to the device.
+func (p *PingPlugin) Ping(dev device.Peer, message ...string) error {
+	msg := "Ping!"
+	if len(message) > 0 && message[0] != "" {
+		msg = message[0]
+	} else if p.cfg.DefaultMessage != "" {
+		msg = p.cfg.DefaultMessage
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.ping", map[string]string{"message": msg})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}

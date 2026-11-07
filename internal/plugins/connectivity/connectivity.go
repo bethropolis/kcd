@@ -8,8 +8,11 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+var _ plugin.Plugin = (*ConnectivityPlugin)(nil)
 
 type ConnectivityPlugin struct {
 	bus         *events.Bus
@@ -43,7 +46,7 @@ func (p *ConnectivityPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.connectivity_report.request"}
 }
 
-func (p *ConnectivityPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ConnectivityPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body ConnectivityBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -85,7 +88,7 @@ func connectivityEqual(a, b ConnectivityBody) bool {
 
 // OnConnect intentionally sends nothing: Android's plugin declares empty
 // supportedPacketTypes and drops every request, pushing reports on its own.
-func (p *ConnectivityPlugin) OnConnect(_ device.Sender) {}
+func (p *ConnectivityPlugin) OnConnect(_ device.Peer) {}
 
 // Report returns the last connectivity report; false means never reported
 // (or cleared on disconnect). Feeds watch dumps and on-demand queries.
@@ -99,7 +102,30 @@ func (p *ConnectivityPlugin) Report(deviceID string) (ConnectivityBody, bool) {
 	return body, ok
 }
 
-func (p *ConnectivityPlugin) OnDisconnect(dev device.Sender) {
+// ConnectivitySummary implements plugin.ConnectivitySupplier.
+func (p *ConnectivityPlugin) ConnectivitySummary(deviceID string) (any, bool) {
+	body, ok := p.Report(deviceID)
+	if !ok {
+		return nil, false
+	}
+	return body, true
+}
+
+// Replay implements plugin.Replayer.
+func (p *ConnectivityPlugin) Replay(deviceID string) []events.Event {
+	body, ok := p.Report(deviceID)
+	if !ok {
+		return nil
+	}
+	return []events.Event{{
+		Type:      events.TypeConnectivityUpdate,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().UTC(),
+		Payload:   body,
+	}}
+}
+
+func (p *ConnectivityPlugin) OnDisconnect(dev device.Peer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.lastReports, dev.ID())

@@ -2,10 +2,8 @@ package clipboard
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/testutil"
 )
 
 // setProbe points the plugin's probe at fn for the lifetime of the plugin.
@@ -227,29 +226,6 @@ func TestIsNoSelection(t *testing.T) {
 	}
 }
 
-// fakeSender records packets like a device without touching the network.
-type fakeSender struct {
-	sent []*protocol.Packet
-}
-
-func (f *fakeSender) ID() string                 { return "fake" }
-func (f *fakeSender) Name() string               { return "fake" }
-func (f *fakeSender) SetName(string)             {}
-func (f *fakeSender) State() device.PairingState { return device.StatePaired }
-func (f *fakeSender) SetState(device.PairingState) {
-}
-
-func (f *fakeSender) Send(p *protocol.Packet) error {
-	f.sent = append(f.sent, p)
-	return nil
-}
-func (f *fakeSender) IsConnected() bool           { return true }
-func (f *fakeSender) RemoteIP() net.IP            { return net.ParseIP("127.0.0.1") }
-func (f *fakeSender) PeerCert() *x509.Certificate { return nil }
-func (f *fakeSender) HasCapability(string) bool   { return false }
-func (f *fakeSender) UpdateBattery(int, bool)     {}
-func (f *fakeSender) GetBattery() (int, bool)     { return 0, false }
-
 // shimWith replaces PATH with a single scripted binary so Push exercises the
 // real command execution without depending on the host's clipboard tools.
 func shimWith(t *testing.T, name, script string) {
@@ -268,13 +244,13 @@ func TestPush_EmptyClipboardIsSoftFail(t *testing.T) {
 	// Empty clipboard with nothing copied: wl-paste exits non-zero with a
 	// "no selection" diagnostic — push must not fail the CLI for this.
 	shimWith(t, "wl-paste", "#!/bin/sh\necho 'No selection' >&2\nexit 1\n")
-	dev := &fakeSender{}
+	dev := testutil.NewFakeSender("fake")
 
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected soft pass on empty clipboard, got %v", err)
 	}
-	if len(dev.sent) != 0 {
-		t.Fatalf("expected no packet for empty clipboard, got %d", len(dev.sent))
+	if len(dev.Sent()) != 0 {
+		t.Fatalf("expected no packet for empty clipboard, got %d", len(dev.Sent()))
 	}
 }
 
@@ -284,13 +260,13 @@ func TestPush_EmptyOutputSendsNothing(t *testing.T) {
 
 	// Tool reports success but no content — still nothing to push.
 	shimWith(t, "wl-paste", "#!/bin/sh\nexit 0\n")
-	dev := &fakeSender{}
+	dev := testutil.NewFakeSender("fake")
 
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if len(dev.sent) != 0 {
-		t.Fatalf("expected no packet for empty output, got %d", len(dev.sent))
+	if len(dev.Sent()) != 0 {
+		t.Fatalf("expected no packet for empty output, got %d", len(dev.Sent()))
 	}
 }
 
@@ -299,16 +275,16 @@ func TestPush_SendsContent(t *testing.T) {
 	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "wayland-1" })
 
 	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'hello world'\n")
-	dev := &fakeSender{}
+	dev := testutil.NewFakeSender("fake")
 
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if len(dev.sent) != 1 {
-		t.Fatalf("expected 1 packet, got %d", len(dev.sent))
+	if len(dev.Sent()) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(dev.Sent()))
 	}
 	var body ClipboardBody
-	if err := json.Unmarshal(dev.sent[0].Body, &body); err != nil {
+	if err := json.Unmarshal(dev.Sent()[0].Body, &body); err != nil {
 		t.Fatalf("bad body: %v", err)
 	}
 	if body.Content != "hello world" {
@@ -330,13 +306,13 @@ func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
 	p.lastContent = "hello"
 	p.mu.Unlock()
 	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'hello\\n'\n")
-	dev := &fakeSender{}
+	dev := testutil.NewFakeSender("fake")
 
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if len(dev.sent) != 0 {
-		t.Fatalf("expected no echo packet, got %d", len(dev.sent))
+	if len(dev.Sent()) != 0 {
+		t.Fatalf("expected no echo packet, got %d", len(dev.Sent()))
 	}
 
 	// Exact round-trip (what wl-copy -n produces) must also be suppressed.
@@ -344,13 +320,13 @@ func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
 	p.lastContent = "new clip"
 	p.mu.Unlock()
 	shimWith(t, "wl-paste", "#!/bin/sh\nprintf 'new clip'\n")
-	dev = &fakeSender{}
+	dev = testutil.NewFakeSender("fake")
 
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if len(dev.sent) != 0 {
-		t.Fatalf("expected no echo packet, got %d", len(dev.sent))
+	if len(dev.Sent()) != 0 {
+		t.Fatalf("expected no echo packet, got %d", len(dev.Sent()))
 	}
 
 	// Genuinely different content must still be pushed.
@@ -358,8 +334,8 @@ func TestPush_DoesNotEchoReceivedClipboard(t *testing.T) {
 	if err := Push(context.Background(), dev, p); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
-	if len(dev.sent) != 1 {
-		t.Fatalf("expected 1 packet, got %d", len(dev.sent))
+	if len(dev.Sent()) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(dev.Sent()))
 	}
 }
 
@@ -377,5 +353,143 @@ func TestClipboardPlugin_Handle(t *testing.T) {
 
 	if err := p.Handle(context.Background(), dev, pkt); err != nil {
 		t.Fatalf("Handle failed: %v", err)
+	}
+}
+
+func TestClipboardPlugin_OutgoingTypes(t *testing.T) {
+	p := NewClipboardPlugin(nil, log.Nop(), false)
+	types := p.OutgoingTypes()
+	wantTypes := map[string]bool{
+		"kdeconnect.clipboard":         false,
+		"kdeconnect.clipboard.connect": false,
+	}
+	for _, typ := range types {
+		if _, ok := wantTypes[typ]; ok {
+			wantTypes[typ] = true
+		}
+	}
+	for typ, found := range wantTypes {
+		if !found {
+			t.Errorf("expected %q in OutgoingTypes, got %v", typ, types)
+		}
+	}
+}
+
+func TestClipboardPlugin_HandleConnect_Timestamps(t *testing.T) {
+	logger := log.Nop()
+	dev := device.NewDevice("dev1", "Test", "phone", logger)
+	p := NewClipboardPlugin(nil, logger, false)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendUnknown, "" })
+
+	// Set local timestamp to 1000.
+	p.SetLocalChangedAt(1000)
+
+	// Case 1: timestamp == 0 must be ignored per spec.
+	pkt0, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "ignore-zero",
+		Timestamp: 0,
+	})
+	if err := p.Handle(context.Background(), dev, pkt0); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if p.LocalChangedAt() != 1000 {
+		t.Errorf("expected localChangedAt 1000, got %d", p.LocalChangedAt())
+	}
+	p.mu.Lock()
+	lastContent := p.lastContent
+	p.mu.Unlock()
+	if lastContent == "ignore-zero" {
+		t.Errorf("content with timestamp 0 was accepted")
+	}
+
+	// Case 2: timestamp < localChangedAt (e.g. 500 < 1000) must be ignored.
+	pktOlder, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "ignore-older",
+		Timestamp: 500,
+	})
+	if err := p.Handle(context.Background(), dev, pktOlder); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	p.mu.Lock()
+	lastContent = p.lastContent
+	p.mu.Unlock()
+	if lastContent == "ignore-older" {
+		t.Errorf("content with older timestamp was accepted")
+	}
+
+	// Case 3: timestamp >= localChangedAt (e.g. 2000 >= 1000) must be accepted.
+	pktNewer, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "accept-newer",
+		Timestamp: 2000,
+	})
+	if err := p.Handle(context.Background(), dev, pktNewer); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	p.mu.Lock()
+	lastContent = p.lastContent
+	p.mu.Unlock()
+	if lastContent != "accept-newer" {
+		t.Errorf("expected lastContent 'accept-newer', got %q", lastContent)
+	}
+	if p.LocalChangedAt() != 2000 {
+		t.Errorf("expected localChangedAt 2000, got %d", p.LocalChangedAt())
+	}
+}
+
+func TestClipboardPlugin_OnConnect_SendsLocalChangedAt(t *testing.T) {
+	dir := t.TempDir()
+	// Fake tool returning "local text"
+	script := "#!/bin/sh\nprintf 'local text'\n"
+	if err := os.WriteFile(filepath.Join(dir, "wl-paste"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake wl-paste: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	logger := log.Nop()
+	sender := testutil.NewFakeSender("dev1")
+	p := NewClipboardPlugin(nil, logger, true)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "" })
+
+	p.SetLocalChangedAt(123456789)
+	p.OnConnect(sender)
+
+	sent := sender.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 packet sent, got %d", len(sent))
+	}
+	pkt := sent[0]
+	if pkt.Type != "kdeconnect.clipboard.connect" {
+		t.Fatalf("packet type = %q, want kdeconnect.clipboard.connect", pkt.Type)
+	}
+	var body ClipboardBody
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Content != "local text" {
+		t.Errorf("body.Content = %q, want 'local text'", body.Content)
+	}
+	if body.Timestamp != 123456789 {
+		t.Errorf("body.Timestamp = %d, want 123456789", body.Timestamp)
+	}
+}
+
+func TestClipboardPlugin_OnConnect_SkipsEmptyClipboard(t *testing.T) {
+	dir := t.TempDir()
+	// Fake tool returning nothing
+	script := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "wl-paste"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake wl-paste: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	logger := log.Nop()
+	sender := testutil.NewFakeSender("dev1")
+	p := NewClipboardPlugin(nil, logger, true)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "" })
+
+	p.OnConnect(sender)
+
+	if len(sender.Sent()) != 0 {
+		t.Fatalf("expected 0 packets sent when clipboard is empty, got %d", len(sender.Sent()))
 	}
 }

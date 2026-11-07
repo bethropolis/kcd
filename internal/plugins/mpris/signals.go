@@ -172,7 +172,7 @@ func (p *MPRISPlugin) handlePropertiesChanged(sig *dbus.Signal, uniqueToDisplay 
 	p.mu.RLock()
 	state := p.lastStates[displayName]
 	if state == nil {
-		state = &NowPlaying{Player: displayName, CanControl: true}
+		state = &NowPlaying{Player: displayName, CanControl: true, Volume: -1}
 	} else {
 		cp := *state
 		state = &cp

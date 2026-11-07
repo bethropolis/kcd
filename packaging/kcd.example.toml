@@ -7,6 +7,10 @@
 
 # ─── Identity ─────────────────────────────────────────────────────────────────
 
+# Optional schema version used to select compatibility notices. Older files
+# without this key are treated as version 1.
+# config_version = 1
+
 # Stable identifier used for pairing and certificate fingerprint checks.
 # Generated once on first run and written back here. Never edit it: changing it
 # makes every paired device fail to authenticate, and you would have to
@@ -58,6 +62,12 @@
 # Only change this if you run multiple daemon instances.
 # Default: $XDG_RUNTIME_DIR/kcd/kcd.sock  (e.g. /run/user/1000/kcd/kcd.sock)
 # socket_path = "/run/user/1000/kcd/kcd.sock"
+
+# Base directories for device state, cache, and runtime files.
+# state_dir = "~/.local/state/kcd"
+# cache_dir = "~/.cache/kcd"
+# runtime_dir = "/run/user/1000/kcd"
+# Use `kcd --instance NAME daemon` to isolate all default paths.
 
 # TLS certificate and key generated on first run.
 # Default: $XDG_CONFIG_HOME/kcd/cert.pem and key.pem
@@ -154,6 +164,64 @@ presenter = true
 # See `kcd volume --help`.
 remotesystemvolume = true
 
+# Use a phone/tablet as a drawing tablet with active stylus/pressure.
+# Creates a virtual tablet device via /dev/uinput.
+digitizer = true
+
+# ─── Desktop popups ───────────────────────────────────────────────────────────
+
+# Popup events still flow to IPC watchers when delivery is disabled.
+[popups]
+# enabled = true
+# backend = "auto"                 # auto | notify-send | dbus | none
+# app_name = "KDE Connect"
+# battery = true
+# ping = true
+# telephony = true
+# sms = true
+# notifications = true
+# runcommand = true
+
+# External desktop commands are argv arrays, never shell strings. Commands may
+# use {file} and {text} placeholders as individual arguments.
+[backends]
+# lock_command = ["loginctl", "lock-session"]
+# unlock_command = ["loginctl", "unlock-session"]
+# clipboard_get = ["wl-paste", "--no-newline"]
+# clipboard_set = ["wl-copy"]
+# volume = "auto"                 # auto | pactl | wpctl | none
+# notify = "auto"                 # auto | notify-send | dbus | none
+# sound_command = ["pw-play", "{file}"]
+# sound_file = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
+
+# Event hooks receive the complete event JSON on stdin. Arguments are argv
+# elements, not shell text; payload placeholders are replaced per argument.
+[hooks]
+# "battery.threshold" = ["notify-send", "Phone battery", "{payload.charge}%"]
+# [hooks."device.connected"]
+# command = ["systemctl", "--user", "start", "phone-home.target"]
+# devices = ["device-id"]
+# timeout = "10s"
+# debounce = "30s"
+
+# Remote command execution keeps the historical 15-second default unless
+# changed here. Per-command table options remain compatible work in progress.
+[runcommand]
+# default_timeout = "15s"
+
+# Lock behavior for incoming requests from paired peers.
+[lockdevice]
+# Allow paired peers to unlock this desktop session. Remote locking remains enabled.
+allow_remote_unlock = false
+
+# ─── IPC Access Tiers ─────────────────────────────────────────────────────────
+
+[ipc]
+# Optional secondary read-only Unix socket path for sandboxed or untrusted readers
+# (permits only inspection commands such as devices, status, battery, and non-opt-in watch events).
+# Default: "" (disabled)
+# readonly_socket = "/run/user/1000/kcd/kcd-ro.sock"
+
 # ─── Connection timing and storage ────────────────────────────────────────────
 
 # Durations use Go syntax (e.g. "750ms", "10s", "5m") and must be positive.
@@ -201,6 +269,8 @@ remotesystemvolume = true
 # Changing a path does not migrate existing files.
 
 [clipboard]
+# receive = true                    # phone -> desktop
+# send = true                       # desktop -> phone
 # Push the local clipboard on connection/reconnection. Off by default.
 # push_on_connect = false
 
@@ -266,6 +336,7 @@ suspend = "systemctl suspend"
 # ─── Share: file transfer settings ────────────────────────────────────────────
 
 [share]
+# max_file_size = 1073741824   # maximum received file size (bytes; default 1 GiB)
 # port_min = 1739               # start of TCP port range for transfers
 # port_max = 1764               # end of TCP port range for transfers
 # accept_timeout_secs = 120     # how long to wait for phone to connect
@@ -308,7 +379,7 @@ suspend = "systemctl suspend"
 # ─── Pairing: protocol settings ──────────────────────────────────────────────
 
 [pairing]
-# timeout_secs = 30             # how long to wait for a pairing response
+# timeout_secs = 30             # pending-pair wait; capped at Android's 30s/25s windows
 # intent_ttl = "5m"             # lifetime of explicit `kcd pair <id>` intent
 # listen_timeout = "60s"        # maximum wait in `kcd pair` listen mode
 

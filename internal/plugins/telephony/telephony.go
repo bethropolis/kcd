@@ -11,7 +11,10 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*TelephonyPlugin)(nil)
 
 type TelephonyPlugin struct {
 	notifications config.NotificationConfig
@@ -32,10 +35,11 @@ func NewTelephonyPlugin(bus *events.Bus, logger log.Logger, notifications ...con
 }
 
 type TelephonyBody struct {
-	Event       string            `json:"event"` // "ringing", "talking", "missedCall"
-	ContactName string            `json:"contactName"`
-	PhoneNumber string            `json:"phoneNumber"`
-	IsCancel    protocol.FlexBool `json:"isCancel"`
+	Event          string            `json:"event"` // "ringing", "talking", "missedCall"
+	ContactName    string            `json:"contactName"`
+	PhoneNumber    string            `json:"phoneNumber"`
+	PhoneThumbnail string            `json:"phoneThumbnail,omitempty"`
+	IsCancel       protocol.FlexBool `json:"isCancel"`
 }
 
 func (p *TelephonyPlugin) Name() string            { return "Telephony" }
@@ -45,7 +49,7 @@ func (p *TelephonyPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.telephony.request_mute"}
 }
 
-func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body TelephonyBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -56,9 +60,17 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		if canceled {
 			p.bus.Publish(events.TypeTelephonyCanceled, dev.ID(), body)
 		} else {
-			eventType := events.EventType("telephony." + body.Event)
-			if body.Event == "missedCall" {
+			var eventType events.EventType
+			switch body.Event {
+			case "ringing":
+				eventType = events.TypeTelephonyRinging
+			case "talking":
+				eventType = events.TypeTelephonyTalking
+			case "missed", "missedCall":
 				eventType = events.TypeTelephonyMissed
+			default:
+				p.logger.Debug("telephony: ignoring unknown event type", log.String("event", body.Event))
+				return nil
 			}
 			p.bus.Publish(eventType, dev.ID(), body)
 		}
@@ -88,19 +100,19 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 			return
 		}
 
-		plugin.RunCommandAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
+		sysexec.RunAsync(p.logger, "notify-send", "-a", p.notifications.AppName(), "-u", urgency, title, message)
 	}()
 
 	return nil
 }
 
-func (p *TelephonyPlugin) Mute(dev device.Sender) error {
-	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{"action": "mute"})
+func (p *TelephonyPlugin) Mute(dev device.Peer) error {
+	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{})
 	if err != nil {
 		return err
 	}
 	return dev.Send(pkt)
 }
 
-func (p *TelephonyPlugin) OnConnect(dev device.Sender)    {}
-func (p *TelephonyPlugin) OnDisconnect(dev device.Sender) {}
+func (p *TelephonyPlugin) OnConnect(dev device.Peer)    {}
+func (p *TelephonyPlugin) OnDisconnect(dev device.Peer) {}

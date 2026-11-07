@@ -4,11 +4,8 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
-	"net"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
+	"runtime/debug"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -16,11 +13,10 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/hooks"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/plugins/notification"
-	"github.com/bethropolis/kcd/internal/plugins/runcommand"
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -33,16 +29,36 @@ var Version = "dev"
 // can hit 13s, so the budget — not the cost — fits TimeoutStopSec.
 const shutdownUnmountBudget = 5 * time.Second
 
-// syncReconnectBroadcast runs UDP broadcast (reconnect owner) while any pair
-// is offline, else withdraws it. Pure state, no timers; callers drive it.
+// syncReconnectBroadcast runs UDP broadcast while any paired device is offline.
 func syncReconnectBroadcast(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController) {
+	syncReconnectBroadcastUntil(ctx, devices, bc, 0)
+}
+
+func syncReconnectBroadcastUntil(ctx context.Context, devices *device.Registry, bc *discovery.BroadcasterController, staleAfter time.Duration) time.Time {
+	var earliest time.Time
+	wanted := false
 	for _, dev := range devices.List() {
 		if dev.State() == device.StatePaired && !dev.IsConnected() {
+			lastSeen := dev.LastSeen()
+			if staleAfter > 0 && !lastSeen.IsZero() && time.Since(lastSeen) >= staleAfter {
+				continue
+			}
+			wanted = true
 			bc.StartOwned(ctx, discovery.OwnerReconnect)
-			return
+			if staleAfter > 0 && !lastSeen.IsZero() {
+				expires := lastSeen.Add(staleAfter)
+				if earliest.IsZero() || expires.Before(earliest) {
+					earliest = expires
+				}
+			}
 		}
 	}
-	bc.StopOwned(discovery.OwnerReconnect)
+	if !wanted {
+		bc.StopOwned(discovery.OwnerReconnect)
+	} else {
+		return earliest
+	}
+	return time.Time{}
 }
 
 // Run starts the core daemon lifecycle.
@@ -53,6 +69,10 @@ func buildIdentity(cfg *config.Config, incoming, outgoing []string) (*protocol.P
 }
 
 func Run(ctx context.Context, cfg *config.Config) error {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(64 * 1024 * 1024)
+	}
+
 	startedAt := time.Now()
 
 	logger, err := log.New(cfg.LogLevel)
@@ -77,60 +97,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// 2. Event Bus & Device Registry
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
-	statePath := config.StatePath()
-	if loaded, err := device.LoadDevices(statePath); err == nil {
-		for _, info := range loaded {
-			// Migrate pre-fix state: devices persisted as UNKNOWN (the old
-			// zero value) are simply unpaired.
-			if info.State == device.StateUnknown {
-				info.State = device.StateUnpaired
-			}
-			// Migrate pre-fix names: decode decimal byte escapes to real UTF-8
-			// (SanitizeDeviceName already decodes; don't double-decode).
-			info.Name = protocol.SanitizeDeviceName(info.Name)
-			dev := device.NewDevice(info.ID, info.Name, info.Type, logger)
-			dev.SetState(info.State)
-			dev.CertFP = info.CertFP
-			dev.SetLastSeen(info.LastSeen)
-			// Restore the dial target so auto-dial works immediately after a
-			// restart (validation lives inside DialTarget).
-			if ip, port := info.DialTarget(); ip != nil {
-				dev.SetLastIP(ip)
-				dev.SetLastPort(port)
-			}
-			devices.Add(dev)
-		}
-	} else {
-		logger.Warn("failed to load devices", log.Error(err))
-	}
 
-	pruneThreshold, _ := time.ParseDuration(cfg.PruneStaleThreshold)
-	if pruned := devices.Prune(pruneThreshold); pruned > 0 {
-		logger.Info("pruned stale devices on startup", log.Int("count", pruned))
-	}
-
-	// Helper to save device state
-	saveDevices := func() {
-		devices.Prune(pruneThreshold)
-		devs := devices.List()
-		infos := make([]device.DeviceInfo, 0, len(devs))
-		for _, dev := range devs {
-			info := device.DeviceInfo{
-				ID:       dev.ID(),
-				Name:     dev.Name(),
-				Type:     dev.Type,
-				State:    dev.State(),
-				CertFP:   dev.CertFP,
-				LastSeen: dev.LastSeen(),
-				LastPort: dev.LastPort(),
-			}
-			// net.IP.String() on nil renders "<nil>" — store empty instead.
-			if ip := dev.LastIP(); ip != nil {
-				info.LastIP = ip.String()
-			}
-			infos = append(infos, info)
-		}
-		_ = device.SaveDevices(statePath, infos)
+	sm, requestSave, saveDevices, err := initStateManager(ctx, cfg, devices, logger)
+	if err != nil {
+		return err
 	}
 
 	// 3. Plugin Registry
@@ -141,16 +111,36 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		localCert, _ = x509.ParseCertificate(certPair.Certificate[0])
 	}
 
-	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, saveDevices, plugins)
+	pairPlugin := setupPlugins(cfg, bus, tlsCfg, logger, devices, localCert, requestSave, plugins)
+	hooks.New(cfg.Hooks, bus, logger).Start(ctx)
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()
+
+	tcpListener, err := bindTCPListener(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer tcpListener.Close()
+	tcpListener.SetKeepAliveIdle(config.Duration(cfg.Network.KeepAliveIdle))
+
 	identity, err := buildIdentity(cfg, incomingCaps, outgoingCaps)
 	if err != nil {
 		return err
 	}
 
-	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	env := &transportEnv{
+		tls:      tlsCfg,
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  cfg.DeviceID,
+		cfg:      cfg,
+		logger:   logger,
+	}
+
+	bc := discovery.NewBroadcasterController(identity, protocol.DefaultDiscoveryPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	go discovery.WatchNetworkChanges(ctx, bc.ResetBackoff)
 
 	// mDNS advertisement is always on: responder-only means zero idle timers,
 	// so phones keep a standing path while UDP broadcast is stopped.
@@ -162,62 +152,58 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	go func() {
 		sub := bus.Subscribe(0, events.TypeDeviceConnected, events.TypeDeviceDisconnected)
 		defer sub.Close()
-		sync := func() { syncReconnectBroadcast(ctx, devices, bc) }
-		sync()
-		for range sub.C {
-			sync()
+		var timer *time.Timer
+		var timerC <-chan time.Time
+		reset := func() {
+			expires := syncReconnectBroadcastUntil(ctx, devices, bc, config.Duration(cfg.Reconnect.StaleAfter))
+			if expires.IsZero() {
+				if timer != nil {
+					timer.Stop()
+				}
+				timerC = nil
+				return
+			}
+			if timer == nil {
+				timer = time.NewTimer(time.Until(expires))
+			} else if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			delay := time.Until(expires)
+			if delay < 0 {
+				delay = 0
+			}
+			timer.Reset(delay)
+			timerC = timer.C
+		}
+		defer func() {
+			if timer != nil {
+				timer.Stop()
+			}
+		}()
+		reset()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-sub.C:
+				if !ok {
+					return
+				}
+				reset()
+			case <-timerC:
+				reset()
+			}
 		}
 	}()
 
 	// 5. IPC Server
-	handler := ipc.NewHandler(devices, plugins, pairPlugin, statePath, bus, pruneThreshold)
-	handler.SetPairListenTimeout(config.Duration(cfg.Pairing.ListenTimeout))
-
-	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
-
-	// Explicit `kcd pair <id>` dials on demand: background dial never touches
-	// strangers, so arm a one-shot flag and dial now if last-seen is known.
-	handler.SetPairDialHook(func(deviceID string) error {
-		dev, ok := devices.Get(deviceID)
-		if !ok {
-			return fmt.Errorf("device not found")
-		}
-		if dev.State() == device.StatePaired {
-			return fmt.Errorf("device already paired")
-		}
-		dev.RequestPairDial(config.Duration(cfg.Pairing.IntentTTL))
-		ip, port := dev.DiscoveryAddr()
-		if ip == nil {
-			// No address yet — the flagged dial fires on the next
-			// broadcast from the phone; tell the user to retry then.
-			return fmt.Errorf("device address unknown yet, wait for discovery and retry")
-		}
-		if port == 0 {
-			port = cfg.TCPPort
-		}
-		go func() {
-			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
-			if !dev.IsConnected() {
-				logger.Warn("on-demand pair dial failed", log.String("device_id", deviceID))
-				return
-			}
-			// A successful immediate dial consumes the one-shot trigger; on
-			// failure it stays for the next sighting. PairDialActive outlives it.
-			dev.ConsumePairDial()
-			if dev.State() == device.StatePairRequestedByPeer {
-				if err := pairPlugin.AcceptPairing(dev); err != nil {
-					logger.Warn("auto-accept on pair dial failed", log.Error(err))
-				}
-			} else if dev.State() != device.StatePaired {
-				// No CLI is attached to this dial, so the verification code
-				// only reaches the log; RequestPairing already logs it.
-				if _, err := pairPlugin.RequestPairing(dev); err != nil {
-					logger.Warn("pair request on dial failed", log.Error(err))
-				}
-			}
-		}()
-		return nil
-	})
+	pairDialHook := makePairDialHook(ctx, env, pairPlugin)
+	handler := ipc.NewHandler(devices, plugins, bus)
+	registerPairRoutes(handler, cfg, devices, plugins, bus, saveDevices, sm.pruneThreshold, pairDialHook)
+	registerIPCRoutes(handler, env, bc, ctx, startedAt)
 
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
@@ -227,63 +213,24 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			logger.Error("ipc server error", log.Error(err))
 		}
 	}()
-
-	// 6. Transport Layer
-	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg)
-
-	if notifySocket := os.Getenv("NOTIFY_SOCKET"); notifySocket != "" {
-		addr := &net.UnixAddr{Name: notifySocket, Net: "unixgram"}
-		if strings.HasPrefix(notifySocket, "@") {
-			addr.Name = "\x00" + notifySocket[1:]
-		}
-		if conn, err := net.DialUnix("unixgram", nil, addr); err == nil {
-			_, _ = conn.Write([]byte("READY=1\n"))
-			conn.Close()
-		}
+	if cfg.IPC.ReadOnlySocket != "" && cfg.IPC.ReadOnlySocket != cfg.SocketPath {
+		readOnlyServer := ipc.NewReadOnlyServer(cfg.IPC.ReadOnlySocket, handler, logger)
+		go func() {
+			if err := readOnlyServer.Listen(ctx); err != nil {
+				logger.Error("read-only ipc server error", log.Error(err))
+			}
+		}()
 	}
 
-	// Hot-reload on SIGHUP.
-	sighupCh := make(chan os.Signal, 1)
-	signal.Notify(sighupCh, syscall.SIGHUP)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-sighupCh:
-				logger.Info("SIGHUP received, reloading config")
-				newCfg, err := config.Load(cfg.ConfigPath)
-				if err != nil {
-					logger.Error("config reload failed", log.Error(err))
-					continue
-				}
+	// 6. Transport Layer
+	go runTransport(ctx, env, bc, tcpListener)
 
-				// Reload RunCommand plugin commands.
-				if pl, ok := plugins.GetByName("RunCommand"); ok {
-					rc := pl.(*runcommand.RunCommandPlugin)
-					rc.Mu.Lock()
-					rc.Commands = newCfg.Commands
-					rc.CommandsPerDevice = newCfg.CommandsPerDevice
-					rc.Mu.Unlock()
-					logger.Info("reloaded commands",
-						log.Int("global", len(newCfg.Commands)),
-						log.Int("per_device", len(newCfg.CommandsPerDevice)),
-					)
-				}
+	notifySystemdReady()
 
-				// Reload notification filters.
-				if pl, ok := plugins.GetByName("Notification"); ok {
-					pl.(*notification.NotificationPlugin).SetFilters(newCfg.Notifications.Filters())
-					logger.Info("reloaded notification filters")
-				}
-
-				// Reload log level.
-				logger.SetLevel(newCfg.LogLevel)
-			}
-		}
-	}()
+	watchConfigReload(ctx, cfg, devices, plugins, logger)
 
 	<-ctx.Done()
+	sm.wait()
 
 	logger.Info("kcd daemon shutting down")
 

@@ -3,68 +3,42 @@ package mousepad
 import (
 	"context"
 	"fmt"
-	"os"
-	"time"
+	"io"
+	"net"
+	"sync"
 
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 type MousepadPlugin struct {
 	logger     log.Logger
+	exec       *sysexec.Exec
 	cfg        config.MousepadConfig
 	useYdotool bool
 	useUinput  bool
 	isWayland  bool
 
+	xdotoolMu sync.Mutex
+	xdotoolIn io.WriteCloser
+
+	ydotoolMu   sync.Mutex
+	ydotoolConn net.Conn
+
 	// uinput devices
 	mouse    uinput.Mouse
 	keyboard uinput.Keyboard
 
-	moveCh  chan MousepadBody // capacity 1, older frames dropped
-	eventCh chan MousepadBody // capacity 64, clicks + keys
+	queueMu   sync.Mutex
+	queue     []MousepadBody
+	queueWake chan struct{}
+	moveX     float64
+	moveY     float64
 
 	ctx    context.Context
 	cancel context.CancelFunc
-}
-
-func NewMousepadPlugin(cfg config.MousepadConfig, logger log.Logger) *MousepadPlugin {
-	ctx, cancel := context.WithCancel(context.Background())
-	isWayland := os.Getenv("WAYLAND_DISPLAY") != ""
-	p := &MousepadPlugin{
-		logger:    logger.With(log.String("plugin", "mousepad")),
-		cfg:       cfg,
-		isWayland: isWayland,
-		moveCh:    make(chan MousepadBody, 1),
-		eventCh:   make(chan MousepadBody, 64),
-		ctx:       ctx,
-		cancel:    cancel,
-	}
-
-	// Try uinput first if auto or explicit
-	if cfg.Backend == "auto" || cfg.Backend == "uinput" {
-		if err := p.initUinput(); err != nil {
-			p.logger.Warn("uinput initialization failed, falling back to legacy backends", log.Error(err))
-		} else {
-			p.useUinput = true
-			p.logger.Info("uinput initialized successfully")
-		}
-	}
-
-	if !p.useUinput {
-		switch cfg.Backend {
-		case "ydotool":
-			p.useYdotool = true
-		case "xdotool":
-			p.useYdotool = false
-		default: // auto
-			p.useYdotool = os.Getenv("WAYLAND_DISPLAY") != ""
-		}
-	}
-
-	go p.worker()
-	return p
 }
 
 func (p *MousepadPlugin) initUinput() error {
@@ -103,11 +77,4 @@ type MousepadBody struct {
 	Ctrl        bool    `json:"ctrl"`
 	Alt         bool    `json:"alt"`
 	Super       bool    `json:"super"`
-}
-
-func (p *MousepadPlugin) Name() string            { return "Mousepad" }
-func (p *MousepadPlugin) Timeout() time.Duration  { return 2 * time.Second }
-func (p *MousepadPlugin) IncomingTypes() []string { return []string{"kdeconnect.mousepad.request"} }
-func (p *MousepadPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.mousepad.keyboardstate"}
 }

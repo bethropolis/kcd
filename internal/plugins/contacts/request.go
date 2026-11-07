@@ -10,7 +10,7 @@ import (
 
 // Handle routes response packets; all parsing and disk I/O runs in a
 // worker goroutine so Handle returns immediately (rule 9).
-func (p *ContactsPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ContactsPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case PacketTypeContactsResponseUIDs:
 		body := append([]byte(nil), pkt.Body...)
@@ -28,7 +28,7 @@ func (p *ContactsPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pro
 
 // RequestSync asks the phone for all contact UIDs and timestamps. The body
 // must be {} not null: at least one phone build aborts the link on null.
-func (p *ContactsPlugin) RequestSync(dev device.Sender) error {
+func (p *ContactsPlugin) RequestSync(dev device.Peer) error {
 	pkt, err := protocol.NewPacket(PacketTypeContactsRequestUIDs, map[string]any{})
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func (p *ContactsPlugin) RequestSync(dev device.Sender) error {
 
 // requestVCards asks for vCards of the given UIDs, chunked to bound
 // outbound packet size.
-func (p *ContactsPlugin) requestVCards(dev device.Sender, uids []string) error {
+func (p *ContactsPlugin) requestVCards(dev device.Peer, uids []string) error {
 	for _, chunk := range chunkUIDs(uids, vcardChunkSize) {
 		body := map[string]any{"uids": chunk}
 		pkt, err := protocol.NewPacket(PacketTypeContactsRequestVCards, body)

@@ -5,53 +5,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
+	desktopclipboard "github.com/bethropolis/kcd/internal/desktop/clipboard"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
-func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SharePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
+	if pkt.Type == "kdeconnect.share.request.update" {
+		// Multi-file progress update from peer; per-file progress is tracked via sidechannel.
+		return nil
+	}
+	if p.cfg.Accept == "never" {
+		p.Logger.Debug("share: inbound share disabled")
+		return nil
+	}
 	var body ShareBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return fmt.Errorf("share: parse body: %w", err)
 	}
 
-	if body.Text != "" && pkt.PayloadSize <= 0 {
+	// The peer's 'open' flag is intentionally ignored in favor of the local
+	// auto_open policy to protect against remote code execution.
+
+	if body.Text != "" && pkt.PayloadTransferInfo == nil {
 		p.Logger.Info("share: received text", log.String("text", body.Text))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareText, dev.ID(), map[string]string{"text": body.Text})
 		}
-		go func() {
-			var cmd *exec.Cmd
-			if os.Getenv("WAYLAND_DISPLAY") != "" {
-				cmd = exec.CommandContext(context.Background(), "wl-copy")
-			} else {
-				cmd = exec.CommandContext(context.Background(), "xclip", "-selection", "clipboard")
-			}
-			cmd.Stdin = strings.NewReader(body.Text)
-			_ = cmd.Run()
-		}()
+		if p.cfg.TextAction == "clipboard" {
+			go func() {
+				if err := desktopclipboard.SetText(context.Background(), body.Text, nil); err != nil {
+					p.Logger.Warn("share: clipboard update failed", log.Error(err))
+				}
+			}()
+		}
 		return nil
 	}
 
-	if body.Url != "" && pkt.PayloadSize <= 0 {
+	if body.Url != "" && pkt.PayloadTransferInfo == nil {
 		p.Logger.Info("share: received url", log.String("url", body.Url))
 		if p.bus != nil {
 			p.bus.Publish(events.TypeShareURL, dev.ID(), map[string]string{"url": body.Url})
 		}
 		// Only http(s) may reach xdg-open (other schemes hit unrelated
 		// handlers); the URL event still emits either way.
-		if isOpenableURL(body.Url) {
-			plugin.RunCommandAsync(p.Logger, "xdg-open", body.Url)
+		if p.cfg.URLAction == "open" && isOpenableURL(body.Url) {
+			sysexec.RunAsync(p.Logger, "xdg-open", body.Url)
 		} else {
 			p.Logger.Warn("share: refusing to open non-http(s) URL",
 				log.String("url", body.Url))
@@ -59,8 +66,11 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 		return nil
 	}
 
-	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
+	if pkt.PayloadSize < -1 || pkt.PayloadTransferInfo == nil {
 		return nil
+	}
+	if pkt.PayloadSize > p.cfg.MaxFileSize {
+		return fmt.Errorf("share: payload size %d exceeds configured limit %d", pkt.PayloadSize, p.cfg.MaxFileSize)
 	}
 
 	safeName := SanitizeFilename(body.Filename)
@@ -134,7 +144,7 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 					if err != nil {
 						absPath = destPath
 					}
-					plugin.RunCommandAsync(p.Logger, cmd, absPath)
+					sysexec.RunAsync(p.Logger, cmd, absPath)
 				}
 			}
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/testutil"
+	"github.com/bethropolis/kcd/internal/testutil/daemonstart"
 )
 
 // nextDomainEvent returns the next non-bootstrap event on a watch stream,
@@ -70,7 +71,7 @@ func TestPairFlowIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
 	// Subscribe to pair.accepted events
 	evCh := make(chan events.Event, 4)
@@ -83,7 +84,7 @@ func TestPairFlowIntegration(t *testing.T) {
 	// Dial with mock peer
 	peerCertFile := dir + "/peer-cert.pem"
 	peerKeyFile := dir + "/peer-key.pem"
-	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, "mock-peer")
+	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("peer cert: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestPairFlowIntegration(t *testing.T) {
 
 	// Send our identity back inside TLS
 	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID:        "mock-peer",
+		DeviceID:        testutil.DefaultMockPeerID,
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,
@@ -106,7 +107,7 @@ func TestPairFlowIntegration(t *testing.T) {
 	_ = peer.SendPacket(conn, identPkt)
 
 	// Send pair request
-	pairPkt, err := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, err := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	if err != nil {
 		t.Fatalf("build pair pkt: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestPairFlowIntegration(t *testing.T) {
 
 	// Accept the pending pair request via IPC (auto_accept removed in v1.10).
 	// The peer initiated, so it owns the verification code and ours is empty.
-	verificationKey, err := cl.Pair("mock-peer")
+	verificationKey, err := cl.Pair(testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestPairFlowIntegration(t *testing.T) {
 	}
 	found := false
 	for _, d := range devs {
-		if d.ID == "mock-peer" && d.State == device.StatePaired {
+		if d.ID == testutil.DefaultMockPeerID && d.State == device.StatePaired {
 			found = true
 		}
 	}
@@ -183,9 +184,9 @@ func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
-	peerCertPair, err := cert.LoadOrGenerate(dir+"/peer-cert.pem", dir+"/peer-key.pem", "mock-peer")
+	peerCertPair, err := cert.LoadOrGenerate(dir+"/peer-cert.pem", dir+"/peer-key.pem", testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("peer cert: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
 	// Identity only — no pair request. The daemon must initiate, so the
 	// verification code is ours to report.
 	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID:        "mock-peer",
+		DeviceID:        testutil.DefaultMockPeerID,
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,
@@ -216,7 +217,7 @@ func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list devices: %v", err)
 		}
-		if len(devs) > 0 && devs[0].ID == "mock-peer" {
+		if len(devs) > 0 && devs[0].ID == testutil.DefaultMockPeerID {
 			registered = true
 			break
 		}
@@ -226,7 +227,7 @@ func TestPairInitiateReturnsVerificationKeyIntegration(t *testing.T) {
 		t.Fatal("mock-peer never appeared in the device list")
 	}
 
-	verificationKey, err := cl.Pair("mock-peer")
+	verificationKey, err := cl.Pair(testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("initiate pair: %v", err)
 	}

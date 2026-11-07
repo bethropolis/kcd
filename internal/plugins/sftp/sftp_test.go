@@ -146,7 +146,7 @@ func TestBuildSSHFSArgs_RejectsInjection(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := buildSSHFSArgs(tc.body, tc.path, "/mnt/kcd", 1000, 1000, 15, 3, nil, false); err == nil {
-				t.Errorf("buildSSHFSArgs accepted %q / %q, want error", tc.body, tc.path)
+				t.Errorf("buildSSHFSArgs accepted %+v / %q, want error", tc.body, tc.path)
 			}
 		})
 	}

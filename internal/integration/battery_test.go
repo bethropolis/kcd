@@ -15,6 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/testutil"
+	"github.com/bethropolis/kcd/internal/testutil/daemonstart"
 )
 
 func TestBatteryUpdateFlowIntegration(t *testing.T) {
@@ -50,7 +51,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
 	// Subscribe to battery events
 	evCh := make(chan events.Event, 4)
@@ -64,7 +65,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	// Dial daemon TCP port with a mock peer
 	peerCertFile := dir + "/peer-cert.pem"
 	peerKeyFile := dir + "/peer-key.pem"
-	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, "mock-peer")
+	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("peer cert: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 
 	// Send our identity back inside TLS
 	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID:        "mock-peer",
+		DeviceID:        testutil.DefaultMockPeerID,
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,
@@ -87,14 +88,14 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	_ = peer.SendPacket(conn, identPkt)
 
 	// Send pair request to get into Paired state
-	pairPkt, _ := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, _ := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	_ = peer.SendPacket(conn, pairPkt)
 
 	// Give daemon time to process the pair request
 	time.Sleep(100 * time.Millisecond)
 
 	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
-	if _, err := cl.Pair("mock-peer"); err != nil {
+	if _, err := cl.Pair(testutil.DefaultMockPeerID); err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)

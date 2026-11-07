@@ -9,17 +9,35 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
+	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/netutil"
 )
 
 // Server handles listening for JSON IPC requests over a Unix socket.
 type Server struct {
-	path    string
-	handler *Handler
-	logger  log.Logger
+	path     string
+	handler  *Handler
+	logger   log.Logger
+	readOnly bool
 }
+
+// NewReadOnlyServer creates a socket that rejects state-changing commands.
+func NewReadOnlyServer(path string, handler *Handler, logger log.Logger) *Server {
+	server := NewServer(path, handler, logger)
+	server.readOnly = true
+	return server
+}
+
+const (
+	ipcReadDeadline      = 10 * time.Second
+	ipcKeepAliveDeadline = 5 * time.Minute
+	maxIPCLine           = 1 << 20
+)
 
 // NewServer creates a new IPC server.
 func NewServer(path string, handler *Handler, logger log.Logger) *Server {
@@ -100,49 +118,146 @@ func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) erro
 		log.Bool("socket_activated", activated),
 	)
 
+	var acceptBackoff netutil.ErrorBackoff
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			s.logger.Error("ipc socket accept error", log.Error(err))
+			s.logger.Warn("ipc socket accept error", log.Error(err))
+			if !acceptBackoff.Wait(ctx) {
+				return nil
+			}
 			continue
 		}
+		acceptBackoff.Reset()
 
 		go s.handleConnection(conn)
 	}
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic in ipc handler", log.Any("recovered", r))
+			s.writeResponse(conn, Err(CodeInternal, "internal error", nil))
+		}
+	}()
+	reader := bufio.NewReader(conn)
+	_ = conn.SetReadDeadline(time.Now().Add(ipcReadDeadline))
+	line, err := readIPCLine(reader)
 	if err != nil {
-		conn.Close()
 		return
 	}
-
 	var req Request
 	if err := json.Unmarshal(line, &req); err != nil {
-		s.writeResponse(conn, Response{OK: false, Error: "malformed request"})
-		conn.Close()
+		s.writeResponse(conn, Err(CodeInvalidPayload, "malformed request", nil))
+		return
+	}
+	if req.Command == CmdWatch {
+		if s.readOnly && !watchIsReadOnly(req.Payload) {
+			s.writeResponse(conn, Err(CodePermissionDenied, "read-only socket permits only non-opt-in watch events", nil))
+			return
+		}
+		s.handleWatch(conn, req.Payload)
 		return
 	}
 
-	if req.Command == CmdWatch {
-		s.handleWatch(conn, req.Payload)
-		return // handleWatch will close the connection
+	keepAlive := false
+	if req.Command == CmdHello {
+		var payload HelloPayload
+		if len(req.Payload) > 0 && json.Unmarshal(req.Payload, &payload) == nil {
+			keepAlive = payload.KeepAlive
+		}
 	}
+	var writeMu sync.Mutex
+	write := func(request Request) {
+		defer func() {
+			if recover() != nil {
+				s.writeResponseID(conn, Err(CodeInternal, "internal error", nil), request.ID, &writeMu)
+			}
+		}()
+		if s.readOnly && !readOnlyCommand(request.Command) {
+			s.writeResponseID(conn, Err(CodePermissionDenied, "command is not available on read-only socket", map[string]string{"command": request.Command}), request.ID, &writeMu)
+			return
+		}
+		s.writeResponseID(conn, s.handler.HandleRequest(request), request.ID, &writeMu)
+	}
+	write(req)
+	if !keepAlive {
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(ipcKeepAliveDeadline))
+	var workers sync.WaitGroup
+	for {
+		line, err = readIPCLine(reader)
+		if err != nil {
+			break
+		}
+		var next Request
+		if err := json.Unmarshal(line, &next); err != nil {
+			s.writeResponseID(conn, Err(CodeInvalidPayload, "malformed request", nil), nil, &writeMu)
+			break
+		}
+		if next.Command == CmdWatch {
+			s.writeResponseID(conn, Err(CodeNotSupported, "watch is not supported on keep-alive connections", nil), next.ID, &writeMu)
+			continue
+		}
+		workers.Add(1)
+		go func(request Request) {
+			defer workers.Done()
+			write(request)
+		}(next)
+	}
+	workers.Wait()
+}
 
-	res := s.handler.HandleRequest(req)
-	s.writeResponse(conn, res)
-	conn.Close()
+func readOnlyCommand(command string) bool {
+	switch command {
+	case CmdHello, CmdDevices, CmdStatus, CmdBattery, CmdConnectivity, CmdMprisStatus:
+		return true
+	default:
+		return false
+	}
+}
+
+func watchIsReadOnly(payload []byte) bool {
+	var request WatchPayload
+	if len(payload) > 0 && json.Unmarshal(payload, &request) != nil {
+		return false
+	}
+	for _, typ := range request.Events {
+		if typ == string(events.TypeSMSIncoming) || typ == string(events.TypeSMSAttachment) || typ == string(events.TypePrompt) {
+			return false
+		}
+	}
+	return true
+}
+
+func readIPCLine(reader *bufio.Reader) ([]byte, error) {
+	line, err := reader.ReadBytes('\n')
+	if len(line) > maxIPCLine {
+		return nil, fmt.Errorf("ipc request exceeds %d bytes", maxIPCLine)
+	}
+	return line, err
 }
 
 func (s *Server) writeResponse(conn net.Conn, res Response) {
+	s.writeResponseID(conn, res, nil, nil)
+}
+
+func (s *Server) writeResponseID(conn net.Conn, res Response, id json.RawMessage, mu *sync.Mutex) {
+	res.ID = id
 	data, err := json.Marshal(res)
 	if err != nil {
 		return
 	}
 	data = append(data, '\n')
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	_, _ = conn.Write(data)
 }

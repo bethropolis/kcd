@@ -3,7 +3,6 @@ package notification
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 // notifIDChars restricts phone-provided notification IDs to filename-safe
 // characters when they're embedded in icon cache paths.
 var notifIDChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+var payloadHashPattern = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
 
 // sanitizeNotifID strips everything but safe chars so IDs can't escape the
 // icon cache via separators; empty results fall back to "default".
@@ -43,6 +43,7 @@ func (p *NotificationPlugin) fetchIcon(
 	size int64,
 	hasIcon bool,
 	expectedFP string,
+	payloadHash ...string,
 ) string {
 	if !p.cfg.FetchIcons || p.tlsConfig == nil || p.iconDir == "" {
 		// Fall back to icon name derived from app name.
@@ -53,7 +54,14 @@ func (p *NotificationPlugin) fetchIcon(
 	// ../ in a phone-supplied ID would otherwise escape the icon dir.
 	safeName := nonAlphaNumeric.ReplaceAllString(appName, "_")
 	safeID := sanitizeNotifID(notifID)
-	iconPath := filepath.Join(p.iconDir, fmt.Sprintf("%s-%s.png", safeName, safeID))
+	cacheName := fmt.Sprintf("%s-%s", safeName, safeID)
+	if len(payloadHash) > 0 && payloadHash[0] != "" {
+		if !payloadHashPattern.MatchString(payloadHash[0]) {
+			return ""
+		}
+		cacheName = strings.ToLower(payloadHash[0])
+	}
+	iconPath := filepath.Join(p.iconDir, cacheName+".png")
 
 	// Belt and braces: confine the result to the icon dir even if the
 	// sanitizer above ever regresses.
@@ -63,32 +71,20 @@ func (p *NotificationPlugin) fetchIcon(
 		return ""
 	}
 
-	// Reuse the cached icon when re-posts carry no bytes (the phone sends them
-	// only on hash change); otherwise every re-post shows a placeholder.
-	if _, err := os.Stat(iconPath); err == nil {
-		return iconPath
-	}
-
+	// Android sends icon bytes only when the hash changes; a matching cached
+	// file can be reused when the packet carries metadata without a payload.
 	if !hasIcon {
+		if _, err := os.Stat(iconPath); err == nil {
+			return iconPath
+		}
+		return ""
+	}
+	if size <= 0 || size > 1024*1024 {
 		return ""
 	}
 
-	conn, err := transport.DialSidechannel(ctx, remoteIP, port, p.tlsConfig, expectedFP, p.logger, p.sidechannel)
-	if err != nil {
-		p.logger.Debug("notification: icon dial failed", log.Error(err))
-		return ""
-	}
-	defer conn.Close()
-
-	f, err := os.Create(iconPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, io.LimitReader(conn, size)); err != nil {
+	if _, err := transport.ReceiveToFile(ctx, remoteIP, port, size, iconPath, p.tlsConfig, expectedFP, p.logger, transport.ReceiveOptions{MaxSize: 1024 * 1024, Sidechannel: p.sidechannel}); err != nil {
 		p.logger.Debug("notification: icon download failed", log.Error(err))
-		_ = os.Remove(iconPath)
 		return ""
 	}
 

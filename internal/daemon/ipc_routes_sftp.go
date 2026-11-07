@@ -13,11 +13,11 @@ import (
 
 // readOnlyFor resolves a per-request override against the default; the field
 // is a pointer so absent never flips a read-only default back to writable.
-func readOnlyFor(pl plugin.Plugin, override *bool) bool {
+func readOnlyFor(pl *sftp.SftpPlugin, override *bool) bool {
 	if override != nil {
 		return *override
 	}
-	return pl.(*sftp.SftpPlugin).ReadOnlyByDefault()
+	return pl.ReadOnlyByDefault()
 }
 
 // resolveVolume resolves a user-supplied volume argument (index, name, or path)
@@ -59,8 +59,8 @@ func resolveVolume(arg string, volumes []ipc.StorageVolumeResponse) string {
 func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins *plugin.Registry) {
 	handler.Register(ipc.CmdSftpInfo, func(req ipc.Request) ipc.Response {
 		var p ipc.SftpInfoPayload
-		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
-			info := pl.(*sftp.SftpPlugin).Info(p.DeviceID, p.ShowPassword)
+		return pluginRoute(req, &p, plugins, "SFTP", func(sftpPl *sftp.SftpPlugin) ipc.Response {
+			info := sftpPl.Info(p.DeviceID, p.ShowPassword)
 			if info == nil {
 				return ipc.Response{OK: false, Error: "no SFTP credentials cached for this device — use 'kcd sftp request' first"}
 			}
@@ -69,8 +69,8 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 	})
 	handler.Register(ipc.CmdSftpVolumes, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
-			volumes := pl.(*sftp.SftpPlugin).Volumes(p.DeviceID)
+		return pluginRoute(req, &p, plugins, "SFTP", func(sftpPl *sftp.SftpPlugin) ipc.Response {
+			volumes := sftpPl.Volumes(p.DeviceID)
 			if volumes == nil {
 				return ipc.Response{OK: false, Error: "no volumes available — use 'kcd sftp request' first"}
 			}
@@ -79,8 +79,8 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 	})
 	handler.Register(ipc.CmdSftpMount, func(req ipc.Request) ipc.Response {
 		var p ipc.SftpMountPayload
-		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-			if err := pl.(*sftp.SftpPlugin).RequestMount(dev); err != nil {
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, sftpPl *sftp.SftpPlugin) ipc.Response {
+			if err := sftpPl.RequestMount(dev); err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
 			return ipc.Response{OK: true}
@@ -88,8 +88,8 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 	})
 	handler.Register(ipc.CmdSftpMountLocal, func(req ipc.Request) ipc.Response {
 		var p ipc.SftpMountPayload
-		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-			browsePath, err := pl.(*sftp.SftpPlugin).RequestAndMount(context.Background(), dev, readOnlyFor(pl, p.ReadOnly))
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, sftpPl *sftp.SftpPlugin) ipc.Response {
+			browsePath, err := sftpPl.RequestAndMount(context.Background(), dev, readOnlyFor(sftpPl, p.ReadOnly))
 			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
@@ -98,8 +98,8 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 	})
 	handler.Register(ipc.CmdSftpUnmount, func(req ipc.Request) ipc.Response {
 		var p ipc.DevicePayload
-		return pluginRoute(req, &p, plugins, "SFTP", func(pl plugin.Plugin) ipc.Response {
-			if err := pl.(*sftp.SftpPlugin).Unmount(p.DeviceID); err != nil {
+		return pluginRoute(req, &p, plugins, "SFTP", func(sftpPl *sftp.SftpPlugin) ipc.Response {
+			if err := sftpPl.Unmount(p.DeviceID); err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
 			return ipc.Response{OK: true}
@@ -107,8 +107,7 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 	})
 	handler.Register(ipc.CmdSftpBrowse, func(req ipc.Request) ipc.Response {
 		var p ipc.SftpBrowsePayload
-		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-			sftpPl := pl.(*sftp.SftpPlugin)
+		return deviceRoute(req, &p, devices, plugins, "SFTP", func(dev *device.Device, sftpPl *sftp.SftpPlugin) ipc.Response {
 
 			volumePath := p.Volume
 
@@ -126,7 +125,7 @@ func registerSftpRoutes(handler *ipc.Handler, devices *device.Registry, plugins 
 				}
 			}
 
-			mountPath, volumes, err := sftpPl.RequestAndMountVolume(context.Background(), dev, volumePath, readOnlyFor(pl, p.ReadOnly))
+			mountPath, volumes, err := sftpPl.RequestAndMountVolume(context.Background(), dev, volumePath, readOnlyFor(sftpPl, p.ReadOnly))
 			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}

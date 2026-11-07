@@ -1,0 +1,17 @@
+device_name = "legacy-workstation"
+device_type = "laptop"
+tcp_port = 1716
+log_level = "debug"
+download_dir = "/home/example/Downloads/kcd"
+
+[plugins]
+battery = false
+clipboard = true
+sms = false
+
+[network]
+dial_timeout = "7s"
+
+[notifications]
+app_name = "Legacy KDE Connect"
+"com.example.chat" = "silent"

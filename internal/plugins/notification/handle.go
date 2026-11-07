@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -13,7 +14,7 @@ import (
 )
 
 // Handle processes an incoming notification.
-func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body NotificationBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -56,44 +57,10 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 		return nil
 	}
 
-	if body.Silent {
-		return nil
-	}
-
 	// Skip non-clearable notifications (media playback, foreground services).
 	if p.cfg.SkipNonClearable && !body.IsClearable {
 		return nil
 	}
-
-	// Apply per-app notification filter.
-	action := p.resolveAction(body.AppName)
-	if action == "silent" {
-		// Still publish the event for scripts/watch, but skip the desktop popup.
-		if p.bus != nil {
-			payload := map[string]any{
-				"id":      body.ID,
-				"appName": body.AppName,
-				"title":   body.Title,
-				"text":    body.Text,
-			}
-			if body.RequestReplyId != "" {
-				payload["requestReplyId"] = body.RequestReplyId
-			}
-			p.bus.Publish(events.TypeNotification, dev.ID(), payload)
-		}
-		return nil
-	}
-
-	// Truncate text to keep notifications readable.
-	text := body.Text
-	if p.cfg.MaxBodyLength > 0 && len(text) > p.cfg.MaxBodyLength {
-		text = text[:p.cfg.MaxBodyLength] + "…"
-	} else if p.cfg.MaxBodyLength == 0 && len(text) > 512 {
-		// Maintain the old default limit if no config is set
-		text = text[:512] + "…"
-	}
-
-	appName := nonAlphaNumeric.ReplaceAllString(body.AppName, "")
 
 	if p.bus != nil {
 		payload := map[string]any{
@@ -102,10 +69,67 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 			"title":   body.Title,
 			"text":    body.Text,
 		}
+		if body.Silent {
+			payload["silent"] = true
+		}
+		if body.Ticker != "" {
+			payload["ticker"] = body.Ticker
+		}
+		if body.Time != "" {
+			payload["time"] = body.Time
+		}
+		if body.GroupName != "" {
+			payload["groupName"] = body.GroupName
+		}
+		if len(body.Actions) > 0 {
+			payload["actions"] = body.Actions
+		}
+		if len(body.Conversation) > 0 {
+			payload["conversation"] = body.Conversation
+		}
 		if body.RequestReplyId != "" {
 			payload["requestReplyId"] = body.RequestReplyId
 		}
+		if body.PayloadHash != "" {
+			payload["payloadHash"] = body.PayloadHash
+		}
 		p.bus.Publish(events.TypeNotification, dev.ID(), payload)
+	}
+
+	// Apply per-app notification filter and popup policy.
+	action := p.resolveAction(body.AppName)
+	if body.Silent || action == "silent" || !p.popups.Allows("notification") {
+		return nil
+	}
+
+	// Format notification text, rendering conversation transcripts when present.
+	text := body.Text
+	if len(body.Conversation) > 0 {
+		var lines []string
+		for _, msg := range body.Conversation {
+			if msg.Sender != "" {
+				lines = append(lines, msg.Sender+": "+msg.Content)
+			} else if msg.Content != "" {
+				lines = append(lines, msg.Content)
+			}
+		}
+		if len(lines) > 0 {
+			text = strings.Join(lines, "\n")
+		}
+	}
+
+	// Truncate text to keep notifications readable.
+	if p.cfg.MaxBodyLength > 0 && len(text) > p.cfg.MaxBodyLength {
+		text = text[:p.cfg.MaxBodyLength] + "…"
+	} else if p.cfg.MaxBodyLength == 0 && len(text) > 512 {
+		// Maintain the old default limit if no config is set
+		text = text[:512] + "…"
+	}
+
+	appName := nonAlphaNumeric.ReplaceAllString(body.AppName, "")
+	title := body.Title
+	if title == "" && body.GroupName != "" {
+		title = body.GroupName
 	}
 
 	// Capture payload info before the goroutine — pkt may be released.
@@ -128,11 +152,13 @@ func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 
 	// Handlers must not block — all I/O in a goroutine.
 	go func() {
+		dlCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		var iconPath string
 		if p.cfg.ShowIcons {
-			iconPath = p.fetchIcon(ctx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP)
+			iconPath = p.fetchIcon(dlCtx, appName, body.ID, remoteIP, payloadPort, payloadSize, hasIcon, expectedFP, body.PayloadHash)
 		}
-		p.sendDesktopNotification(dev.ID(), appName, body.ID, body.Title, text, iconPath)
+		p.sendDesktopNotification(dev.ID(), appName, body.ID, title, text, iconPath)
 	}()
 
 	return nil

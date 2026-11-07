@@ -22,17 +22,13 @@ type listSender struct {
 	sent   int
 }
 
-func (s *listSender) ID() string                   { return s.id }
-func (s *listSender) Name() string                 { return "Test" }
-func (s *listSender) SetName(string)               {}
-func (s *listSender) State() device.PairingState   { return device.StatePaired }
-func (s *listSender) SetState(device.PairingState) {}
-func (s *listSender) IsConnected() bool            { return true }
-func (s *listSender) RemoteIP() net.IP             { return nil }
-func (s *listSender) PeerCert() *x509.Certificate  { return nil }
-func (s *listSender) HasCapability(string) bool    { return false }
-func (s *listSender) UpdateBattery(int, bool)      {}
-func (s *listSender) GetBattery() (int, bool)      { return 0, false }
+func (s *listSender) ID() string                  { return s.id }
+func (s *listSender) Name() string                { return "Test" }
+func (s *listSender) State() device.PairingState  { return device.StatePaired }
+func (s *listSender) IsConnected() bool           { return true }
+func (s *listSender) RemoteIP() net.IP            { return nil }
+func (s *listSender) PeerCert() *x509.Certificate { return nil }
+func (s *listSender) HasCapability(string) bool   { return false }
 func (s *listSender) Send(p *protocol.Packet) error {
 	s.sent++
 	if s.onSend != nil {
@@ -100,9 +96,9 @@ func TestRequestListReleasesWaiterAfterReply(t *testing.T) {
 		}
 	}
 
-	p.Mu.RLock()
+	p.mu.RLock()
 	pending := len(p.pendingLists)
-	p.Mu.RUnlock()
+	p.mu.RUnlock()
 	if pending != 0 {
 		t.Errorf("%d waiters left registered after completion, want 0", pending)
 	}
@@ -191,9 +187,9 @@ func TestRequestListRejectsConcurrentRequest(t *testing.T) {
 	// Give the first request time to register its waiter.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Mu.RLock()
+		p.mu.RLock()
 		_, busy := p.pendingLists["dev1"]
-		p.Mu.RUnlock()
+		p.mu.RUnlock()
 		if busy {
 			break
 		}

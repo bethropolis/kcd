@@ -48,7 +48,7 @@ const (
 // the phone's handler iterates them without a null check.
 type outputStream struct {
 	mu      sync.Mutex
-	dev     device.Sender
+	dev     device.Peer
 	logger  log.Logger
 	bus     *events.Bus
 	id      int32
@@ -202,7 +202,7 @@ type line struct {
 // keys rows off the started id), deferring finish so panics still release it.
 func (p *RunCommandPlugin) streamOutput(
 	ctx context.Context,
-	dev device.Sender,
+	dev device.Peer,
 	id int32,
 	key string,
 	cmd *exec.Cmd,
@@ -218,15 +218,22 @@ func (p *RunCommandPlugin) streamOutput(
 		if stream != nil && stream.stopped {
 			success = false
 		}
+		exitCode := -1
+		if cmd != nil && cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		} else if success {
+			exitCode = 0
+		}
 		// Only for an execution that actually started, so a client never sees
 		// a finish with no matching start.
 		if stream != nil && stream.announced {
 			stream.publishLifecycle("finished", map[string]any{
-				"success": success,
-				"output":  summary,
+				"success":  success,
+				"output":   summary,
+				"exitCode": exitCode,
 			})
 		}
-		p.finishOutput(dev, id, success)
+		p.finishOutput(dev, id, success, exitCode)
 	}()
 
 	// Built before the pipes exist so deferred finish finds it on early
@@ -338,20 +345,21 @@ func scanInto(out chan<- line, r io.Reader, isStderr bool, logger log.Logger) {
 
 // finishOutput emits commandFinished and clears the registration; the phone
 // colors the line off it, so exactly once per started execution.
-func (p *RunCommandPlugin) finishOutput(dev device.Sender, id int32, success bool) {
-	p.Mu.Lock()
+func (p *RunCommandPlugin) finishOutput(dev device.Peer, id int32, success bool, exitCode int) {
+	p.mu.Lock()
 	if byID, ok := p.running[dev.ID()]; ok {
 		delete(byID, id)
 		if len(byID) == 0 {
 			delete(p.running, dev.ID())
 		}
 	}
-	p.Mu.Unlock()
+	p.mu.Unlock()
 
 	body := map[string]any{
 		"commandFinished": true,
 		"id":              id,
 		"success":         success,
+		"exitCode":        exitCode,
 	}
 	pkt, err := protocol.NewPacket(PacketTypeOutput, body)
 	if err != nil {
@@ -360,46 +368,5 @@ func (p *RunCommandPlugin) finishOutput(dev device.Sender, id int32, success boo
 	}
 	if err := dev.Send(pkt); err != nil {
 		p.logger.Warn("runcommand: send finished", log.Error(err), log.Int("id", int(id)))
-	}
-}
-
-// nextExecID hands out execution ids as a counter: the phone's getInt would
-// overflow on nanosecond timestamps.
-func (p *RunCommandPlugin) nextExecID() int32 {
-	p.Mu.Lock()
-	defer p.Mu.Unlock()
-	p.execSeq++
-	return p.execSeq
-}
-
-// stopRunning cancels a running execution, if the phone asked for it. The
-// phone's stop button sends kdeconnect.runcommand.request {"stop": true}.
-func (p *RunCommandPlugin) stopRunning(deviceID string, id int32) {
-	p.Mu.Lock()
-	cancel := p.running[deviceID][id]
-	p.Mu.Unlock()
-
-	if cancel == nil {
-		p.logger.Debug("runcommand: stop for unknown execution",
-			log.String("device_id", deviceID), log.Int("id", int(id)))
-		return
-	}
-	p.logger.Info("runcommand: stopping execution on request",
-		log.String("device_id", deviceID), log.Int("id", int(id)))
-	cancel()
-}
-
-// stopAll cancels everything running for a device, used when it disconnects.
-func (p *RunCommandPlugin) stopAll(deviceID string) {
-	p.Mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(p.running[deviceID]))
-	for _, cancel := range p.running[deviceID] {
-		cancels = append(cancels, cancel)
-	}
-	delete(p.running, deviceID)
-	p.Mu.Unlock()
-
-	for _, cancel := range cancels {
-		cancel()
 	}
 }

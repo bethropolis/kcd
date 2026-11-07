@@ -5,16 +5,19 @@ import (
 	"fmt"
 
 	"github.com/bethropolis/kcd/internal/ipc"
-	"github.com/bethropolis/kcd/internal/plugins/contacts"
 )
 
 // SendSMS requests the remote device to send an SMS.
-func (c *Client) SendSMS(deviceID, phoneNumber, message string) error {
-	_, err := c.Call(ipc.CmdSendSMS, ipc.SMSPayload{
+func (c *Client) SendSMS(deviceID, phoneNumber, message string, subID ...int64) error {
+	payload := ipc.SMSPayload{
 		DeviceID:    deviceID,
 		PhoneNumber: phoneNumber,
 		Message:     message,
-	})
+	}
+	if len(subID) > 0 {
+		payload.SubID = &subID[0]
+	}
+	_, err := c.Call(ipc.CmdSendSMS, payload)
 	return err
 }
 
@@ -43,12 +46,16 @@ func (c *Client) SmsRequestConversationRange(deviceID string, threadID int64, ra
 }
 
 // SmsRequestAttachment asks a device to send an MMS attachment file.
-func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdentifier string) error {
-	_, err := c.Call(ipc.CmdSmsRequestAttachment, ipc.SMSAttachmentPayload{
+func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdentifier string, threadID ...int64) error {
+	payload := ipc.SMSAttachmentPayload{
 		DeviceID:         deviceID,
 		PartID:           partID,
 		UniqueIdentifier: uniqueIdentifier,
-	})
+	}
+	if len(threadID) > 0 {
+		payload.ThreadID = &threadID[0]
+	}
+	_, err := c.Call(ipc.CmdSmsRequestAttachment, payload)
 	return err
 }
 
@@ -61,12 +68,12 @@ func (c *Client) ContactsSync(deviceID string) error {
 
 // ContactsList returns cached contact summaries for a device (empty when
 // never synced — absent means unknown).
-func (c *Client) ContactsList(deviceID string) ([]contacts.ContactSummary, error) {
+func (c *Client) ContactsList(deviceID string) ([]ipc.ContactSummary, error) {
 	res, err := c.Call(ipc.CmdContactsList, ipc.DevicePayload{DeviceID: deviceID})
 	if err != nil {
 		return nil, err
 	}
-	var list []contacts.ContactSummary
+	var list []ipc.ContactSummary
 	if err := json.Unmarshal(res.Data, &list); err != nil {
 		return nil, fmt.Errorf("decode contacts: %w", err)
 	}

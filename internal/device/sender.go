@@ -7,22 +7,23 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-// Sender is a KDE Connect device that can receive packets, letting plugins
-// interact without knowing device internals.
-type Sender interface {
+// Peer represents a remote connected KDE Connect peer from the plugin's perspective.
+type Peer interface {
 	ID() string
 	Name() string
-	SetName(name string)
 	State() PairingState
-	SetState(state PairingState)
-
 	Send(p *protocol.Packet) error
 	IsConnected() bool
 	RemoteIP() net.IP
 	PeerCert() *x509.Certificate
-
 	HasCapability(cap string) bool
+}
 
+// Sender embeds Peer and adds mutable device state methods for internal daemon and pairing flows.
+type Sender interface {
+	Peer
+	SetName(name string)
+	SetState(state PairingState)
 	UpdateBattery(charge int, charging bool)
 	GetBattery() (int, bool)
 }

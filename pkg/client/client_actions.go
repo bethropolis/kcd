@@ -86,6 +86,16 @@ func (c *Client) NotifyDismiss(deviceID, notificationID string) error {
 	return err
 }
 
+// NotifyAction requests the daemon to trigger a notification action on the remote device.
+func (c *Client) NotifyAction(deviceID, notificationID, action string) error {
+	_, err := c.Call(ipc.CmdNotifyAction, ipc.NotifyActionPayload{
+		DeviceID:       deviceID,
+		NotificationID: notificationID,
+		Action:         action,
+	})
+	return err
+}
+
 // CallMute requests the daemon to mute an incoming call on the remote device.
 func (c *Client) CallMute(deviceID string) error {
 	_, err := c.Call(ipc.CmdCallMute, ipc.DevicePayload{DeviceID: deviceID})
@@ -107,5 +117,14 @@ func (c *Client) Lock(deviceID string) error {
 // Unlock requests the daemon to unlock the session.
 func (c *Client) Unlock(deviceID string) error {
 	_, err := c.Call(ipc.CmdUnlock, ipc.DevicePayload{DeviceID: deviceID})
+	return err
+}
+
+// PromptRespond resolves a pending user prompt with the selected choice.
+func (c *Client) PromptRespond(promptID, choice string) error {
+	_, err := c.Call(ipc.CmdPromptRespond, ipc.PromptRespondPayload{
+		PromptID: promptID,
+		Choice:   choice,
+	})
 	return err
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/netutil"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -46,6 +47,7 @@ func (l *Listener) Run(ctx context.Context) {
 		conn.Close()
 	}()
 
+	var readBackoff netutil.ErrorBackoff
 	for {
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
@@ -53,8 +55,12 @@ func (l *Listener) Run(ctx context.Context) {
 				return // clean exit on context cancel
 			}
 			l.logger.Debug("read udp error", log.Error(err))
+			if !readBackoff.Wait(ctx) {
+				return
+			}
 			continue
 		}
+		readBackoff.Reset()
 
 		if n >= len(buf) || n == 0 {
 			continue // ignore giant/empty packets
@@ -73,6 +79,10 @@ func (l *Listener) Run(ctx context.Context) {
 
 		var identity protocol.IdentityBody
 		if err := json.Unmarshal(pkt.Body, &identity); err != nil {
+			protocol.ReleasePacket(pkt)
+			continue
+		}
+		if !protocol.ValidDeviceID(identity.DeviceID) {
 			protocol.ReleasePacket(pkt)
 			continue
 		}

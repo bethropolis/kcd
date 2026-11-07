@@ -2,16 +2,13 @@ package clipboard
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
-	"fmt"
-	"io"
 	"mime"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
@@ -21,7 +18,13 @@ import (
 )
 
 // Handle processes incoming clipboard packets.
-func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
+	p.mu.Lock()
+	receive := p.receive
+	p.mu.Unlock()
+	if !receive {
+		return nil
+	}
 	if pkt.Type == "kdeconnect.clipboard.file" {
 		return p.handleClipboardFile(ctx, dev, pkt)
 	}
@@ -42,14 +45,25 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		p.mu.Unlock()
 		return nil
 	}
-	// Guard lastTimestamp under the same lock as lastContent — they form a
-	// consistent pair and both fields are written from the TCP read goroutine.
-	if body.Timestamp > 0 {
-		if body.Timestamp < p.lastTimestamp {
+	if pkt.Type == "kdeconnect.clipboard.connect" {
+		// Spec schemas/kdeconnect.clipboard.connect.json: If the timestamp is 0
+		// or less than the local timestamp, the content should be ignored.
+		if body.Timestamp == 0 || body.Timestamp < p.localChangedAt {
 			p.mu.Unlock()
 			return nil
 		}
-		p.lastTimestamp = body.Timestamp
+		p.localChangedAt = body.Timestamp
+	} else {
+		// Guard lastTimestamp under the same lock as lastContent — they form a
+		// consistent pair and both fields are written from the TCP read goroutine.
+		if body.Timestamp > 0 {
+			if body.Timestamp < p.lastTimestamp {
+				p.mu.Unlock()
+				return nil
+			}
+			p.lastTimestamp = body.Timestamp
+		}
+		p.localChangedAt = time.Now().UnixMilli()
 	}
 	p.lastContent = body.Content
 	p.mu.Unlock()
@@ -82,7 +96,7 @@ type ClipboardFileBody struct {
 
 const maxClipboardFileSize = 50 * 1024 * 1024 // 50 MB safety limit (matches KDE Connect C++)
 
-func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
 		return nil
 	}
@@ -120,7 +134,9 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		tmpFile.Close()
 		defer os.Remove(tmpPath)
 
-		if err := downloadToFile(ctx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, p.sidechannel); err != nil {
+		dlCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if _, err := transport.ReceiveToFile(dlCtx, remoteIP, payloadPort, payloadSize, tmpPath, p.tlsConfig, expectedFP, p.logger, transport.ReceiveOptions{MaxSize: maxClipboardFileSize, Sidechannel: p.sidechannel}); err != nil {
 			p.logger.Error("clipboard file: download failed", log.Error(err))
 			return
 		}
@@ -151,27 +167,5 @@ func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Se
 		}
 	}()
 
-	return nil
-}
-
-// downloadToFile dials a TLS side-channel and streams the payload to dest.
-func downloadToFile(ctx context.Context, ip net.IP, port int, size int64, dest string, tlsConfig *tls.Config, expectedFP string, logger log.Logger, options ...transport.SidechannelOptions) error {
-	conn, err := transport.DialSidechannel(ctx, ip, port, tlsConfig, expectedFP, logger, options...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("clipboard: create file %s: %w", dest, err)
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, io.LimitReader(conn, size))
-	if err != nil {
-		os.Remove(dest) // don't leave a corrupt partial behind
-		return fmt.Errorf("clipboard: stream to %s: %w", dest, err)
-	}
 	return nil
 }

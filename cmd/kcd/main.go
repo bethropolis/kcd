@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,7 +11,8 @@ import (
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/daemon"
-	"github.com/bethropolis/kcd/internal/doctor"
+	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/pkg/client"
 	"github.com/urfave/cli/v2"
 )
@@ -24,17 +24,31 @@ var (
 )
 
 func getClient(c *cli.Context) (*client.Client, error) {
-	cfgPath := c.String("config")
+	cfgPath := configPathFor(c)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	reportConfigWarnings(cfg)
 	return &client.Client{
 		SocketPath:        cfg.SocketPath,
 		Timeout:           5 * time.Second,
 		PairListenTimeout: pairListenDeadline(config.Duration(cfg.Pairing.ListenTimeout)),
 		SftpTimeout:       sftpCredentialDeadline(cfg.SFTP.CredentialsTimeoutSecs),
 	}, nil
+}
+
+func configPathFor(c *cli.Context) string {
+	if c.IsSet("config") {
+		return c.String("config")
+	}
+	return config.DefaultConfigPath()
+}
+
+func reportConfigWarnings(cfg *config.Config) {
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+	}
 }
 
 // sftpCredentialDeadline outlasts the daemon's wait so failures report the
@@ -67,12 +81,18 @@ func main() {
 
 	daemon.Version = version
 
-	app := &cli.App{
+	var app *cli.App
+	app = &cli.App{
 		Name:                 "kcd",
 		Usage:                "KDE Connect daemon and client",
 		Version:              fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
 		EnableBashCompletion: true,
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "instance",
+				Usage:   "Named isolated daemon instance",
+				EnvVars: []string{"KCD_INSTANCE"},
+			},
 			&cli.StringFlag{
 				Name:    "config",
 				Value:   config.DefaultConfigPath(),
@@ -85,17 +105,63 @@ func main() {
 				EnvVars: []string{"KCD_LOG_LEVEL"},
 			},
 		},
+		Before: func(c *cli.Context) error {
+			if instance := c.String("instance"); instance != "" {
+				return os.Setenv("KCD_INSTANCE", instance)
+			}
+			return nil
+		},
 		Commands: []*cli.Command{
+			configCmd,
+			dbusCmd,
+			{
+				Name:  "version",
+				Usage: "Show daemon and IPC capability information",
+				Flags: []cli.Flag{&cli.BoolFlag{Name: "json", Usage: "Output capability JSON"}},
+				Action: func(c *cli.Context) error {
+					if !c.Bool("json") {
+						fmt.Println(app.Version)
+						return nil
+					}
+					cfg, err := config.Load(configPathFor(c))
+					if err != nil {
+						return err
+					}
+					pluginState := map[string]bool{}
+					for _, name := range []string{"Pair", "Battery", "Clipboard", "Notification", "Share", "RunCommand", "MPRIS", "Ping", "Telephony", "Connectivity", "Mousepad", "SFTP", "FindMyPhone", "LockDevice", "SystemVolume", "SMS", "Contacts", "Presenter", "FindThisDevice", "RemoteSystemVolume", "Digitizer"} {
+						pluginState[name] = cfg.PluginEnabledForDevice("", name)
+					}
+					commands := make([]string, 0, len(app.Commands))
+					for _, command := range app.Commands {
+						commands = append(commands, command.Name)
+					}
+					data, err := json.MarshalIndent(ipc.HelloResponse{
+						APIVersion:    ipc.APIVersion,
+						DaemonVersion: version,
+						Commands:      commands,
+						Events:        events.AllTypes(),
+						OptInEvents:   []string{string(events.TypeSMSIncoming), string(events.TypeSMSAttachment)},
+						Plugins:       pluginState,
+						Features:      []string{"errorCodes", "keepAlive", "watchResume", "prompts", "config", "schemas"},
+					}, "", "  ")
+					if err != nil {
+						return err
+					}
+					fmt.Println(string(data))
+					return nil
+				},
+			},
 			{
 
 				Name:  "daemon",
 				Usage: "Run the kcd daemon",
 				Action: func(c *cli.Context) error {
-					configPath := c.String("config")
+					configPath := configPathFor(c)
 					cfg, err := config.Load(configPath)
 					if err != nil {
 						return fmt.Errorf("failed to load config: %w", err)
 					}
+					reportConfigWarnings(cfg)
 
 					if logLevel := c.String("log-level"); logLevel != "" {
 						cfg.LogLevel = logLevel
@@ -148,6 +214,7 @@ func main() {
 			sftpCmd,
 			replyCmd,
 			dismissCmd,
+			notifyCmd,
 			callCmd,
 			findmyphoneCmd,
 			lockCmd,
@@ -159,72 +226,13 @@ func main() {
 			contactsCmd,
 			mprisCmd,
 			volumeCmd,
-			{
-
-				Name:  "doctor",
-				Usage: "Check runtime dependencies and configuration",
-				Action: func(c *cli.Context) error {
-					checks := doctor.Run()
-					useColor := os.Getenv("TERM") != "" && os.Getenv("NO_COLOR") == ""
-					green := ""
-					red := ""
-					reset := ""
-					if useColor {
-						green = "\033[32m"
-						red = "\033[31m"
-						reset = "\033[0m"
-					}
-					anyFailed := false
-					for _, ch := range checks {
-						if ch.Pass {
-							fmt.Printf("%s✓%s %s\n", green, reset, ch.Name)
-						} else {
-							fmt.Printf("%s✗%s %s — %s\n", red, reset, ch.Name, ch.Detail)
-							anyFailed = true
-						}
-					}
-					if anyFailed {
-						fmt.Println("\nSome checks failed.")
-						return cli.Exit("", 1)
-					}
-					fmt.Println("\nAll checks passed.")
-					return nil
-				},
-			},
-			{
-
-				Name:  "status",
-				Usage: "Show daemon status and runtime information",
-				Flags: []cli.Flag{
-					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
-				},
-				Action: func(c *cli.Context) error {
-					cl, err := getClient(c)
-					if err != nil {
-						return err
-					}
-					st, err := cl.Status()
-					if err != nil {
-						return err
-					}
-					if c.Bool("json") {
-						data, _ := json.MarshalIndent(st, "", "  ")
-						fmt.Println(string(data))
-						return nil
-					}
-					fmt.Print(formatStatus(st))
-					return nil
-				},
-			},
+			doctorCmd,
+			statusCmd,
 		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
-
-// printDeviceTable prints a human-readable device list table.
-
-// watchDevices prints the current device list then re-prints it on every
-// connect/disconnect/add/remove event.

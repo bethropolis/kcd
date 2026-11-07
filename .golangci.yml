@@ -31,6 +31,10 @@ linters:
           deny:
             - pkg: go.uber.org/zap
               desc: 'import internal/log instead of go.uber.org/zap directly'
+            - pkg: log
+              desc: 'use internal/log or fmt.Fprintln(os.Stderr, ...) instead of stdlib log'
+            - pkg: io/ioutil
+              desc: 'use io or os packages instead of deprecated io/ioutil'
 
   exclusions:
     rules:

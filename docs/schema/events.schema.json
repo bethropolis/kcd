@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kcd events",
+  "type": "object",
+  "required": ["type", "timestamp"],
+  "properties": {
+    "seq": {"type": "integer", "minimum": 1},
+    "type": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "deviceId": {"type": "string"},
+    "payload": {}
+  },
+  "additionalProperties": false,
+  "x-optInTypes": ["sms.incoming", "sms.attachment", "prompt"]
+}

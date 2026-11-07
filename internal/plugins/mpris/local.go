@@ -9,7 +9,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *MPRISPlugin) sendPlayerList(dev device.Sender) error {
+func (p *MPRISPlugin) sendPlayerList(dev device.Peer) error {
 	p.mu.RLock()
 	displayNames := make([]string, 0, len(p.players))
 	for name := range p.players {

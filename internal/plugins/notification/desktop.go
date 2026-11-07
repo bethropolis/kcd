@@ -21,6 +21,13 @@ func (p *NotificationPlugin) closeNotification(desktopID string) {
 
 // sendDesktopNotification calls notify-send with the collected parameters.
 func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, text, iconPath string) {
+	backend := p.backend
+	if backend == "" || backend == "auto" {
+		backend = "notify-send"
+	}
+	if backend == "none" {
+		return
+	}
 	// Stack same-app notifications so they replace instead of flooding; daemons
 	// ignoring the hint are covered by --replace-id below.
 	groupHint := "string:x-dunst-stack-tag:kcd-" + appName
@@ -70,7 +77,12 @@ func (p *NotificationPlugin) sendDesktopNotification(devID, appName, id, title, 
 		args = append(args, "--", title, text)
 	}
 
-	out, err := p.newExec(context.Background(), "notify-send", args...).Output()
+	command := "notify-send"
+	if backend == "dbus" {
+		args = []string{"call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", appName, "0", iconArg, title, text, "[]", "{}", "-1"}
+		command = "gdbus"
+	}
+	out, err := p.newExec(context.Background(), command, args...).Output()
 	if err == nil && p.canCloseNotifs && id != "" {
 		if desktopID := strings.TrimSpace(string(out)); desktopID != "" {
 			p.notifIDs.Store(p.notifKey(devID, id), desktopID)

@@ -12,6 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/testutil"
+	"github.com/bethropolis/kcd/internal/testutil/daemonstart"
 )
 
 // drainSnapshot skips the state.snapshot bootstrap event every watch stream
@@ -101,7 +102,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	cfg.Plugins.SystemVolume = false
 	cfg.Plugins.SMS = false
 
-	_, cl := testutil.StartTestDaemon(t, cfg)
+	_, cl := daemonstart.StartTestDaemon(t, cfg)
 
 	evCh := make(chan events.Event, 16)
 	go func() {
@@ -110,7 +111,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	}()
 	drainSnapshot(t, evCh)
 
-	peerCertPair, err := cert.LoadOrGenerate(dir+"/peer-cert.pem", dir+"/peer-key.pem", "mock-peer")
+	peerCertPair, err := cert.LoadOrGenerate(dir+"/peer-cert.pem", dir+"/peer-key.pem", testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("peer cert: %v", err)
 	}
@@ -123,21 +124,21 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 		t.Fatalf("read daemon identity: %v", err)
 	}
 	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID: "mock-peer", DeviceName: "Mock Peer",
+		DeviceID: testutil.DefaultMockPeerID, DeviceName: "Mock Peer",
 		DeviceType: "phone", ProtocolVersion: protocol.ProtocolVersion,
 	})
 	if err := peer.SendPacket(connA, identPkt); err != nil {
 		t.Fatalf("send identity: %v", err)
 	}
-	pairPkt, _ := protocol.NewPacket("kdeconnect.pair", map[string]bool{"pair": true})
+	pairPkt, _ := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	if err := peer.SendPacket(connA, pairPkt); err != nil {
 		t.Fatalf("send pair: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if _, err := cl.Pair("mock-peer"); err != nil {
+	if _, err := cl.Pair(testutil.DefaultMockPeerID); err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
-	if ev := nextFor(t, evCh, "mock-peer", "device.connected"); ev.Type != events.TypeDeviceConnected {
+	if ev := nextFor(t, evCh, testutil.DefaultMockPeerID, "device.connected"); ev.Type != events.TypeDeviceConnected {
 		t.Fatalf("expected device.connected, got %s", ev.Type)
 	}
 
@@ -145,7 +146,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	if _, err := peer.TryDial("127.0.0.1:1716"); err == nil {
 		t.Fatal("expected duplicate handshake refused inside cooldown")
 	}
-	expectNoFor(t, evCh, "mock-peer", 500*time.Millisecond, "duplicate connect/disconnect")
+	expectNoFor(t, evCh, testutil.DefaultMockPeerID, 500*time.Millisecond, "duplicate connect/disconnect")
 
 	// Past the cooldown (1s, matching upstream Android) the same handshake
 	// replaces the live session.
@@ -161,10 +162,10 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	// Replacement is immediate; old socket is closed. The replacement
 	// fires a fresh device.connected (same device, new session) while the
 	// superseded session's death stays silent (no device.disconnected).
-	if ev := nextFor(t, evCh, "mock-peer", "device.connected"); ev.Type != events.TypeDeviceConnected {
+	if ev := nextFor(t, evCh, testutil.DefaultMockPeerID, "device.connected"); ev.Type != events.TypeDeviceConnected {
 		t.Fatalf("expected device.connected on replacement, got %s", ev.Type)
 	}
-	expectNoFor(t, evCh, "mock-peer", 500*time.Millisecond, "replacement disconnect")
+	expectNoFor(t, evCh, testutil.DefaultMockPeerID, 500*time.Millisecond, "replacement disconnect")
 	// connA's peer should see EOF since it was replaced.
 	_ = connA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 
@@ -175,7 +176,7 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	if err := peer.SendPacket(connC, battPkt); err != nil {
 		t.Fatalf("send battery: %v", err)
 	}
-	if ev := nextFor(t, evCh, "mock-peer", "battery.update"); ev.Type != events.TypeBatteryUpdate {
+	if ev := nextFor(t, evCh, testutil.DefaultMockPeerID, "battery.update"); ev.Type != events.TypeBatteryUpdate {
 		t.Fatalf("expected battery.update on survivor, got %s", ev.Type)
 	}
 
@@ -183,11 +184,11 @@ func TestDuplicateSessionFailoverIntegration(t *testing.T) {
 	if err := connA.Close(); err != nil {
 		t.Fatalf("close A: %v", err)
 	}
-	expectNoFor(t, evCh, "mock-peer", 300*time.Millisecond, "superseded disconnect")
+	expectNoFor(t, evCh, testutil.DefaultMockPeerID, 300*time.Millisecond, "superseded disconnect")
 	if err := connC.Close(); err != nil {
 		t.Fatalf("close C: %v", err)
 	}
-	if ev := nextFor(t, evCh, "mock-peer", "device.disconnected"); ev.Type != events.TypeDeviceDisconnected {
+	if ev := nextFor(t, evCh, testutil.DefaultMockPeerID, "device.disconnected"); ev.Type != events.TypeDeviceDisconnected {
 		t.Fatalf("expected device.disconnected, got %s", ev.Type)
 	}
 }

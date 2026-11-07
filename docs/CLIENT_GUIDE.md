@@ -72,6 +72,41 @@ if resp["ok"]:
 
 ## 3. Device Lifecycle
 
+### Go client package
+
+Go integrations can use `github.com/bethropolis/kcd/pkg/client`. The package
+keeps the existing exported `Client` fields and also provides a constructor
+and capability handshake:
+
+```go
+cl := client.New(socketPath)
+
+// Capability negotiation
+hello, err := cl.Hello()
+if err != nil {
+    return err
+}
+fmt.Println(hello.APIVersion, hello.Features)
+
+// Persistent keepalive session for request pipelining
+session, err := cl.OpenKeepAlive()
+if err != nil {
+    return err
+}
+defer session.Close()
+
+res, err := session.Call("ping", map[string]string{"deviceId": "a1b2..."}, time.Second)
+
+// Stream live events, optionally resuming from a previous sequence token
+ch := make(chan events.Event, 64)
+err = cl.WatchSince(ctx, []string{"battery.update", "device.connected"}, lastSeq, ch)
+```
+
+`client.APIVersion` is the IPC contract version. Additive capabilities are
+listed by `Hello`; callers should check those feature names rather than parse
+the daemon version string. Use `OpenKeepAlive()` for long-lived interactive
+sessions to pipeline requests without per-call socket reconnects.
+
 ### 3.1 Listing Devices
 
 The `devices` command returns all known devices (paired and unpaired).
@@ -452,8 +487,9 @@ ipc_request(sock, "remote_volume_mute", {
 ```
 
 Volume changes from the phone arrive as `volume.update` events. The event payload
-is either `{"name", "volume", "muted"}` for a single sink change or `{"sinks": [...]}`
-for the full sink list.
+is either a per-sink object with `name` and any known `volume` / `muted` fields,
+or `{"sinks": [...]}` for the full sink list. The phone can send volume and mute
+as separate packets, so clients should preserve cached fields that are absent.
 
 ### 5.11 Get SFTP Connection Info
 
@@ -825,7 +861,7 @@ kcd watch --events=connectivity.update
 
 If you are implementing a full KDE Connect network-level client (not just IPC),
 refer to the upstream protocol spec at
-<https://github.com/KDE/kdeconnect-meta/blob/work/protocol-schemas/protocol.md>.
+<https://invent.kde.org/network/kdeconnect-meta/-/blob/master/protocol.md>.
 
 ### Getting Help
 - **Ask questions or Issues**: feel free to ask questions in kcd discussion page  or file an issue that you may find, also if something can better be done upstream than in client do a feature request through issues

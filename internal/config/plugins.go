@@ -1,8 +1,109 @@
 package config
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+// HookConfig describes a command run for a matching event.
+type HookConfig struct {
+	Command  []string     `toml:"command"`
+	Devices  []string     `toml:"devices"`
+	Timeout  FlexDuration `toml:"timeout" json:"-"`
+	Debounce FlexDuration `toml:"debounce" json:"-"`
+}
+
+// UnmarshalTOML accepts both an argv array and an extended hook table.
+func (h *HookConfig) UnmarshalTOML(value any) error {
+	switch v := value.(type) {
+	case []string:
+		h.Command = append([]string(nil), v...)
+		return nil
+	case []any:
+		h.Command = make([]string, len(v))
+		for i, arg := range v {
+			text, ok := arg.(string)
+			if !ok {
+				return fmt.Errorf("hook command argument %d is not a string", i)
+			}
+			h.Command[i] = text
+		}
+		return nil
+	case map[string]any:
+		if command, ok := v["command"]; ok {
+			if err := h.UnmarshalTOML(command); err != nil {
+				return err
+			}
+		}
+		if devices, ok := v["devices"].([]any); ok {
+			for _, device := range devices {
+				text, ok := device.(string)
+				if !ok {
+					return fmt.Errorf("hook device is not a string")
+				}
+				h.Devices = append(h.Devices, text)
+			}
+		}
+		if timeout, ok := v["timeout"]; ok {
+			text, ok := timeout.(string)
+			if !ok {
+				return fmt.Errorf("hook timeout is not a duration")
+			}
+			if err := h.Timeout.UnmarshalText([]byte(text)); err != nil {
+				return err
+			}
+		}
+		if debounce, ok := v["debounce"]; ok {
+			text, ok := debounce.(string)
+			if !ok {
+				return fmt.Errorf("hook debounce is not a duration")
+			}
+			if err := h.Debounce.UnmarshalText([]byte(text)); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("hook must be an argv array or table")
+	}
+}
+
+// RunCommandConfig controls the default lifetime of remote commands.
+type RunCommandConfig struct {
+	DefaultTimeout FlexDuration `toml:"default_timeout" json:"-"`
+}
+
+// Defaults preserves the historical fifteen-second command timeout.
+func (c *RunCommandConfig) Defaults() {
+	c.DefaultTimeout = FlexDuration(15 * time.Second)
+}
+
+// FlexDuration accepts Go duration strings and bare seconds for config aliases.
+type FlexDuration time.Duration
+
+// UnmarshalText decodes a duration string or a bare number of seconds.
+func (d *FlexDuration) UnmarshalText(text []byte) error {
+	value := string(text)
+	if seconds, err := time.ParseDuration(value); err == nil {
+		*d = FlexDuration(seconds)
+		return nil
+	}
+	seconds, err := time.ParseDuration(value + "s")
+	if err != nil {
+		return err
+	}
+	*d = FlexDuration(seconds)
+	return nil
+}
+
+// MarshalText preserves duration aliases as readable TOML values.
+func (d FlexDuration) MarshalText() ([]byte, error) {
+	return []byte(time.Duration(d).String()), nil
+}
+
+func (d FlexDuration) duration() time.Duration { return time.Duration(d) }
 
 type PluginConfig struct {
 	Battery            bool `toml:"battery"`
@@ -25,6 +126,82 @@ type PluginConfig struct {
 	Presenter          bool `toml:"presenter"`
 	FindThisDevice     bool `toml:"findthisdevice"`
 	RemoteSystemVolume bool `toml:"remotesystemvolume"`
+	Digitizer          bool `toml:"digitizer"`
+}
+
+// BackendsConfig defines external desktop tools as argv templates.
+type BackendsConfig struct {
+	LockCommand   []string `toml:"lock_command"`
+	UnlockCommand []string `toml:"unlock_command"`
+	ClipboardGet  []string `toml:"clipboard_get"`
+	ClipboardSet  []string `toml:"clipboard_set"`
+	Volume        string   `toml:"volume"`
+	Notify        string   `toml:"notify"`
+	SoundCommand  []string `toml:"sound_command"`
+	SoundFile     string   `toml:"sound_file"`
+}
+
+// Defaults fills backend selectors without overriding command templates.
+func (c *BackendsConfig) Defaults() {
+	c.Volume = "auto"
+	c.Notify = "auto"
+}
+
+// PopupsConfig controls desktop popup delivery independently of event flow.
+type PopupsConfig struct {
+	Enabled       bool   `toml:"enabled"`
+	Backend       string `toml:"backend"`
+	AppName       string `toml:"app_name"`
+	Battery       bool   `toml:"battery"`
+	Ping          bool   `toml:"ping"`
+	Telephony     bool   `toml:"telephony"`
+	SMS           bool   `toml:"sms"`
+	Notifications bool   `toml:"notifications"`
+	RunCommand    bool   `toml:"runcommand"`
+}
+
+// Defaults enables the existing popup behavior for every source.
+func (c *PopupsConfig) Defaults() {
+	c.Enabled = true
+	c.Backend = "auto"
+	c.Battery = true
+	c.Ping = true
+	c.Telephony = true
+	c.SMS = true
+	c.Notifications = true
+	c.RunCommand = true
+}
+
+// Allows reports whether a popup source is enabled by the popup policy.
+func (c PopupsConfig) Allows(source string) bool {
+	if !c.Enabled {
+		return false
+	}
+	switch source {
+	case "battery":
+		return c.Battery
+	case "ping":
+		return c.Ping
+	case "telephony":
+		return c.Telephony
+	case "sms":
+		return c.SMS
+	case "notification":
+		return c.Notifications
+	case "runcommand":
+		return c.RunCommand
+	default:
+		return true
+	}
+}
+
+// DeviceConfig restricts globally enabled features for one paired device.
+type DeviceConfig struct {
+	Alias         string             `toml:"alias"`
+	DownloadDir   string             `toml:"download_dir"`
+	Plugins       map[string]bool    `toml:"plugins"`
+	Notifications NotificationConfig `toml:"notifications"`
+	Commands      map[string]string  `toml:"commands"`
 }
 
 type BatteryConfig struct {
@@ -37,12 +214,13 @@ type BatteryConfig struct {
 }
 
 type NotificationPluginConfig struct {
-	Urgency          string `toml:"urgency"`
-	FetchIcons       bool   `toml:"fetch_icons"`
-	IconCacheDir     string `toml:"icon_cache_dir"`
-	MaxBodyLength    int    `toml:"max_body_length"`
-	ExpireMS         int    `toml:"expire_ms"`
-	SkipNonClearable bool   `toml:"skip_non_clearable"`
+	Urgency          string       `toml:"urgency"`
+	FetchIcons       bool         `toml:"fetch_icons"`
+	IconCacheDir     string       `toml:"icon_cache_dir"`
+	MaxBodyLength    int          `toml:"max_body_length"`
+	ExpireMS         int          `toml:"expire_ms"`
+	Expire           FlexDuration `toml:"expire" json:"-"`
+	SkipNonClearable bool         `toml:"skip_non_clearable"`
 	// ReplaceNotifications replaces the popup on same-id re-posts instead of
 	// stacking a new one each time. On by default.
 	ReplaceNotifications bool `toml:"replace_notifications"`
@@ -51,26 +229,39 @@ type NotificationPluginConfig struct {
 	ShowIcons bool `toml:"show_icons"`
 	// CancelGraceMS holds a cancelled popup briefly so a same-id re-post
 	// updates it in place; 0 closes immediately.
-	CancelGraceMS int `toml:"cancel_grace_ms"`
+	CancelGraceMS int          `toml:"cancel_grace_ms"`
+	CancelGrace   FlexDuration `toml:"cancel_grace" json:"-"`
+}
+
+// LockDeviceConfig controls actions a paired peer may request on this session.
+type LockDeviceConfig struct {
+	AllowRemoteUnlock bool `toml:"allow_remote_unlock"`
 }
 
 type ShareConfig struct {
-	PortMin           int    `toml:"port_min"`
-	PortMax           int    `toml:"port_max"`
-	AcceptTimeoutSecs int    `toml:"accept_timeout_secs"`
-	AutoOpen          bool   `toml:"auto_open"`
-	OpenCommand       string `toml:"open_command"`
-	Overwrite         bool   `toml:"overwrite"`
+	MaxFileSize       int64        `toml:"max_file_size"`
+	PortMin           int          `toml:"port_min"`
+	PortMax           int          `toml:"port_max"`
+	AcceptTimeoutSecs int          `toml:"accept_timeout_secs"`
+	AcceptTimeout     FlexDuration `toml:"accept_timeout" json:"-"`
+	AutoOpen          bool         `toml:"auto_open"`
+	OpenCommand       string       `toml:"open_command"`
+	Overwrite         bool         `toml:"overwrite"`
+	Accept            string       `toml:"accept" json:"-"`
+	TextAction        string       `toml:"text_action" json:"-"`
+	URLAction         string       `toml:"url_action" json:"-"`
 }
 
 type SFTPConfig struct {
-	MountDir               string   `toml:"mount_dir"`
-	CredentialsTimeoutSecs int      `toml:"credentials_timeout_secs"`
-	KeepaliveIntervalSecs  int      `toml:"keepalive_interval_secs"`
-	KeepaliveCount         int      `toml:"keepalive_count"`
-	AutoOpen               bool     `toml:"auto_open"`
-	OpenCommand            string   `toml:"open_command"`
-	ExtraSshfsOpts         []string `toml:"extra_sshfs_opts"`
+	MountDir               string       `toml:"mount_dir"`
+	CredentialsTimeoutSecs int          `toml:"credentials_timeout_secs"`
+	CredentialsTimeout     FlexDuration `toml:"credentials_timeout" json:"-"`
+	KeepaliveIntervalSecs  int          `toml:"keepalive_interval_secs"`
+	KeepaliveInterval      FlexDuration `toml:"keepalive_interval" json:"-"`
+	KeepaliveCount         int          `toml:"keepalive_count"`
+	AutoOpen               bool         `toml:"auto_open"`
+	OpenCommand            string       `toml:"open_command"`
+	ExtraSshfsOpts         []string     `toml:"extra_sshfs_opts"`
 	// ReadOnly mounts the device's filesystem read-only by default. --ro on a
 	// single mount request overrides this either way.
 	ReadOnly bool `toml:"read_only"`
@@ -83,9 +274,12 @@ type PingConfig struct {
 }
 
 type PairingConfig struct {
-	TimeoutSecs   int    `toml:"timeout_secs"`
-	IntentTTL     string `toml:"intent_ttl"`
-	ListenTimeout string `toml:"listen_timeout"`
+	TimeoutSecs    int          `toml:"timeout_secs"`
+	Timeout        FlexDuration `toml:"timeout" json:"-"`
+	IntentTTL      string       `toml:"intent_ttl"`
+	ListenTimeout  string       `toml:"listen_timeout"`
+	AcceptRequests string       `toml:"accept_requests" json:"-"`
+	AskFallback    string       `toml:"ask_fallback" json:"-"`
 }
 
 type MousepadConfig struct {
@@ -122,6 +316,7 @@ func (p *PluginConfig) Defaults() {
 	p.Presenter = true
 	p.FindThisDevice = true
 	p.RemoteSystemVolume = true
+	p.Digitizer = true
 }
 
 func (c *BatteryConfig) Defaults() {
@@ -142,20 +337,30 @@ func (c *NotificationPluginConfig) Defaults() {
 }
 
 type ClipboardConfig struct {
+	// Receive accepts clipboard content and clipboard files from the phone.
+	Receive bool `toml:"receive" json:"-"`
+	// Send allows explicit pushes and connect-time clipboard pushes to the phone.
+	Send bool `toml:"send" json:"-"`
 	// PushOnConnect sends the local clipboard to a device when it
 	// connects/reconnects. Off by default to avoid spurious pushes.
 	PushOnConnect bool `toml:"push_on_connect"`
 }
 
 func (c *ClipboardConfig) Defaults() {
+	c.Receive = true
+	c.Send = true
 	c.PushOnConnect = false
 }
 
 func (c *ShareConfig) Defaults() {
+	c.MaxFileSize = 1024 * 1024 * 1024
 	c.PortMin = protocol.DefaultSidechannelPortMin
 	c.PortMax = protocol.DefaultSidechannelPortMax
 	c.AcceptTimeoutSecs = 120
 	c.OpenCommand = "xdg-open"
+	c.Accept = "always"
+	c.TextAction = "clipboard"
+	c.URLAction = "open"
 }
 
 func (c *SFTPConfig) Defaults() {
@@ -177,6 +382,8 @@ func (c *PairingConfig) Defaults() {
 	c.TimeoutSecs = 30
 	c.IntentTTL = "5m"
 	c.ListenTimeout = "60s"
+	c.AcceptRequests = "ask"
+	c.AskFallback = "reject"
 }
 
 func (c *MousepadConfig) Defaults() {

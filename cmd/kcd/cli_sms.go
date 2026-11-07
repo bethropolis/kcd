@@ -16,6 +16,12 @@ var smsCmd = &cli.Command{
 			Name:      "send",
 			Usage:     "Send an SMS via a device",
 			ArgsUsage: "<device-id> <phone-number> <message>",
+			Flags: []cli.Flag{
+				&cli.Int64Flag{
+					Name:  "sub-id",
+					Usage: "SIM subscription ID to send from",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				if c.NArg() < 3 {
 					return fmt.Errorf("missing device ID, phone number, or message")
@@ -24,7 +30,11 @@ var smsCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-				if err := cl.SendSMS(c.Args().Get(0), c.Args().Get(1), c.Args().Get(2)); err != nil {
+				var subID []int64
+				if c.IsSet("sub-id") {
+					subID = append(subID, c.Int64("sub-id"))
+				}
+				if err := cl.SendSMS(c.Args().Get(0), c.Args().Get(1), c.Args().Get(2), subID...); err != nil {
 					return err
 				}
 				fmt.Println("SMS request sent")
@@ -76,6 +86,12 @@ var smsCmd = &cli.Command{
 			Name:      "attachment",
 			Usage:     "Request an MMS attachment file from a device",
 			ArgsUsage: "<device-id> <part-id> <unique-identifier>",
+			Flags: []cli.Flag{
+				&cli.Int64Flag{
+					Name:  "thread-id",
+					Usage: "Conversation thread ID this attachment belongs to",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				if c.NArg() < 3 {
 					return fmt.Errorf("missing device ID, part ID, or unique identifier")
@@ -88,7 +104,11 @@ var smsCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-				if err := cl.SmsRequestAttachment(c.Args().Get(0), partID, c.Args().Get(2)); err != nil {
+				var threadID []int64
+				if c.IsSet("thread-id") {
+					threadID = append(threadID, c.Int64("thread-id"))
+				}
+				if err := cl.SmsRequestAttachment(c.Args().Get(0), partID, c.Args().Get(2), threadID...); err != nil {
 					return err
 				}
 				fmt.Println("Attachment requested. File will arrive via `kcd watch --events sms.attachment`.")

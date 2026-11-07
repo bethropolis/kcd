@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
@@ -13,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/contacts"
+	"github.com/bethropolis/kcd/internal/plugins/digitizer"
 	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
 	"github.com/bethropolis/kcd/internal/plugins/findthisdevice"
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
@@ -34,26 +36,37 @@ import (
 
 func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logger log.Logger, devices *device.Registry, localCert *x509.Certificate, saveDevices func(), plugins *plugin.Registry) *pair.PairPlugin {
 	sidechannel := transport.SidechannelOptions{
-		Timeout:       config.Duration(cfg.Network.SidechannelTimeout),
-		IdleTimeout:   config.Duration(cfg.Network.TransferIdleTimeout),
-		KeepAliveIdle: config.Duration(cfg.Network.KeepAliveIdle),
+		Timeout:        config.Duration(cfg.Network.SidechannelTimeout),
+		IdleTimeout:    config.Duration(cfg.Network.TransferIdleTimeout),
+		KeepAliveIdle:  config.Duration(cfg.Network.KeepAliveIdle),
+		MaxPayloadSize: cfg.Share.MaxFileSize,
+		PortMin:        cfg.Share.PortMin,
+		PortMax:        cfg.Share.PortMax,
 	}
 	pairPlugin := pair.NewPairPlugin(devices, localCert, cfg.Pairing, saveDevices, bus, logger)
 	plugins.Register(pairPlugin)
+	plugins.SetDevicePluginPolicy(cfg.PluginEnabledForDevice)
+	pairPlugin.SetLifecycleCallbacks(plugins.OnConnect, plugins.OnDisconnect)
 	if cfg.Plugins.Battery {
 		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPlugin(cfg.Notification, bus, tlsCfg, logger, sidechannel))
+		notif := notification.NewNotificationPluginWithPopup(cfg.Notification, bus, tlsCfg, logger, cfg.Popups, cfg.Backends.Notify, sidechannel)
+		notif.SetFilters(cfg.Notifications.Filters())
+		plugins.Register(notif)
 	}
 	if cfg.Plugins.Clipboard {
-		plugins.Register(clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel))
+		clipboardPlugin := clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel)
+		clipboardPlugin.SetPolicy(cfg.Clipboard.Receive, cfg.Clipboard.Send)
+		plugins.Register(clipboardPlugin)
 	}
 	if cfg.Plugins.Share {
 		plugins.Register(share.NewSharePlugin(cfg.DownloadDir, cfg.Share, tlsCfg, bus, logger, sidechannel))
 	}
 	if cfg.Plugins.RunCommand {
-		plugins.Register(runcommand.NewRunCommandPlugin(cfg.Commands, cfg.CommandsPerDevice, bus, logger))
+		plugins.Register(runcommand.NewRunCommandPlugin(cfg.Commands, cfg.CommandsPerDevice, bus, logger, runcommand.Options{
+			Timeout: time.Duration(cfg.RunCommand.DefaultTimeout),
+		}))
 	}
 	if cfg.Plugins.Ping {
 		plugins.Register(ping.NewPingPlugin(cfg.Ping, bus, logger, cfg.Notifications))
@@ -65,7 +78,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(connectivity.NewConnectivityPlugin(bus))
 	}
 	if cfg.Plugins.MPRIS {
-		plugins.Register(mpris.NewMPRISPlugin(tlsCfg, bus, cfg.Plugins.PauseMusic, cfg.MPRIS, logger, cfg.Cache.AlbumArtDir))
+		plugins.Register(mpris.NewMPRISPluginWithOptions(tlsCfg, bus, cfg.Plugins.PauseMusic, cfg.MPRIS, logger, sidechannel, cfg.Cache.AlbumArtDir))
 	}
 	if cfg.Plugins.Mousepad {
 		plugins.Register(mousepad.NewMousepadPlugin(cfg.Mousepad, logger))
@@ -83,7 +96,7 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(findthisdevice.NewFindThisDevicePlugin(bus, logger))
 	}
 	if cfg.Plugins.LockDevice {
-		plugins.Register(lockdevice.NewLockDevicePlugin(logger))
+		plugins.Register(lockdevice.NewLockDevicePlugin(cfg.LockDevice, bus, logger))
 	}
 	if cfg.Plugins.SystemVolume {
 		plugins.Register(systemvolume.NewSystemVolumePlugin(bus, logger))
@@ -100,6 +113,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	}
 	if cfg.Plugins.RemoteSystemVolume {
 		plugins.Register(remotesystemvolume.NewRemoteSystemVolumePlugin(bus, logger))
+	}
+	if cfg.Plugins.Digitizer {
+		plugins.Register(digitizer.NewDigitizerPlugin(bus, logger))
 	}
 
 	return pairPlugin

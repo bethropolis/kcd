@@ -7,6 +7,7 @@ func (p SftpMountPayload) GetDeviceID() string     { return p.DeviceID }
 func (p SharePayload) GetDeviceID() string         { return p.DeviceID }
 func (p NotifyReplyPayload) GetDeviceID() string   { return p.DeviceID }
 func (p NotifyDismissPayload) GetDeviceID() string { return p.DeviceID }
+func (p NotifyActionPayload) GetDeviceID() string  { return p.DeviceID }
 func (p SMSPayload) GetDeviceID() string           { return p.DeviceID }
 func (p SMSConvPayload) GetDeviceID() string       { return p.DeviceID }
 func (p SMSAttachmentPayload) GetDeviceID() string { return p.DeviceID }

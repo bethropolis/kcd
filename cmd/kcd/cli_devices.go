@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
@@ -14,10 +14,7 @@ var devicesCmd = &cli.Command{
 	Name:  "devices",
 	Usage: "List known devices",
 	Flags: []cli.Flag{
-		&cli.BoolFlag{
-			Name:  "json",
-			Usage: "Output in JSON format",
-		},
+		jsonFlag,
 		&cli.BoolFlag{
 			Name:    "watch",
 			Aliases: []string{"w"},
@@ -46,9 +43,7 @@ var devicesCmd = &cli.Command{
 		}
 		devices = filterDevices(devices, c.Bool("paired"), c.Bool("connected"))
 		if c.Bool("json") {
-			data, _ := json.MarshalIndent(devices, "", "  ")
-			fmt.Println(string(data))
-			return nil
+			return printJSON(os.Stdout, devices)
 		}
 		printDeviceTable(devices)
 		return nil

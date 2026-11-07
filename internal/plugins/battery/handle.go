@@ -8,12 +8,11 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 // Handle processes incoming battery packets.
-func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case "kdeconnect.battery":
 		var body BatteryBody
@@ -27,7 +26,9 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 			return p.sendLocalState(dev)
 		}
 
-		dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
+		if updater, ok := dev.(interface{ UpdateBattery(int, bool) }); ok {
+			updater.UpdateBattery(body.CurrentCharge, body.IsCharging)
+		}
 
 		if body.ThresholdEvent != thresholdNone {
 			p.handleThreshold(dev, body)
@@ -42,7 +43,7 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 }
 
 // sendLocalState reports the local battery to the peer.
-func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
+func (p *BatteryPlugin) sendLocalState(dev device.Peer) error {
 	charge, charging, err := readLocalBattery()
 	if err != nil {
 		p.logger.Debug("local battery unavailable, skipping response", log.Error(err))
@@ -58,7 +59,7 @@ func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
+func (p *BatteryPlugin) handleThreshold(dev device.Peer, body BatteryBody) {
 	var message, urgency string
 
 	switch body.ThresholdEvent {
@@ -80,7 +81,7 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 
 	if message != "" {
 		// Desktop notification.
-		plugin.RunCommandAsync(p.logger, "notify-send",
+		p.exec.RunAsync(p.logger, "notify-send",
 			"-a", p.notifications.AppName(),
 			"-u", urgency,
 			"-i", "battery",
@@ -96,26 +97,3 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 		})
 	}
 }
-
-// OnConnect requests the phone's battery and sends our local battery state.
-func (p *BatteryPlugin) OnConnect(dev device.Sender) {
-	// Ask via request:true inside a regular battery packet: stock peers honor
-	// only that. The legacy request type stays for inbound compat.
-	pkt, _ := protocol.NewPacket("kdeconnect.battery", map[string]any{
-		"request": true,
-	})
-	dev.Send(pkt)
-
-	charge, charging, err := readLocalBattery()
-	if err != nil {
-		p.logger.Debug("local battery unavailable on connect", log.Error(err))
-		return
-	}
-	pkt, _ = protocol.NewPacket("kdeconnect.battery", BatteryBody{
-		CurrentCharge: charge,
-		IsCharging:    charging,
-	})
-	dev.Send(pkt)
-}
-
-func (p *BatteryPlugin) OnDisconnect(_ device.Sender) {}

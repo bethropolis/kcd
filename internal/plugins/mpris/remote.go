@@ -30,9 +30,9 @@ func CanonicalAction(action string) string {
 	return action
 }
 
-// SendAction sends a control request on both mpris packet types (old and
-// receiver plugins); relative seeks resolve to SetPosition or error out.
-func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek, setPosition *int64, volume *int) error {
+// SendAction sends a single control request; relative seeks resolve to
+// SetPosition or error out.
+func (p *MPRISPlugin) SendAction(dev device.Peer, player, action string, seek, setPosition *int64, volume *int) error {
 	if setPosition == nil && seek != nil {
 		state := p.RemoteState(dev.ID())
 		if state == nil {
@@ -65,33 +65,21 @@ func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek,
 	if err := dev.Send(pkt); err != nil {
 		return err
 	}
-	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
-	if err != nil {
-		return err
-	}
-	return dev.Send(pkt2)
+	return nil
 }
 
 // requestPlayerList sends a request for the remote device's active player list.
-func (p *MPRISPlugin) requestPlayerList(dev device.Sender) error {
+func (p *MPRISPlugin) requestPlayerList(dev device.Peer) error {
 	body := MPRISRequest{RequestPlayerList: true}
 	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
 	if err != nil {
 		return err
 	}
-	if err := dev.Send(pkt); err != nil {
-		return err
-	}
-	// Also send as kdeconnect.mpris for phone-side MprisReceiverPlugin/MprisPlugin.
-	pkt2, err := protocol.NewPacket("kdeconnect.mpris", body)
-	if err != nil {
-		return err
-	}
-	return dev.Send(pkt2)
+	return dev.Send(pkt)
 }
 
 // requestPlayerStatus sends a requestNowPlaying + requestVolume for a specific player.
-func (p *MPRISPlugin) requestPlayerStatus(dev device.Sender, player string) error {
+func (p *MPRISPlugin) requestPlayerStatus(dev device.Peer, player string) error {
 	body := MPRISRequest{
 		Player:            player,
 		RequestNowPlaying: true,
@@ -105,7 +93,7 @@ func (p *MPRISPlugin) requestPlayerStatus(dev device.Sender, player string) erro
 }
 
 // RequestState sends a requestNowPlaying to refresh remote state.
-func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
+func (p *MPRISPlugin) RequestState(dev device.Peer, player string) error {
 	if player == "" {
 		return p.requestPlayerList(dev)
 	}
@@ -203,13 +191,7 @@ func (p *MPRISPlugin) ActivePlayers() []string {
 	return players
 }
 
-func (p *MPRISPlugin) OnConnect(dev device.Sender) {
-	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
-	p.requestReconcile()
-	go p.requestPlayerListPeriodic(dev)
-}
-
-func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
+func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Peer) {
 	if !dev.IsConnected() {
 		return
 	}
@@ -233,7 +215,7 @@ func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
 func (p *MPRISPlugin) syncRemotePoller() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.bus.HasSubscribers(events.TypeMprisUpdate) {
+	if p.bus.HasExplicitSubscribers(events.TypeMprisUpdate) {
 		if p.remotePollCancel == nil {
 			ctx, cancel := context.WithCancel(p.watchCtx)
 			p.remotePollCancel = cancel
@@ -265,12 +247,12 @@ func (p *MPRISPlugin) runRemoteStatePoller(ctx context.Context) {
 // pollRemoteStates refreshes cached, actively-playing players; stopped ones
 // go stale by design, and nothing is requested with no subscribers listening.
 func (p *MPRISPlugin) pollRemoteStates() {
-	if !p.bus.HasSubscribers(events.TypeMprisUpdate) {
+	if !p.bus.HasExplicitSubscribers(events.TypeMprisUpdate) {
 		return
 	}
 	p.mu.RLock()
 	type target struct {
-		dev    device.Sender
+		dev    device.Peer
 		player string
 	}
 	var targets []target
@@ -293,11 +275,28 @@ func (p *MPRISPlugin) pollRemoteStates() {
 	}
 }
 
-func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.devices, dev.ID())
-	delete(p.remoteStates, dev.ID())
-	delete(p.remoteStateTimes, dev.ID())
-	delete(p.positionTrackers, dev.ID())
+// MediaSummary implements plugin.MediaSupplier for device summaries.
+func (p *MPRISPlugin) MediaSummary(deviceID string) (any, time.Duration, bool) {
+	st := p.RemoteState(deviceID)
+	if st == nil {
+		return nil, 0, false
+	}
+	return st, p.RemoteStateAge(deviceID), true
+}
+
+// Replay implements plugin.Replayer, returning a recent NowPlaying update if fresh.
+func (p *MPRISPlugin) Replay(deviceID string) []events.Event {
+	if p.RemoteStateAge(deviceID) >= 10*time.Second {
+		return nil
+	}
+	st := p.RemoteState(deviceID)
+	if st == nil {
+		return nil
+	}
+	return []events.Event{{
+		Type:      events.TypeMprisUpdate,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().UTC(),
+		Payload:   st,
+	}}
 }

@@ -13,9 +13,10 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/transport"
 )
 
-func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath string) error {
+func (p *SharePlugin) SendFile(ctx context.Context, dev device.Peer, filePath string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("share: open file: %w", err)
@@ -31,7 +32,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	}
 
 	// Bind to an available side-channel port (using config range)
-	ln, port, err := ListenSideChannel(ctx, p.cfg, p.TLSConfig)
+	ln, port, err := transport.ListenSidechannel(ctx, p.cfg.PortMin, p.cfg.PortMax)
 	if err != nil {
 		return err
 	}
@@ -51,7 +52,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 		if timeout == 0 {
 			timeout = 2 * time.Minute
 		}
-		err := AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.cfg.PortMin, p.cfg.PortMax, p.sidechannel)
+		err := transport.AcceptAndSend(ln, filePath, p.TLSConfig, dev.ID(), expectedFP, timeout, onProgress, p.Logger, p.cfg.PortMin, p.cfg.PortMax, p.sidechannel)
 
 		if err != nil {
 			p.Logger.Error("share: send failed",
@@ -108,5 +109,24 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	return dev.Send(pkt)
 }
 
-func (p *SharePlugin) OnConnect(dev device.Sender)    {}
-func (p *SharePlugin) OnDisconnect(dev device.Sender) {}
+// SendText sends a text snippet to the remote device.
+func (p *SharePlugin) SendText(ctx context.Context, dev device.Peer, text string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
+		Text: text,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}
+
+// SendURL sends a URL to open on the remote device.
+func (p *SharePlugin) SendURL(ctx context.Context, dev device.Peer, url string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
+		Url: url,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}

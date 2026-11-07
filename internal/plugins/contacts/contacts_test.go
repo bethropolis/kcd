@@ -1,37 +1,15 @@
 package contacts
 
 import (
-	"crypto/x509"
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/testutil"
 )
-
-// fakeSender captures outbound packets for round-trip tests.
-type fakeSender struct {
-	id   string
-	sent []*protocol.Packet
-}
-
-func (f *fakeSender) ID() string                         { return f.id }
-func (f *fakeSender) Name() string                       { return "Fake" }
-func (f *fakeSender) SetName(name string)                {}
-func (f *fakeSender) State() device.PairingState         { return device.StatePaired }
-func (f *fakeSender) SetState(state device.PairingState) {}
-func (f *fakeSender) Send(p *protocol.Packet) error      { f.sent = append(f.sent, p); return nil }
-func (f *fakeSender) IsConnected() bool                  { return true }
-func (f *fakeSender) RemoteIP() net.IP                   { return nil }
-func (f *fakeSender) PeerCert() *x509.Certificate        { return nil }
-func (f *fakeSender) HasCapability(cap string) bool      { return false }
-func (f *fakeSender) UpdateBattery(charge int, ch bool)  {}
-func (f *fakeSender) GetBattery() (int, bool)            { return 0, false }
 
 func testPlugin(t *testing.T) *ContactsPlugin {
 	t.Helper()
@@ -147,7 +125,7 @@ func TestChunkUIDs(t *testing.T) {
 // response -> files + index + List output.
 func TestSyncRoundTrip(t *testing.T) {
 	p := testPlugin(t)
-	dev := &fakeSender{id: "dev1"}
+	dev := testutil.NewFakeSender("dev1")
 
 	uidsBody, _ := json.Marshal(map[string]any{
 		"uids": []string{"u1", "u2"},
@@ -156,11 +134,11 @@ func TestSyncRoundTrip(t *testing.T) {
 	})
 	p.handleUIDsResponse(dev, uidsBody)
 
-	if len(dev.sent) != 1 {
-		t.Fatalf("expected 1 vcard request, got %d", len(dev.sent))
+	if len(dev.Sent()) != 1 {
+		t.Fatalf("expected 1 vcard request, got %d", len(dev.Sent()))
 	}
-	if dev.sent[0].Type != PacketTypeContactsRequestVCards {
-		t.Errorf("wrong request type: %s", dev.sent[0].Type)
+	if dev.Sent()[0].Type != PacketTypeContactsRequestVCards {
+		t.Errorf("wrong request type: %s", dev.Sent()[0].Type)
 	}
 
 	vcardsBody, _ := json.Marshal(map[string]any{
@@ -205,12 +183,12 @@ func TestSyncRoundTrip(t *testing.T) {
 // Second sync with changed timestamp refetches; unchanged contacts don't.
 func TestSyncDiff(t *testing.T) {
 	p := testPlugin(t)
-	dev := &fakeSender{id: "dev1"}
+	dev := testutil.NewFakeSender("dev1")
 
 	first, _ := json.Marshal(map[string]any{"uids": []string{"u1"}, "u1": "100"})
 	p.handleUIDsResponse(dev, first)
-	if len(dev.sent) != 1 {
-		t.Fatalf("first sync must request vcard, sent=%d", len(dev.sent))
+	if len(dev.Sent()) != 1 {
+		t.Fatalf("first sync must request vcard, sent=%d", len(dev.Sent()))
 	}
 	vcards, _ := json.Marshal(map[string]any{
 		"uids": []string{"u1"},
@@ -218,17 +196,17 @@ func TestSyncDiff(t *testing.T) {
 	})
 	p.handleVCardsResponse("dev1", vcards)
 
-	dev.sent = nil
+	dev.ResetSent()
 	same, _ := json.Marshal(map[string]any{"uids": []string{"u1"}, "u1": "100"})
 	p.handleUIDsResponse(dev, same)
-	if len(dev.sent) != 0 {
+	if len(dev.Sent()) != 0 {
 		t.Error("unchanged contact must not be refetched")
 	}
 
-	dev.sent = nil
+	dev.ResetSent()
 	changed, _ := json.Marshal(map[string]any{"uids": []string{"u1"}, "u1": "101"})
 	p.handleUIDsResponse(dev, changed)
-	if len(dev.sent) != 1 {
+	if len(dev.Sent()) != 1 {
 		t.Error("changed timestamp must trigger refetch")
 	}
 }
@@ -236,7 +214,7 @@ func TestSyncDiff(t *testing.T) {
 // Stale entries are deleted on non-empty responses, never on empty ones.
 func TestSyncDeleteGuard(t *testing.T) {
 	p := testPlugin(t)
-	dev := &fakeSender{id: "dev1"}
+	dev := testutil.NewFakeSender("dev1")
 
 	seed, _ := json.Marshal(map[string]any{"uids": []string{"u1"}, "u1": "1"})
 	p.handleUIDsResponse(dev, seed)
@@ -268,7 +246,7 @@ func TestSyncDeleteGuard(t *testing.T) {
 
 func TestForgetDevice(t *testing.T) {
 	p := testPlugin(t)
-	dev := &fakeSender{id: "dev1"}
+	dev := testutil.NewFakeSender("dev1")
 
 	seed, _ := json.Marshal(map[string]any{"uids": []string{"u1"}, "u1": "1"})
 	p.handleUIDsResponse(dev, seed)

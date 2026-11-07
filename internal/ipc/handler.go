@@ -2,47 +2,33 @@ package ipc
 
 import (
 	"encoding/json"
-	"fmt"
-	"time"
+	"sort"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/plugins/contacts"
-	"github.com/bethropolis/kcd/internal/plugins/pair"
-	"github.com/bethropolis/kcd/internal/protocol"
 )
-
-// defaultPairListenTimeout bounds `kcd pair` listen mode when the daemon
-// config leaves the pairing listen timeout unset.
-const defaultPairListenTimeout = 60 * time.Second
 
 // Handler handles incoming IPC requests.
 type Handler struct {
-	devices           *device.Registry
-	plugins           *plugin.Registry
-	pairPlugin        *pair.PairPlugin
-	statePath         string
-	bus               *events.Bus
-	routes            map[string]func(Request) Response
-	pruneThreshold    time.Duration
-	pairListenTimeout time.Duration
-	// pairDialHook dials a disconnected device on explicit pair request via
-	// its last-seen address, independent of background auto-dial.
-	pairDialHook func(deviceID string) error
+	devices *device.Registry
+	plugins *plugin.Registry
+	bus     *events.Bus
+	routes  map[string]func(Request) Response
+	prompts *PromptManager
 }
 
 // NewHandler creates a new IPC command handler.
-func NewHandler(devices *device.Registry, plugins *plugin.Registry, pairPlugin *pair.PairPlugin, statePath string, bus *events.Bus, pruneThreshold time.Duration) *Handler {
-	return &Handler{
-		devices:        devices,
-		plugins:        plugins,
-		pairPlugin:     pairPlugin,
-		statePath:      statePath,
-		bus:            bus,
-		routes:         make(map[string]func(Request) Response),
-		pruneThreshold: pruneThreshold,
+func NewHandler(devices *device.Registry, plugins *plugin.Registry, bus *events.Bus) *Handler {
+	h := &Handler{
+		devices: devices,
+		plugins: plugins,
+		bus:     bus,
+		routes:  make(map[string]func(Request) Response),
+		prompts: NewPromptManager(bus),
 	}
+	h.routes[CmdPromptRespond] = h.handlePromptRespond
+	return h
 }
 
 // Register adds a custom handler for a given command.
@@ -50,10 +36,14 @@ func (h *Handler) Register(command string, fn func(Request) Response) {
 	h.routes[command] = fn
 }
 
-// SetPairDialHook sets the hook used to connect to a disconnected device on
-// explicit user pair request. See the pairDialHook field for details.
-func (h *Handler) SetPairDialHook(fn func(deviceID string) error) {
-	h.pairDialHook = fn
+// Commands returns the registered IPC command names.
+func (h *Handler) Commands() []string {
+	commands := make([]string, 0, len(h.routes))
+	for command := range h.routes {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+	return commands
 }
 
 // HandleRequest processes an incoming IPC request and returns a response.
@@ -61,240 +51,16 @@ func (h *Handler) HandleRequest(req Request) Response {
 	if fn, ok := h.routes[req.Command]; ok {
 		return fn(req)
 	}
-
-	switch req.Command {
-	case CmdDevices:
-		return h.handleDevices()
-	case CmdPair:
-		return h.handlePair(req.Payload)
-	case CmdPairListen:
-		return h.handlePairListen()
-	case CmdUnpair:
-		return h.handleUnpair(req.Payload)
-	case CmdPing:
-		return h.handlePing(req.Payload)
-	default:
-		return Response{OK: false, Error: "unknown command"}
-	}
+	return Err(CodeUnknownCommand, "unknown command", map[string]string{"command": req.Command})
 }
 
-func (h *Handler) handleDevices() Response {
-	// Enriched summaries (battery/media/signal embedded, omitempty).
-	// Base identity fields are unchanged, so old clients keep working.
-	devs := h.devices.List()
-	infos := make([]DeviceSummary, 0, len(devs))
-	for _, dev := range devs {
-		infos = append(infos, SummarizeDevice(dev, h.plugins))
+func (h *Handler) handlePromptRespond(req Request) Response {
+	var response PromptRespondPayload
+	if err := json.Unmarshal(req.Payload, &response); err != nil || response.PromptID == "" || response.Choice == "" {
+		return Err(CodeInvalidPayload, "invalid prompt response", nil)
 	}
-
-	data, err := json.Marshal(infos)
-	if err != nil {
-		return Response{OK: false, Error: "failed to marshal device list"}
-	}
-	return Response{OK: true, Data: data}
-}
-
-func (h *Handler) saveDevices() {
-	if h.statePath == "" {
-		return
-	}
-	h.devices.Prune(h.pruneThreshold)
-	devs := h.devices.List()
-	infos := make([]device.DeviceInfo, 0, len(devs))
-	for _, dev := range devs {
-		info := device.DeviceInfo{
-			ID:       dev.ID(),
-			Name:     dev.Name(),
-			Type:     dev.Type,
-			State:    dev.State(),
-			CertFP:   dev.CertFP,
-			LastPort: dev.LastPort(),
-		}
-		if ip := dev.LastIP(); ip != nil {
-			info.LastIP = ip.String()
-		}
-		infos = append(infos, info)
-	}
-	_ = device.SaveDevices(h.statePath, infos)
-}
-
-func (h *Handler) handlePair(payload []byte) Response {
-	var p PairPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return Response{OK: false, Error: "invalid payload"}
-	}
-	// Declining a request and unpairing send the same pair=false packet.
-	if p.Reject {
-		return h.handleUnpair(payload)
-	}
-
-	dev, ok := h.devices.Get(p.DeviceID)
-	if !ok {
-		return Response{OK: false, Error: "device not found"}
-	}
-
-	// Pairing needs a live TLS connection, which background dial never opens
-	// to strangers: an explicit pair triggers the on-demand hook, else the
-	// legacy paths below.
-	if !dev.IsConnected() && h.pairDialHook != nil {
-		if err := h.pairDialHook(dev.ID()); err != nil {
-			return Response{OK: false, Error: err.Error()}
-		}
-		return Response{OK: true}
-	}
-
-	if h.pairPlugin != nil {
-		state := dev.State()
-		if state == device.StatePairRequestedByPeer {
-			if err := h.pairPlugin.AcceptPairing(dev); err != nil {
-				return Response{OK: false, Error: "failed to accept pairing: " + err.Error()}
-			}
-		} else {
-			// Initiate a new pairing request; the code lets the CLI show what
-			// to compare against the phone's prompt (else no out-of-band check).
-			verificationKey, err := h.pairPlugin.RequestPairing(dev)
-			if err != nil {
-				return Response{OK: false, Error: "failed to request pairing: " + err.Error()}
-			}
-			data, _ := json.Marshal(PairResult{VerificationKey: verificationKey})
-			return Response{OK: true, Data: data}
-		}
-		return Response{OK: true}
-	}
-
-	// No pair plugin registered; send the bare packet.
-	pkt, _ := protocol.NewPairPacket(protocol.PairAccept, 0)
-	if err := dev.Send(pkt); err != nil {
-		return Response{OK: false, Error: "failed to send pair packet"}
-	}
-
-	dev.SetState(device.StatePaired)
-	h.saveDevices()
-
-	return Response{OK: true}
-}
-
-func (h *Handler) handleUnpair(payload []byte) Response {
-	var p DevicePayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return Response{OK: false, Error: "invalid payload"}
-	}
-
-	dev, ok := h.devices.Get(p.DeviceID)
-	if !ok {
-		return Response{OK: false, Error: "device not found"}
-	}
-
-	if h.pairPlugin != nil {
-		if err := h.pairPlugin.Unpair(dev); err != nil {
-			return Response{OK: false, Error: "failed to unpair: " + err.Error()}
-		}
-		dev.Disconnect()
-		h.forgetContacts(p.DeviceID)
-		return Response{OK: true}
-	}
-
-	// Fallback
-	pkt, _ := protocol.NewPairPacket(protocol.PairReject, 0)
-	_ = dev.Send(pkt)
-	dev.Disconnect()
-	h.devices.Remove(p.DeviceID)
-	h.forgetContacts(p.DeviceID)
-	h.saveDevices()
-
-	return Response{OK: true}
-}
-
-// forgetContacts drops a device's cached contacts on unpair: revoked trust
-// drops the address book. Absent plugin or cache is a no-op.
-func (h *Handler) forgetContacts(deviceID string) {
-	if h.plugins == nil {
-		return
-	}
-	pl, ok := h.plugins.GetByName("Contacts")
-	if !ok {
-		return
-	}
-	if cpl, ok := pl.(*contacts.ContactsPlugin); ok {
-		_ = cpl.ForgetDevice(deviceID)
-	}
-}
-
-// SetPairListenTimeout configures the wait window before the server starts.
-func (h *Handler) SetPairListenTimeout(timeout time.Duration) {
-	if timeout > 0 {
-		h.pairListenTimeout = timeout
-	}
-}
-
-func (h *Handler) handlePairListen() Response {
-	timeout := h.pairListenTimeout
-	if timeout <= 0 {
-		timeout = defaultPairListenTimeout
-	}
-	// Report candidates in StatePairRequestedByPeer WITHOUT accepting: the
-	// caller decides (CmdPair/CmdUnpair); auto-accept would pair stale ones.
-	for _, dev := range h.devices.List() {
-		if dev.State() == device.StatePairRequestedByPeer {
-			return h.pairListenResult(dev, "")
-		}
-	}
-
-	if h.bus == nil || h.pairPlugin == nil {
-		return Response{OK: false, Error: "pair listen requires event bus and pair plugin"}
-	}
-
-	sub := h.bus.Subscribe(0, events.TypePairRequested)
-	defer sub.Close()
-
-	select {
-	case ev, ok := <-sub.C:
-		if !ok {
-			return Response{OK: false, Error: "event bus closed"}
-		}
-		dev, ok := h.devices.Get(ev.DeviceID)
-		if !ok {
-			return Response{OK: false, Error: "device disappeared"}
-		}
-		var vKey string
-		if m, ok := ev.Payload.(map[string]interface{}); ok {
-			if k, ok := m["verificationKey"].(string); ok {
-				vKey = k
-			}
-		}
-		return h.pairListenResult(dev, vKey)
-	case <-time.After(timeout):
-		return Response{OK: false, Error: fmt.Sprintf("timed out waiting for pair request (%s)", timeout)}
-	}
-}
-
-// pairListenResult returns the candidate without accepting it; the caller
-// decides via CmdPair or CmdUnpair.
-func (h *Handler) pairListenResult(dev *device.Device, vKey string) Response {
-	data, _ := json.Marshal(PairListenResult{
-		DeviceID:        dev.ID(),
-		DeviceName:      dev.Name(),
-		VerificationKey: vKey,
-		Fingerprint:     dev.CertFP,
-	})
-	return Response{OK: true, Data: data}
-}
-
-func (h *Handler) handlePing(payload []byte) Response {
-	var p DevicePayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return Response{OK: false, Error: "invalid payload"}
-	}
-
-	dev, ok := h.devices.Get(p.DeviceID)
-	if !ok {
-		return Response{OK: false, Error: "device not found"}
-	}
-
-	// Ping packet is actually kdeconnect.ping
-	pkt, _ := protocol.NewPacket("kdeconnect.ping", map[string]string{"message": "Ping!"})
-	if err := dev.Send(pkt); err != nil {
-		return Response{OK: false, Error: "failed to send ping packet"}
+	if h.prompts == nil || !h.prompts.Respond(response.PromptID, response.Choice) {
+		return Err(CodeDeviceNotFound, "prompt not found", map[string]string{"promptId": response.PromptID})
 	}
 	return Response{OK: true}
 }

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -71,17 +72,14 @@ func TestSanitizeDeviceName(t *testing.T) {
 			t.Errorf("SanitizeDeviceName(%q) invalid UTF-8: %q", in, got)
 		}
 	}
-	// Multibyte truncation must never split a rune nor exceed the cap.
-	long := strings.Repeat("Ö", 40) // 80 bytes
+	// Multibyte truncation must preserve the 32-character protocol limit.
+	long := strings.Repeat("Ö", 40)
 	got := SanitizeDeviceName(long)
-	if len(got) > MaxDeviceNameLength {
-		t.Errorf("truncated name exceeds cap: %d bytes", len(got))
-	}
 	if !utf8.ValidString(got) {
 		t.Errorf("truncated name is invalid UTF-8: %q", got)
 	}
-	if n := len([]rune(got)); n != MaxDeviceNameLength/2 {
-		t.Errorf("expected 16 Ö runes (32 bytes), got %d runes", n)
+	if n := len([]rune(got)); n != MaxDeviceNameLength {
+		t.Errorf("expected %d Ö runes, got %d", MaxDeviceNameLength, n)
 	}
 }
 
@@ -99,6 +97,48 @@ func TestDisplayName(t *testing.T) {
 	for _, tc := range cases {
 		if got := DisplayName(tc.in); got != tc.want {
 			t.Errorf("DisplayName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIdentityTargetProtocolVersionAcceptsAndroidString(t *testing.T) {
+	for _, raw := range []string{`{"targetProtocolVersion":"8"}`, `{"targetProtocolVersion":8}`} {
+		var body IdentityBody
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatalf("decode identity %s: %v", raw, err)
+		}
+		if body.TargetProtocolVersion != 8 {
+			t.Errorf("target protocol version = %d, want 8", body.TargetProtocolVersion)
+		}
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(encoded, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := wire["targetProtocolVersion"].(float64); !ok {
+			t.Fatalf("targetProtocolVersion must marshal as a JSON number: %s", encoded)
+		}
+	}
+}
+
+func TestValidDeviceID(t *testing.T) {
+	valid := []string{
+		"740bd4b9b4184ee497d6caf1da8151be",
+		"a1b2c3d4_e5f6_4789_8abc_def012345678",
+		"0123456789abcdef0123456789abcdef0123",
+	}
+	invalid := []string{"", "short", "x/../../../tmp/evil", strings.Repeat("a", 39), strings.Repeat("a", 32) + ".", strings.Repeat("é", 32)}
+	for _, id := range valid {
+		if !ValidDeviceID(id) {
+			t.Errorf("ValidDeviceID(%q) = false", id)
+		}
+	}
+	for _, id := range invalid {
+		if ValidDeviceID(id) {
+			t.Errorf("ValidDeviceID(%q) = true", id)
 		}
 	}
 }

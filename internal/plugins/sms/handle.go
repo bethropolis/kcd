@@ -1,6 +1,7 @@
 package sms
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,13 +10,13 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
 // --- Handle ----------------------------------------------------------------
 
-func (p *SMSPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SMSPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case PacketTypeSMSMessages:
 		return p.handleMessages(ctx, dev, pkt)
@@ -27,13 +28,13 @@ func (p *SMSPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol
 
 // handleMessages parses a batch of SMS messages from the phone and publishes
 // one event per message.
-func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Body == nil {
 		return nil
 	}
 
 	var batch SMSMessagesPacket
-	if err := json.Unmarshal(pkt.Body, &batch); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(pkt.Body)).Decode(&batch); err != nil {
 		return fmt.Errorf("sms: unmarshal messages batch: %w", err)
 	}
 
@@ -44,7 +45,11 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	}
 
 	if len(batch.Messages) > maxSMSMessages {
-		return fmt.Errorf("sms: messages batch too large: %d (max %d)", len(batch.Messages), maxSMSMessages)
+		p.logger.Warn("sms: messages batch exceeded limit, truncating to newest",
+			log.Int("received", len(batch.Messages)),
+			log.Int("limit", maxSMSMessages),
+		)
+		batch.Messages = batch.Messages[:maxSMSMessages]
 	}
 
 	// Resolved once per batch: the arm time and whether we are still
@@ -54,7 +59,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	stillArmed := p.armed()
 
 	for _, msg := range batch.Messages {
-		if msg.Body == "" {
+		if msg.Body == "" && len(msg.Attachments) == 0 {
 			continue
 		}
 
@@ -96,11 +101,13 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 		// phone echoes those back in the same batch.
 		if p.shouldNotify(msg, isArmed && stillArmed, armAtMs) {
 			msgText := msg.Body
-			if len(msgText) > 120 {
+			if msgText == "" && len(msg.Attachments) > 0 {
+				msgText = "[Attachment]"
+			} else if len(msgText) > 120 {
 				msgText = msgText[:120] + "…"
 			}
 			title := fmt.Sprintf("SMS from %s", sender)
-			plugin.RunCommandAsync(p.logger, "notify-send",
+			sysexec.RunAsync(p.logger, "notify-send",
 				"-a", p.notifications.AppName(),
 				"-i", "dialog-information",
 				title,

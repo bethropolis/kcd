@@ -20,13 +20,18 @@ var invalidNameChars = regexp.MustCompile("[`'\";:.!?()\\[\\]<>$&|\\\\*~#%^{}=/]
 
 const MaxDeviceNameLength = 32
 
+var deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{32,38}$`)
+
+// ValidDeviceID reports whether an identity is safe to use as a stable peer key.
+func ValidDeviceID(id string) bool { return deviceIDPattern.MatchString(id) }
+
 // SanitizeDeviceName strips terminal/XSS characters and truncates rune-aware
 // to the spec length, decoding the decimal byte escapes phones may send first.
 func SanitizeDeviceName(name string) string {
 	clean := DecodeDeviceName(name)
 	clean = stripControlRunes(clean)
 	clean = invalidNameChars.ReplaceAllString(clean, "")
-	if len(clean) > MaxDeviceNameLength {
+	if utf8.RuneCountInString(clean) > MaxDeviceNameLength {
 		clean = truncateRunes(clean, MaxDeviceNameLength)
 	}
 	return clean
@@ -95,19 +100,13 @@ func containsBackslash(s string) bool {
 	return false
 }
 
-// truncateRunes cuts s to at most maxBytes without splitting a UTF-8 rune.
-func truncateRunes(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
+// truncateRunes cuts s to at most maxRunes without splitting a UTF-8 rune.
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
 		return s
 	}
-	cut := 0
-	for i := range s {
-		if i > maxBytes {
-			break
-		}
-		cut = i
-	}
-	return s[:cut]
+	return string(runes[:maxRunes])
 }
 
 // IdentityBody contains the fields of an identity packet body.
@@ -120,7 +119,7 @@ type IdentityBody struct {
 	IncomingCapabilities  []string `json:"incomingCapabilities,omitempty"`
 	OutgoingCapabilities  []string `json:"outgoingCapabilities,omitempty"`
 	TargetDeviceID        string   `json:"targetDeviceId,omitempty"`
-	TargetProtocolVersion int      `json:"targetProtocolVersion,omitempty"`
+	TargetProtocolVersion FlexInt  `json:"targetProtocolVersion,omitempty"`
 }
 
 // NewIdentityPacket creates a fully-formed identity packet ready for the wire.

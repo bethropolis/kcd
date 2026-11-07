@@ -56,6 +56,9 @@ func TestSendActionSendsSeekAsSetPosition(t *testing.T) {
 		if err := p.SendAction(dev, "music", "", tc.seek, tc.setPos, nil); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
+		if got := len(dev.sent); got != 1 {
+			t.Fatalf("%s: sent %d packets, want 1", tc.name, got)
+		}
 		var body map[string]any
 		if err := json.Unmarshal(dev.sent[0].Body, &body); err != nil {
 			t.Fatal(err)

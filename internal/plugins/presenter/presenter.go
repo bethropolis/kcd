@@ -15,7 +15,10 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*PresenterPlugin)(nil)
 
 // PresenterPlugin handles kdeconnect.presenter packets containing
 // gyroscope-based pointer deltas (dx/dy) from the Android presenter remote.
@@ -29,7 +32,7 @@ type PresenterPlugin struct {
 	screenW int
 	screenH int
 
-	moveCh chan PresenterBody
+	moveCh chan struct{}
 }
 
 // PresenterBody is the payload of a kdeconnect.presenter packet.
@@ -45,7 +48,7 @@ func NewPresenterPlugin(logger log.Logger) *PresenterPlugin {
 		logger: logger.With(log.String("plugin", "Presenter")),
 		xPos:   0.5,
 		yPos:   0.5,
-		moveCh: make(chan PresenterBody, 1),
+		moveCh: make(chan struct{}, 1),
 	}
 	p.detectScreen()
 	go p.worker()
@@ -70,67 +73,58 @@ func (p *PresenterPlugin) Timeout() time.Duration  { return 2 * time.Second }
 func (p *PresenterPlugin) IncomingTypes() []string { return []string{"kdeconnect.presenter"} }
 func (p *PresenterPlugin) OutgoingTypes() []string { return nil }
 
-func (p *PresenterPlugin) OnConnect(_ device.Sender)    {}
-func (p *PresenterPlugin) OnDisconnect(_ device.Sender) {}
+func (p *PresenterPlugin) OnConnect(_ device.Peer)    {}
+func (p *PresenterPlugin) OnDisconnect(_ device.Peer) {}
 
 // Handle dispatches a presenter packet to the worker goroutine.
 // It returns immediately as required by the plugin contract.
-func (p *PresenterPlugin) Handle(_ context.Context, _ device.Sender, pkt *protocol.Packet) error {
+func (p *PresenterPlugin) Handle(_ context.Context, _ device.Peer, pkt *protocol.Packet) error {
 	var body PresenterBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
 	}
 
-	select {
-	case p.moveCh <- body:
-	default:
-		select {
-		case <-p.moveCh:
-		default:
+	p.mu.Lock()
+	if body.Stop != nil && *body.Stop {
+		p.xPos = 0.5
+		p.yPos = 0.5
+	} else {
+		if body.Dx != nil {
+			p.xPos += *body.Dx
 		}
-		p.moveCh <- body
+		if body.Dy != nil {
+			p.yPos += *body.Dy * p.ratio
+		}
+		if p.xPos < 0 {
+			p.xPos = 0
+		}
+		if p.xPos > 1 {
+			p.xPos = 1
+		}
+		if p.yPos < 0 {
+			p.yPos = 0
+		}
+		if p.yPos > 1 {
+			p.yPos = 1
+		}
+	}
+	p.mu.Unlock()
+
+	select {
+	case p.moveCh <- struct{}{}:
+	default:
 	}
 	return nil
 }
 
 func (p *PresenterPlugin) worker() {
-	for body := range p.moveCh {
-		p.handleBody(body)
+	for range p.moveCh {
+		p.mu.Lock()
+		x := int(p.xPos * float64(p.screenW))
+		y := int(p.yPos * float64(p.screenH))
+		p.mu.Unlock()
+		moveCursor(x, y)
 	}
-}
-
-func (p *PresenterPlugin) handleBody(body PresenterBody) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if body.Stop != nil && *body.Stop {
-		p.xPos = 0.5
-		p.yPos = 0.5
-		return
-	}
-
-	if body.Dx != nil {
-		p.xPos += *body.Dx
-	}
-	if body.Dy != nil {
-		p.yPos += *body.Dy * p.ratio
-	}
-	if p.xPos < 0 {
-		p.xPos = 0
-	}
-	if p.xPos > 1 {
-		p.xPos = 1
-	}
-	if p.yPos < 0 {
-		p.yPos = 0
-	}
-	if p.yPos > 1 {
-		p.yPos = 1
-	}
-
-	x := int(p.xPos * float64(p.screenW))
-	y := int(p.yPos * float64(p.screenH))
-	moveCursor(x, y)
 }
 
 // getScreenSize attempts to detect the screen resolution via xdpyinfo (X11)
@@ -139,7 +133,7 @@ func getScreenSize() (int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	out, err := plugin.RunCommandOutput(ctx, "xdpyinfo")
+	out, err := sysexec.Output(ctx, "xdpyinfo")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.Contains(line, "dimensions:") {
@@ -151,7 +145,7 @@ func getScreenSize() (int, int) {
 		}
 	}
 
-	out, err = plugin.RunCommandOutput(ctx, "wlr-randr")
+	out, err = sysexec.Output(ctx, "wlr-randr")
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
@@ -173,9 +167,9 @@ func moveCursor(x, y int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := plugin.RunCommandSync(ctx, "ydotool", "mousemove", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
+	if _, err := sysexec.Run(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y)); err == nil {
 		return
 	}
 
-	_, _ = plugin.RunCommandSync(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
+	_, _ = sysexec.Run(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
 }

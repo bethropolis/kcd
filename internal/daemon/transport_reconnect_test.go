@@ -12,6 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 // parkedOpts returns reconnect options whose timer never fires during the
@@ -80,6 +81,19 @@ func waitForReconnectExit(t *testing.T, dev *device.Device, timeout time.Duratio
 	}
 }
 
+func testReconnectWithBackoff(ctx context.Context, dev *device.Device, ip net.IP, identity *protocol.Packet, opts *config.Config) {
+	env := &transportEnv{
+		tls:      &tls.Config{InsecureSkipVerify: true},
+		identity: identity,
+		devices:  device.NewRegistry(nil),
+		plugins:  plugin.NewRegistry(log.Nop()),
+		localID:  "local",
+		cfg:      opts,
+		logger:   log.Nop(),
+	}
+	env.ReconnectWithBackoff(ctx, dev, ip)
+}
+
 // A device silent past the stale horizon must exit without dialling:
 // zero timers for pairs that will never return.
 func TestReconnectStaleHorizonGivesUp(t *testing.T) {
@@ -93,9 +107,7 @@ func TestReconnectStaleHorizonGivesUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go reconnectWithBackoff(context.Background(), dev, net.ParseIP("127.0.0.1"), identity,
-		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
-		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+	go testReconnectWithBackoff(context.Background(), dev, net.ParseIP("127.0.0.1"), identity, opts)
 
 	waitForReconnectExit(t, dev, 5*time.Second)
 	if n := ac.count.Load(); n != 0 {
@@ -117,9 +129,7 @@ func TestReconnectWakesOnSighting(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go reconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity,
-		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
-		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+	go testReconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity, opts)
 
 	time.Sleep(100 * time.Millisecond) // let the loop park on the timer
 	dev.PokeReconnect()
@@ -150,9 +160,7 @@ func TestReconnectUnpairExitsParkedLoop(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go reconnectWithBackoff(ctx, dev, net.ParseIP("192.0.2.1"), identity,
-		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
-		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+	go testReconnectWithBackoff(ctx, dev, net.ParseIP("192.0.2.1"), identity, opts)
 
 	time.Sleep(100 * time.Millisecond) // let the loop park
 	dev.SetState(device.StateUnpaired) // pokes the wake channel
@@ -193,9 +201,7 @@ func TestReconnectFollowsSightedAddress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Spawn target is dead (refused): only the sighted address can answer.
-	go reconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity,
-		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
-		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+	go testReconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity, opts)
 
 	time.Sleep(100 * time.Millisecond) // let the loop park on the timer
 	dev.NoteSighting(net.ParseIP("127.0.0.2"))
@@ -230,9 +236,7 @@ func TestReconnectLegacyTimerStillDials(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go reconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity,
-		&tls.Config{InsecureSkipVerify: true}, device.NewRegistry(nil),
-		plugin.NewRegistry(log.Nop()), "local", log.Nop(), opts)
+	go testReconnectWithBackoff(ctx, dev, net.ParseIP("127.0.0.1"), identity, opts)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for ac.count.Load() == 0 && time.Now().Before(deadline) {

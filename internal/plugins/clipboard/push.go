@@ -13,7 +13,13 @@ import (
 )
 
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
-func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
+func Push(ctx context.Context, dev device.Peer, p *ClipboardPlugin) error {
+	p.mu.Lock()
+	send := p.send
+	p.mu.Unlock()
+	if !send {
+		return nil
+	}
 	var cmd *exec.Cmd
 	switch backend, _ := p.getBackend(); backend {
 	case backendWayland:
@@ -47,6 +53,7 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 		return nil
 	}
 	p.lastPushedContent = content
+	p.localChangedAt = time.Now().UnixMilli()
 	p.mu.Unlock()
 
 	pkt, err := protocol.NewPacket("kdeconnect.clipboard", ClipboardBody{
@@ -82,30 +89,4 @@ func (p *ClipboardPlugin) readClipboard() string {
 		return ""
 	}
 	return string(out)
-}
-
-func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
-	if !p.pushOnConnect {
-		return
-	}
-	content := p.readClipboard()
-
-	p.mu.Lock()
-	p.lastPushedContent = content
-	p.mu.Unlock()
-
-	body := ClipboardBody{
-		Content:   content,
-		Timestamp: time.Now().UnixMilli(),
-	}
-	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", body)
-	if err != nil {
-		p.logger.Debug("clipboard: OnConnect: failed to build packet", log.Error(err))
-		return
-	}
-	// Best-effort — device may still be completing the TLS handshake.
-	_ = dev.Send(pkt)
-}
-
-func (p *ClipboardPlugin) OnDisconnect(dev device.Sender) {
 }

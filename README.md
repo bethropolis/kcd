@@ -35,7 +35,12 @@ which is how the [projects in Community](#community) are built.
 | **Ping** | Simple connectivity check |
 | **Connectivity** | Phone signal strength and network type reporting |
 | **System Volume** | Control desktop audio volume from the phone |
-| **Send Notification** | Push a notification from the PC to the phone |
+| **Remote Volume** | Control phone media and notification volume from desktop |
+| **Find This Device** | Sound desktop alarm from the phone |
+| **Presenter** | Navigate presentation slides and pointer from the phone |
+| **Digitizer** | Virtual drawing tablet and stylus input emulation via uinput |
+| **Event Hooks** | Run direct commands on daemon events without external watchers |
+| **D-Bus Adapter** | Optional compatibility bridge (`kcd dbus`) for KDE Plasma widgets |
 | **Auto-reconnect** | Paired devices reconnect automatically after dropping |
 
 Discovery is dual-mode: **UDP broadcast** (port 1716) and **mDNS/Zeroconf** (`_kdeconnect._udp`), so `kcd` works on both simple home networks and restricted environments (corporate Wi-Fi, Docker, university networks) where broadcast packets are dropped.
@@ -317,38 +322,21 @@ kcd watch --json | while read -r event; do
 done
 ```
 
+> [!TIP]
+> For simple event triggers, you can also configure native `[hooks]` directly in `kcd.toml` (e.g. run a script when a device connects or battery drops below a threshold) without keeping a background watcher script running. See [`packaging/kcd.example.toml`](packaging/kcd.example.toml).
+
 ---
 
 ## Events
 
-`kcd watch --json` streams NDJSON events. All events include `type`, `timestamp` (RFC3339), and `deviceId` fields.
+`kcd watch --json` streams newline-delimited JSON events. All events include `type`, `timestamp` (RFC3339), and `deviceId` fields.
 
-| Event type | Payload fields | Description |
-|---|---|---|
-| `state.snapshot` | `devices[]` (enriched summaries, online and offline) | Full-state bootstrap, once per watch connection |
-| `device.added` | `name`, `type` | New device seen for the first time |
-| `device.removed` | — | Device unpaired and removed |
-| `device.connected` | `name`, `type` | TCP connection established |
-| `device.disconnected` | — | Connection dropped |
-| `pair.requested` | — | Phone sent a pairing request |
-| `pair.accepted` | — | Pairing completed on both sides |
-| `pair.rejected` | — | Pairing denied or cancelled |
-| `battery.update` | `charge`, `charging` | Battery reading received |
-| `battery.threshold` | `charge`, `charging`, `event` | Low (event=1) or full (event=2) |
-| `notification` | `appName`, `title`, `text`, `requestReplyId` | Phone notification forwarded |
-| `notification.canceled` | `id` | Phone dismissed a notification |
-| `share.progress` | `file`, `current`, `total` | File transfer in progress (~2/sec) |
-| `share.complete` | `file`, `path` | File transfer finished |
-| `share.text` | `text` | Plain text received |
-| `share.url` | `url` | URL received |
-| `ping.received` | — | Ping arrived |
-| `telephony.ringing` | `contactName`, `phoneNumber` | Incoming call |
-| `telephony.missed` | `contactName`, `phoneNumber` | Missed call |
-| `telephony.canceled` | — | Call ended |
-| `connectivity.update` | `signal`, `networkType` | Signal strength report |
-| `mpris.update` | `player`, `title`, `artist`, `album`, `isPlaying`, `pos`, `posAnchorMs`, `length`, `volume`, `albumArtUrl`, `artPending` | Phone now playing state changed |
-| `volume.update` | `name`, `volume`, `muted` | Desktop volume changed from phone |
-| `sftp.mount` | `uri`, `ip`, `port`, `user`, `password`, `path` | SFTP credentials received |
+Example events:
+- `battery.update`: Device battery charge level and charging status (`{"charge": 85, "charging": true}`).
+- `notification`: Incoming phone notifications forwarded to the desktop (`{"appName": "Signal", "title": "...", "text": "..."}`).
+- `share.progress`: Progress updates during active side-channel file transfers (`{"file": "photo.jpg", "current": 1048576, "total": 4194304}`).
+
+For the full catalog of event types, payload schemas, and watch filter options, see [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md#5-events).
 
 ---
 
@@ -358,6 +346,8 @@ done
 - **Certificate fingerprinting** — trust is established by comparing the SHA-256 fingerprint of each peer's self-signed certificate during pairing. No CA required.
 - **Path sanitisation** — filenames received via the Share plugin are strictly sanitised to prevent path traversal attacks.
 - **Memory-safe transfers** — large file transfers stream directly to disk to prevent OOM conditions.
+
+See [SECURITY.md](SECURITY.md) for the threat model, what a paired device can do, hardening tips, and how to report a vulnerability privately.
 
 ---
 
@@ -386,9 +376,15 @@ kcd connect 192.168.1.100
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, plugin system, event bus |
 | [`docs/CLI.md`](docs/CLI.md) | Full CLI reference and sub-commands |
 | [`docs/IPC_PROTOCOL.md`](docs/IPC_PROTOCOL.md) | Daemon socket protocol: commands, events, packet reference |
-| [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python examples) |
+| [`docs/CLIENT_GUIDE.md`](docs/CLIENT_GUIDE.md) | Building clients over the IPC socket (Python and Go examples) |
+| [`docs/PROTOCOL_COMPAT.md`](docs/PROTOCOL_COMPAT.md) | KDE Connect v8 protocol matrix and intentional deviations |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Real-world continuous profiling dossiers and resource benchmarks |
+| [`docs/DBUS.md`](docs/DBUS.md) | D-Bus compatibility adapter guide |
 | [`docs/CONTAINER.md`](docs/CONTAINER.md) | Running kcd in Docker / Podman |
 | [`packaging/kcd.example.toml`](packaging/kcd.example.toml) | Annotated configuration reference |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes and version history |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup, checks, commit and PR conventions |
+| [`SECURITY.md`](SECURITY.md) | Threat model, hardening, private vulnerability reporting |
 
 ---
 

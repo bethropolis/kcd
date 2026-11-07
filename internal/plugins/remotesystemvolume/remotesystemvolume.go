@@ -9,14 +9,17 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+var _ plugin.Plugin = (*RemoteSystemVolumePlugin)(nil)
 
 type VolumeBody struct {
 	RequestSinks bool       `json:"requestSinks,omitempty"`
 	Name         string     `json:"name,omitempty"`
-	Volume       int        `json:"volume,omitempty"`
-	Muted        bool       `json:"muted,omitempty"`
+	Volume       *int       `json:"volume,omitempty"`
+	Muted        *bool      `json:"muted,omitempty"`
 	MaxVolume    int        `json:"maxVolume,omitempty"`
 	SinkList     []SinkInfo `json:"sinkList,omitempty"`
 }
@@ -51,7 +54,7 @@ func (p *RemoteSystemVolumePlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.systemvolume.request"}
 }
 
-func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body VolumeBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -68,23 +71,41 @@ func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Sender
 	}
 
 	if body.Name != "" {
+		update := map[string]any{"name": body.Name}
 		if val, ok := p.sinks.Load(dev.ID()); ok {
-			sinks := val.([]SinkInfo)
+			sinks := append([]SinkInfo(nil), val.([]SinkInfo)...)
+			found := false
 			for i, s := range sinks {
 				if s.Name == body.Name {
-					sinks[i].Volume = body.Volume
-					sinks[i].Muted = body.Muted
+					found = true
+					if body.Volume != nil {
+						sinks[i].Volume = *body.Volume
+					}
+					if body.Muted != nil {
+						sinks[i].Muted = *body.Muted
+					}
 					break
 				}
 			}
 			p.sinks.Store(dev.ID(), sinks)
+			if found {
+				for _, sink := range sinks {
+					if sink.Name == body.Name {
+						update["volume"] = sink.Volume
+						update["muted"] = sink.Muted
+						break
+					}
+				}
+			}
 		}
 		if p.bus != nil {
-			p.bus.Publish(events.TypeVolumeUpdate, dev.ID(), map[string]any{
-				"name":   body.Name,
-				"volume": body.Volume,
-				"muted":  body.Muted,
-			})
+			if _, ok := update["volume"]; !ok && body.Volume != nil {
+				update["volume"] = *body.Volume
+			}
+			if _, ok := update["muted"]; !ok && body.Muted != nil {
+				update["muted"] = *body.Muted
+			}
+			p.bus.Publish(events.TypeVolumeUpdate, dev.ID(), update)
 		}
 	}
 
@@ -93,16 +114,16 @@ func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Sender
 
 func (p *RemoteSystemVolumePlugin) ListSinks(deviceID string) []SinkInfo {
 	if val, ok := p.sinks.Load(deviceID); ok {
-		return val.([]SinkInfo)
+		return append([]SinkInfo(nil), val.([]SinkInfo)...)
 	}
 	return nil
 }
 
-func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Sender, sinkName string, volume int) error {
+func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Peer, sinkName string, volume int) error {
+	volumeValue := volume
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		Name:   sinkName,
-		Volume: volume,
-		Muted:  false,
+		Volume: &volumeValue,
 	})
 	if err != nil {
 		return err
@@ -110,10 +131,11 @@ func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Sender, sinkName string,
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Sender, sinkName string, muted bool) error {
+func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Peer, sinkName string, muted bool) error {
+	mutedValue := muted
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		Name:  sinkName,
-		Muted: muted,
+		Muted: &mutedValue,
 	})
 	if err != nil {
 		return err
@@ -121,7 +143,7 @@ func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Sender, sinkName string, 
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Sender) error {
+func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		RequestSinks: true,
 	})
@@ -131,7 +153,7 @@ func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Sender) {
+func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Peer) {
 	go func() {
 		if err := p.RequestSinkList(dev); err != nil {
 			p.logger.Warn("failed to request sink list",
@@ -141,6 +163,6 @@ func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Sender) {
 		}
 	}()
 }
-func (p *RemoteSystemVolumePlugin) OnDisconnect(dev device.Sender) {
+func (p *RemoteSystemVolumePlugin) OnDisconnect(dev device.Peer) {
 	p.sinks.Delete(dev.ID())
 }

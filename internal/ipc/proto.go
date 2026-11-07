@@ -4,6 +4,9 @@ package ipc
 
 import "encoding/json"
 
+// APIVersion changes only when the IPC contract makes a breaking change.
+const APIVersion = 2
+
 // Supported IPC command constants.
 const (
 	CmdDevices              = "devices"
@@ -26,6 +29,7 @@ const (
 	CmdSftpVolumes          = "sftp_volumes"
 	CmdNotifyReply          = "notify_reply"
 	CmdNotifyDismiss        = "notify_dismiss"
+	CmdNotifyAction         = "notify_action"
 	CmdCallMute             = "call_mute"
 	CmdFindMyPhone          = "findmyphone"
 	CmdLock                 = "lock"
@@ -47,6 +51,12 @@ const (
 	CmdRemoteVolumeList     = "remote_volume_list"
 	CmdRemoteVolumeSet      = "remote_volume_set"
 	CmdRemoteVolumeMute     = "remote_volume_mute"
+	CmdHello                = "hello"
+	CmdConfigGet            = "config_get"
+	CmdConfigSchema         = "config_schema"
+	CmdConfigSet            = "config_set"
+	CmdReload               = "reload"
+	CmdPromptRespond        = "prompt_respond"
 )
 
 // ConnectPayload carries the target IP for the CmdConnect command.
@@ -57,19 +67,90 @@ type ConnectPayload struct {
 // Request is sent from the client to the local daemon.
 type Request struct {
 	Command string          `json:"cmd"`
+	ID      json.RawMessage `json:"id,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// HelloPayload identifies a client asking for capability discovery.
+type HelloPayload struct {
+	Client        string `json:"client,omitempty"`
+	ClientVersion string `json:"clientVersion,omitempty"`
+	APIVersions   []int  `json:"apiVersions,omitempty"`
+	KeepAlive     bool   `json:"keepAlive,omitempty"`
+}
+
+// HelloResponse describes the additive IPC surface supported by the daemon.
+type HelloResponse struct {
+	APIVersion    int             `json:"apiVersion"`
+	DaemonVersion string          `json:"daemonVersion"`
+	Commands      []string        `json:"commands"`
+	Events        []string        `json:"events"`
+	OptInEvents   []string        `json:"optInEvents"`
+	Plugins       map[string]bool `json:"plugins"`
+	Features      []string        `json:"features"`
+}
+
+// ConfigGetPayload selects effective configuration keys; empty means all
+// supported API-visible settings.
+type ConfigGetPayload struct {
+	Keys []string `json:"keys,omitempty"`
+}
+
+// ConfigSetPayload contains allowlisted API configuration values.
+type ConfigSetPayload struct {
+	Values map[string]json.RawMessage `json:"values"`
+}
+
+// ReloadResponse reports which settings were applied without restart.
+type ReloadResponse struct {
+	Applied         []string `json:"applied"`
+	RestartRequired []string `json:"restartRequired"`
+}
+
+// PromptRespondPayload resolves a pending interactive decision.
+type PromptRespondPayload struct {
+	PromptID string `json:"promptId"`
+	Choice   string `json:"choice"`
 }
 
 // WatchPayload is used for CmdWatch to configure event streaming.
 type WatchPayload struct {
 	Events []string `json:"events,omitempty"`
+	Since  uint64   `json:"since,omitempty"`
 }
 
 // Response is sent from the daemon back to the client.
 type Response struct {
-	OK    bool            `json:"ok"`
-	Error string          `json:"error,omitempty"`
-	Data  json.RawMessage `json:"data,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	OK      bool            `json:"ok"`
+	Error   string          `json:"error,omitempty"`
+	Code    string          `json:"code,omitempty"`
+	Details json.RawMessage `json:"details,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+const (
+	CodeInvalidPayload       = "invalid_payload"
+	CodeUnknownCommand       = "unknown_command"
+	CodeDeviceNotFound       = "device_not_found"
+	CodeDeviceNotConnected   = "device_not_connected"
+	CodeDeviceNotPaired      = "device_not_paired"
+	CodePluginDisabled       = "plugin_disabled"
+	CodePluginDisabledDevice = "plugin_disabled_for_device"
+	CodeTimeout              = "timeout"
+	CodeBusy                 = "busy"
+	CodeNotSupported         = "not_supported"
+	CodePermissionDenied     = "permission_denied"
+	CodeInternal             = "internal"
+)
+
+// Err creates a stable, machine-readable IPC error response.
+func Err(code, message string, details any) Response {
+	response := Response{OK: false, Code: code, Error: message}
+	if details != nil {
+		response.Details, _ = json.Marshal(details)
+	}
+	return response
 }
 
 // PairListenResult is returned by CmdPairListen on success.
@@ -120,11 +201,20 @@ type NotifyDismissPayload struct {
 	NotificationID string `json:"notificationId"`
 }
 
+// NotifyActionPayload is used for CmdNotifyAction.
+type NotifyActionPayload struct {
+	DeviceID       string `json:"deviceId"`
+	NotificationID string `json:"notificationId,omitempty"`
+	Key            string `json:"key,omitempty"`
+	Action         string `json:"action"`
+}
+
 // SMSPayload is used for CmdSendSMS.
 type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`
 	PhoneNumber string `json:"phoneNumber"`
 	Message     string `json:"message"`
+	SubID       *int64 `json:"subID,omitempty"`
 }
 
 // SMSConvPayload is used for CmdSmsRequestConv.
@@ -142,6 +232,7 @@ type SMSAttachmentPayload struct {
 	DeviceID         string `json:"deviceId"`
 	PartID           int64  `json:"partID"`
 	UniqueIdentifier string `json:"uniqueIdentifier"`
+	ThreadID         *int64 `json:"threadID,omitempty"`
 }
 
 // StatusBattery is a cached device battery reading in CmdStatus output.
@@ -286,4 +377,13 @@ type MprisRemotePlayer struct {
 
 type MprisRemoteResponse struct {
 	Players []MprisRemotePlayer `json:"players"`
+}
+
+// ContactSummary is the parsed, display-safe view of one contact.
+type ContactSummary struct {
+	UID       string   `json:"uid"`
+	Name      string   `json:"name"`
+	Phones    []string `json:"phones,omitempty"`
+	Emails    []string `json:"emails,omitempty"`
+	Timestamp int64    `json:"timestamp"`
 }

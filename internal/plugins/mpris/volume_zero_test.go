@@ -24,6 +24,16 @@ func TestNowPlayingVolumeZeroMarshals(t *testing.T) {
 	}
 }
 
+func TestNowPlayingPositionZeroMarshals(t *testing.T) {
+	data, err := json.Marshal(&NowPlaying{Player: "p", Pos: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"pos":0`) {
+		t.Fatalf("position 0 missing from %s", data)
+	}
+}
+
 // The published mpris.update for a zero-volume state must carry the key.
 func TestVolumeZeroPublished(t *testing.T) {
 	bus := events.NewBus(log.Nop())

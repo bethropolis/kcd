@@ -3,23 +3,33 @@ package findthisdevice
 import (
 	"context"
 	"os"
-	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/bethropolis/kcd/internal/desktop/audio"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
+var _ plugin.Plugin = (*FindThisDevicePlugin)(nil)
+
 type FindThisDevicePlugin struct {
-	bus    *events.Bus
-	logger log.Logger
+	bus     *events.Bus
+	logger  log.Logger
+	audio   *audio.Backend
+	playing atomic.Bool
 }
 
-func NewFindThisDevicePlugin(bus *events.Bus, logger log.Logger) *FindThisDevicePlugin {
-	return &FindThisDevicePlugin{bus: bus, logger: logger}
+func NewFindThisDevicePlugin(bus *events.Bus, logger log.Logger, backends ...*audio.Backend) *FindThisDevicePlugin {
+	backend := audio.New(nil)
+	if len(backends) > 0 && backends[0] != nil {
+		backend = backends[0]
+	}
+	return &FindThisDevicePlugin{bus: bus, logger: logger, audio: backend}
 }
 
 func (p *FindThisDevicePlugin) Name() string           { return "FindThisDevice" }
@@ -29,10 +39,16 @@ func (p *FindThisDevicePlugin) IncomingTypes() []string {
 }
 func (p *FindThisDevicePlugin) OutgoingTypes() []string { return []string{} }
 
-func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	p.logger.Info("ring request received", log.String("device_id", dev.ID()))
 
+	if !p.playing.CompareAndSwap(false, true) {
+		p.logger.Debug("findthisdevice: ring already in progress, ignoring duplicate")
+		return nil
+	}
+
 	go func() {
+		defer p.playing.Store(false)
 		p.playAlarm()
 		p.bus.Publish(events.TypeRingReceived, dev.ID(), nil)
 	}()
@@ -40,8 +56,8 @@ func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Sender, pk
 	return nil
 }
 
-func (p *FindThisDevicePlugin) OnConnect(dev device.Sender)    {}
-func (p *FindThisDevicePlugin) OnDisconnect(dev device.Sender) {}
+func (p *FindThisDevicePlugin) OnConnect(dev device.Peer)    {}
+func (p *FindThisDevicePlugin) OnDisconnect(dev device.Peer) {}
 
 func (p *FindThisDevicePlugin) playAlarm() {
 	soundFile := p.findSoundFile()
@@ -66,7 +82,7 @@ func (p *FindThisDevicePlugin) playAlarm() {
 	}
 
 	for _, player := range players {
-		if _, err := plugin.RunCommandSync(ctx, player.cmd, player.args...); err == nil {
+		if _, err := sysexec.Run(ctx, player.cmd, player.args...); err == nil {
 			return
 		}
 	}
@@ -90,24 +106,29 @@ func (p *FindThisDevicePlugin) findSoundFile() string {
 }
 
 func (p *FindThisDevicePlugin) unmuteAudio() func() {
+	if !p.audio.Available() {
+		return func() {}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	out, err := plugin.RunCommandOutput(ctx, "pactl", "get-sink-mute", "@DEFAULT_SINK@")
+	_, wasMuted, err := p.audio.Read(ctx)
 	if err != nil {
 		return func() {}
 	}
-	wasMuted := strings.TrimSpace(string(out)) == "Mute: yes"
 	if wasMuted {
 		muteCtx, muteCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer muteCancel()
-		_, _ = plugin.RunCommandSync(muteCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "0")
+		if err := p.audio.SetMuted(muteCtx, false); err != nil {
+			p.logger.Warn("findthisdevice: failed to unmute audio", log.Error(err))
+		}
 	}
 	return func() {
 		if wasMuted {
 			restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer restoreCancel()
-			_, _ = plugin.RunCommandSync(restoreCtx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1")
+			if err := p.audio.SetMuted(restoreCtx, true); err != nil {
+				p.logger.Warn("findthisdevice: failed to restore audio mute", log.Error(err))
+			}
 		}
 	}
 }

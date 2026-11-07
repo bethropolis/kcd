@@ -58,3 +58,20 @@ func TestOnSubscriberChange(t *testing.T) {
 		t.Fatalf("duplicate close fired hook, total %d want 2", n)
 	}
 }
+
+func TestEventsSinceAndReplayGap(t *testing.T) {
+	b := NewBus(log.Nop())
+	b.Publish(TypeBatteryUpdate, "dev1", map[string]any{"charge": 1})
+	b.Publish(TypeBatteryUpdate, "dev1", map[string]any{"charge": 2})
+	events, gap := b.EventsSince(1, TypeBatteryUpdate)
+	if gap || len(events) != 1 || events[0].Seq != 2 {
+		t.Fatalf("replay = %#v, gap=%v", events, gap)
+	}
+	for i := 0; i < eventReplayCapacity+2; i++ {
+		b.Publish(TypeBatteryUpdate, "dev1", i)
+	}
+	_, gap = b.EventsSince(1, TypeBatteryUpdate)
+	if !gap {
+		t.Fatal("expected replay gap after ring overflow")
+	}
+}

@@ -10,8 +10,12 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/transport"
 	"github.com/godbus/dbus/v5"
 )
+
+var _ plugin.Plugin = (*MPRISPlugin)(nil)
 
 type trackedPlayer struct {
 	busName     string
@@ -21,12 +25,13 @@ type trackedPlayer struct {
 }
 
 type MPRISPlugin struct {
-	tlsConfig *tls.Config
-	logger    log.Logger
-	bus       *events.Bus
-	mu        sync.RWMutex
-	devices   map[string]device.Sender
-	dbus      *dbus.Conn
+	sidechannel transport.SidechannelOptions
+	tlsConfig   *tls.Config
+	logger      log.Logger
+	bus         *events.Bus
+	mu          sync.RWMutex
+	devices     map[string]device.Peer
+	dbus        *dbus.Conn
 
 	watchCancel     context.CancelFunc
 	watchCtx        context.Context
@@ -72,6 +77,11 @@ type remotePositionTracker struct {
 }
 
 func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mprisCfg config.MPRISConfig, logger log.Logger, cacheDirs ...string) *MPRISPlugin {
+	return NewMPRISPluginWithOptions(tlsConfig, bus, pauseMusic, mprisCfg, logger, transport.SidechannelOptions{}, cacheDirs...)
+}
+
+// NewMPRISPluginWithOptions creates an MPRIS plugin with configured side-channel limits.
+func NewMPRISPluginWithOptions(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mprisCfg config.MPRISConfig, logger log.Logger, sidechannel transport.SidechannelOptions, cacheDirs ...string) *MPRISPlugin {
 	dbusConn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		logger.Warn("mpris: failed to connect to D-Bus session bus", log.Error(err))
@@ -80,12 +90,13 @@ func NewMPRISPlugin(tlsConfig *tls.Config, bus *events.Bus, pauseMusic bool, mpr
 	}
 
 	p := &MPRISPlugin{
+		sidechannel:       sidechannel,
 		tlsConfig:         tlsConfig,
 		logger:            logger.With(log.String("plugin", "mpris")),
 		bus:               bus,
 		dbus:              dbusConn,
 		pauseMusic:        pauseMusic,
-		devices:           make(map[string]device.Sender),
+		devices:           make(map[string]device.Peer),
 		players:           make(map[string]*trackedPlayer),
 		lastTracks:        make(map[string]trackIdentity),
 		lastStates:        make(map[string]*NowPlaying),
@@ -141,4 +152,19 @@ func (p *MPRISPlugin) IncomingTypes() []string {
 }
 func (p *MPRISPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
+}
+
+func (p *MPRISPlugin) OnConnect(dev device.Peer) {
+	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
+	p.requestReconcile()
+	go p.requestPlayerListPeriodic(dev)
+}
+
+func (p *MPRISPlugin) OnDisconnect(dev device.Peer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.devices, dev.ID())
+	delete(p.remoteStates, dev.ID())
+	delete(p.remoteStateTimes, dev.ID())
+	delete(p.positionTrackers, dev.ID())
 }

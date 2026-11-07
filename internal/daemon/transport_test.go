@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -50,6 +51,27 @@ func TestShouldEphemeralClose(t *testing.T) {
 				t.Errorf("shouldEphemeralClose() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAndroidTargetProtocolVersionStillAppliesReconnectCooldown(t *testing.T) {
+	registry := device.NewRegistry(nil)
+	dev := device.NewDevice("phone-id", "Phone", "phone", log.Nop())
+	registry.Add(dev)
+	local, peer := net.Pipe()
+	defer peer.Close()
+	dev.Connect(context.Background(), transport.NewConn(tls.Server(local, &tls.Config{})), nil, nil, nil)
+	defer dev.Disconnect()
+
+	var identity protocol.IdentityBody
+	if err := json.Unmarshal([]byte(`{"deviceId":"phone-id","targetProtocolVersion":"8"}`), &identity); err != nil {
+		t.Fatalf("decode Android pre-TLS identity: %v", err)
+	}
+	if !shouldRefuseInboundCooldown(identity, registry, false) {
+		t.Fatal("Android-shaped duplicate identity bypassed reconnect cooldown")
+	}
+	if shouldRefuseInboundCooldown(identity, registry, true) {
+		t.Fatal("pairing mode should permit the inbound handshake")
 	}
 }
 
@@ -152,7 +174,7 @@ func TestSyncReconnectBroadcast(t *testing.T) {
 		t.Fatalf("identity: %v", err)
 	}
 	newBC := func() *discovery.BroadcasterController {
-		return discovery.NewBroadcasterController(identity, protocol.DefaultTCPPort, time.Hour, logger, nil)
+		return discovery.NewBroadcasterController(identity, protocol.DefaultDiscoveryPort, time.Hour, logger, nil)
 	}
 
 	// Offline paired device starts the reconnect broadcast.
@@ -259,5 +281,114 @@ func TestDialPreTLSIdentityTarget(t *testing.T) {
 				t.Fatal("timed out waiting for pre-TLS identity")
 			}
 		})
+	}
+}
+
+func TestBindTCPListenerFallback(t *testing.T) {
+	ctx := context.Background()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", protocol.DefaultTCPPort))
+	if err != nil {
+		t.Skipf("cannot bind default port %d: %v", protocol.DefaultTCPPort, err)
+	}
+	defer ln.Close()
+
+	cfg := config.Defaults()
+	l, err := bindTCPListener(ctx, cfg, log.Nop())
+	if err != nil {
+		t.Fatalf("bindTCPListener failed with fallback: %v", err)
+	}
+	defer l.Close()
+
+	if cfg.TCPPort == protocol.DefaultTCPPort {
+		t.Fatalf("expected fallback port, got default %d", cfg.TCPPort)
+	}
+	if cfg.TCPPort < protocol.TCPPortMin || cfg.TCPPort > protocol.TCPPortMax {
+		t.Fatalf("fallback port %d out of range [%d, %d]", cfg.TCPPort, protocol.TCPPortMin, protocol.TCPPortMax)
+	}
+}
+
+func TestBindTCPListenerExplicitFails(t *testing.T) {
+	ctx := context.Background()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	cfg := config.Defaults()
+	cfg.TCPPort = port
+
+	_, err = bindTCPListener(ctx, cfg, log.Nop())
+	if err == nil {
+		t.Fatal("expected failure binding busy explicit port")
+	}
+}
+
+func TestUpdateIdentityTCPPort(t *testing.T) {
+	pkt, err := protocol.NewIdentityPacket("dev", "Dev", "desktop", 1716, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updateIdentityTCPPort(pkt, 1725); err != nil {
+		t.Fatal(err)
+	}
+	var body protocol.IdentityBody
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.TCPPort != 1725 {
+		t.Fatalf("expected TCPPort 1725, got %d", body.TCPPort)
+	}
+}
+
+func TestInboundTargetDeviceIDMismatchDropped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := log.Nop()
+	cfg := config.Defaults()
+	l, err := transport.Listen(ctx, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	port := l.Addr().(*net.TCPAddr).Port
+	cfg.TCPPort = port
+
+	identity, _ := newTestIdentity()
+	devices := device.NewRegistry(nil)
+	plugins := plugin.NewRegistry(logger)
+
+	env := &transportEnv{
+		tls:      &tls.Config{},
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  "local-dev-id",
+		cfg:      cfg,
+		logger:   logger,
+	}
+	go runTransport(ctx, env, nil, l)
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	payload := `{"id":1,"type":"kdeconnect.identity","body":{"deviceId":"foreign-dev","deviceName":"Foreign","protocolVersion":8,"targetDeviceId":"wrong-dev-id"}}` + "\n"
+	if _, err := conn.Write([]byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 100)
+	n, err := conn.Read(buf)
+	if err == nil && n > 0 {
+		t.Fatalf("expected connection to be closed, read %d bytes: %q", n, string(buf[:n]))
 	}
 }

@@ -1,3 +1,10 @@
+# Capability Discovery
+
+Clients may send `{"cmd":"hello"}` to receive the additive IPC capability
+document. It includes `apiVersion`, daemon version, supported commands and
+events, opt-in event names, enabled plugin states, and feature flags. The same
+document is available locally through `kcd version --json`.
+
 # IPC Protocol Reference
 
 kcd exposes a Unix socket for inter-process communication. This document is the
@@ -17,6 +24,11 @@ daemon without importing Go packages.
 - **Max request payload:** No explicit limit (scanner reads a single line; Unix
   socket buffer is the practical bound). Do not send payloads exceeding ~1 MiB
   over IPC; use the side-channel TLS port for file transfers instead.
+
+Sending `hello` with `{"keepAlive":true}` keeps the socket open. Each request
+may include an `id` (string or number), which is echoed in its response.
+Requests after the handshake may be processed concurrently and responses can
+arrive out of order. Legacy requests remain one request per connection.
 
 ---
 
@@ -54,13 +66,95 @@ change between releases. Do not parse it programmatically beyond logging.
 {"ok": false, "error": "device not found"}
 ```
 
+Stable codes include `invalid_payload`, `unknown_command`,
+`device_not_found`, `device_not_connected`, `device_not_paired`,
+`plugin_disabled`, `plugin_disabled_for_device`, `timeout`, `busy`,
+`not_supported`, `permission_denied`, and `internal`.
+
 ---
 
 ## 3. Command Reference
 
 Every command, its request payload, and its response data shape.
 
+`watch` accepts an optional `since` sequence number. The daemon replays
+retained events after that sequence before continuing live delivery. If the
+sequence is older than the replay window, it emits `stream.gap`; clients must
+request a fresh snapshot. Events include a monotonic `seq` field.
+
+The additive `config_get`, `config_schema`, and `reload` commands expose
+effective settings, supported setting metadata, and reload status to local
+clients.
+
+Machine-readable definitions are checked in at
+`docs/schema/ipc.schema.json` and `docs/schema/events.schema.json`.
+
+`prompt` events are opt-in. Clients resolve them with `prompt_respond` using
+the `promptId` and one of the advertised choices. A read-only IPC socket, when
+configured by an embedding daemon, permits only inspection commands and
+non-opt-in watch events.
+
 ### 3.1 Built-in Commands (handler.go)
+
+#### `hello`
+
+Negotiate protocol capabilities and keepalive on a new or persistent IPC connection.
+
+**Request payload:** `HelloPayload` (optional)
+
+```json
+{
+  "client": "my-client",
+  "clientVersion": "1.0.0",
+  "apiVersions": [2],
+  "keepAlive": true
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `client` | string (optional) | Client application identifier |
+| `clientVersion` | string (optional) | Client version string |
+| `apiVersions` | `[]int` (optional) | Array of IPC API versions supported by the client |
+| `keepAlive` | bool (optional) | When `true`, enables persistent request/response pipelining on the connection |
+
+**Response data:** `HelloResponse`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "apiVersion": 2,
+    "daemonVersion": "2.0.0",
+    "commands": ["battery", "config_get", "config_schema", "config_set", "devices", "hello", "pair", "reload", "status", "watch"],
+    "events": ["battery.threshold", "battery.update", "device.connected", "notification"],
+    "optInEvents": ["sms.incoming", "sms.attachment"],
+    "plugins": {
+      "Battery": true,
+      "Clipboard": true,
+      "Connectivity": true,
+      "Digitizer": true,
+      "FindMyPhone": true,
+      "FindThisDevice": true,
+      "LockDevice": true,
+      "MPRIS": true,
+      "Mousepad": true,
+      "Notification": true,
+      "Pair": true,
+      "Ping": true,
+      "Presenter": true,
+      "RemoteSystemVolume": true,
+      "RunCommand": true,
+      "SFTP": true,
+      "SMS": true,
+      "Share": true,
+      "SystemVolume": true,
+      "Telephony": true
+    },
+    "features": ["errorCodes", "keepAlive", "watchResume", "prompts", "config", "schemas"]
+  }
+}
+```
 
 #### `devices`
 
@@ -225,17 +319,100 @@ Return daemon status info.
 {
   "ok": true,
   "data": {
-    "version": "1.13.0",
-    "startedAt": "2026-05-27T10:00:00Z",
+    "version": "2.0.0",
+    "startedAt": "2026-11-07T10:00:00Z",
     "uptimeHuman": "2h34m",
     "socketPath": "/run/user/1000/kcd/kcd.sock",
     "configPath": "/home/user/.config/kcd/kcd.toml",
-    "plugins": ["pair", "ping", "battery", "share", "sftp", "clipboard", "mpris", "notification", "sms", "telephony", "connectivity", "systemvolume", "mousepad", "lockdevice", "findmyphone", "runcommand"],
+    "plugins": ["battery", "clipboard", "connectivity", "contacts", "digitizer", "findmyphone", "findthisdevice", "lockdevice", "mousepad", "mpris", "notification", "pair", "ping", "presenter", "remotesystemvolume", "runcommand", "sftp", "share", "sms", "systemvolume", "telephony"],
     "deviceCount": 3,
     "connectedCount": 1
   }
 }
 ```
+
+#### `prompt_respond`
+
+Respond to an interactive prompt event emitted by the daemon (e.g. pairing authorization or file transfer confirmation).
+
+**Request payload:** `PromptRespondPayload`
+
+```json
+{
+  "promptId": "prompt-1234",
+  "choice": "accept"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `promptId` | string | Unique prompt identifier from the `prompt` event |
+| `choice` | string | Selected choice matching one of the prompt's advertised options |
+
+**Response data:** none (`{"ok": true}`)
+
+#### `config_get`
+
+Query effective configuration settings.
+
+**Request payload:** `ConfigGetPayload` (optional)
+
+```json
+{
+  "keys": ["network.dial_timeout", "battery.notify_low"]
+}
+```
+
+If `keys` is empty or omitted, returns all API-visible configuration settings.
+
+**Response data:** Object mapping configuration keys to their current effective values.
+
+#### `config_schema`
+
+Return JSON schemas describing writable and inspectable configuration settings.
+
+**Request payload:** none
+
+**Response data:** Object containing schema definitions and type constraints for API-configurable settings.
+
+#### `config_set`
+
+Persist runtime configuration overrides to the daemon's API drop-in directory (`kcd.toml.d/90-ipc.toml`).
+
+**Request payload:** `ConfigSetPayload`
+
+```json
+{
+  "values": {
+    "battery.notify_low": false,
+    "notifications.app_name": "Custom Name"
+  }
+}
+```
+
+Only allowlisted configuration keys are accepted. Writable values are validated before writing.
+
+**Response data:** none (`{"ok": true}`)
+
+#### `reload`
+
+Trigger a daemon configuration reload.
+
+**Request payload:** none
+
+**Response data:** `ReloadResponse`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "applied": [],
+    "restartRequired": ["config reload requires daemon SIGHUP"]
+  }
+}
+```
+
+Reports settings that were applied immediately and settings that require a process reload or restart.
 
 #### `battery`
 
@@ -457,6 +634,22 @@ with `{"cancel": "<id>"}`) and close the matching desktop popup.
 ```
 
 The `notificationId` is the `id` field of a `notification` event.
+
+**Response data:** none
+
+#### `notify_action`
+
+Trigger a notification action on the remote device (sends `kdeconnect.notification.action`
+with `{"key": "<id>", "action": "<action>"}`).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_...", "notificationId": "notif-456", "action": "Reply"}
+```
+
+The `notificationId` (or `key`) is the notification ID, and `action` is one of the strings
+from the `actions` array in the `notification` event.
 
 **Response data:** none
 
@@ -972,6 +1165,9 @@ A pairing request was rejected, or a device was unpaired.
 {"name": "Pixel 9", "type": "phone"}
 ```
 
+When a pending request expires, the payload also includes
+`"reason": "timeout"`.
+
 ### 5.3 Battery Events
 
 #### `battery.update`
@@ -1016,6 +1212,7 @@ A notification was received from a device.
   "title": "John Doe",
   "text": "See you at 5",
   "requestReplyId": "reply-123",
+  "payloadHash": "d97f60d052bf11d1e88821e04fff0007",
   "id": "notif-456"
 }
 ```
@@ -1024,9 +1221,16 @@ A notification was received from a device.
 |---|---|---|
 | `appName` | string | Application name (Android `appName` field) |
 | `title` | string | Notification title (Android `title` field) |
-| `text` | string | Notification body text (Android `ticker` field) |
+| `text` | string | Notification body text |
+| `ticker` | string | Notification ticker text (if present) |
+| `time` | string | Notification UNIX epoch timestamp (ms) as a string |
+| `groupName` | string | Conversation group name (if from a group message) |
+| `actions` | []string | Action titles available to trigger via `notify_action` |
+| `conversation` | []object | Array of `{sender, content}` conversation messages |
+| `silent` | bool | `true` if the notification was pre-existing (connect sync) |
 | `requestReplyId` | string | Present if the notification supports inline replies |
 | `id` | string | Notification identifier |
+| `payloadHash` | string | Optional 32-character hexadecimal icon hash; icon bytes are sent only when this changes |
 
 > **Desktop popups:** the daemon shows each phone notification via `notify-send`.
 > Popups render **without an icon by default** (`show_icons = false`); set
@@ -1241,7 +1445,9 @@ and `mountPoint`.
 
 #### `volume.update`
 
-Device volume level changed (sent in two shapes).
+Device volume level or mute state changed (sent in two shapes). For a per-sink
+update, `name` is present and `volume` / `muted` are included when supplied by
+the peer or known from the cached sink state; a partial packet may omit either.
 
 **Payload (per-sink update):**
 
@@ -1252,8 +1458,8 @@ Device volume level changed (sent in two shapes).
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Audio stream name |
-| `volume` | number | Volume level (0–100) |
-| `muted` | bool | Whether the stream is muted |
+| `volume` | number | Optional volume level (0–100) |
+| `muted` | bool | Optional mute state |
 
 **Payload (full sink list):**
 
@@ -1453,6 +1659,20 @@ The extension is sniffed from the received bytes (JPEG/PNG/GIF/WebP),
 defaulting to `.jpg`. The cache directory holds at most 500 files and is
 cleared when it overflows.
 
+### Lock Device Events
+
+#### `lock.state`
+
+The peer's reported lock state, or the desktop's state after a requested local
+lock action. Payload is `{"isLocked": bool}`; the boolean is always present.
+
+### Digitizer Events
+
+#### `digitizer.session`
+
+A drawing tablet session started or ended.
+Payload is `{"active": true, "width": 1920, "height": 1080}` or `{"active": false}`.
+
 ---
 
 ## 6. Outbound Packet Reference
@@ -1475,6 +1695,7 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.mpris.request` | MPRIS | Request player list, now-playing, volume, album art; send control actions |
 | `kdeconnect.notification.reply` | Notification | Reply to a notification with inline reply support |
 | `kdeconnect.notification.request` | Notification | Clear a notification on the phone (`{"cancel": "<id>"}`) |
+| `kdeconnect.notification.action` | Notification | Trigger notification action on phone (`{"key": "<id>", "action": "<name>"}`) |
 | `kdeconnect.notification` | RunCommand | Command output notification pushed to phone |
 | `kdeconnect.runcommand` | RunCommand | Send command list to phone |
 | `kdeconnect.runcommand.output` | RunCommand | Stream execution results to the phone's output card |
@@ -1522,8 +1743,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.clipboard` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |
 | `kdeconnect.clipboard.connect` | Clipboard | `ClipboardBody{Content string, Timestamp int64}` |
 | `kdeconnect.clipboard.file` | Clipboard | `ClipboardFileBody{Filename string}` |
-| `kdeconnect.lock` | LockDevice | `LockBody{RequestLocked, SetLocked, IsLocked}` |
-| `kdeconnect.lock.request` | LockDevice | `LockBody{}` (triggers lock/unlock) |
+| `kdeconnect.lock` | LockDevice | `{"isLocked": bool}` state report; `false` is sent explicitly |
+| `kdeconnect.lock.request` | LockDevice | `{"requestLocked": true}` queries state, or `{"setLocked": bool}` requests a local lock action |
 | `kdeconnect.mpris` | MPRIS | `MPRISRequest{RequestPlayerList, RequestNowPlaying, RequestVolume, Player, Action, AlbumArtUrl, TransferringAlbumArt, ...}` — inbound packets with `transferringAlbumArt: true` + `payloadTransferInfo` carry album art bytes (side channel) that the daemon caches to `$XDG_CACHE_HOME/kcd/art/` |
 | `kdeconnect.mpris.request` | MPRIS | `MPRISRequest{}` (same struct, different semantics) — an outbound `kdeconnect.mpris.request` with `player` + `albumArtUrl` asks the phone to stream art back |
 | `kdeconnect.runcommand` | RunCommand | `{CommandList string}` — the phone's reply to a command-list request, holding a JSON object of label → `{name, command}` |
@@ -1531,6 +1752,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.runcommand.output` | RunCommand | Execution results. One packet type, three shapes distinguished by which key is present: `{"commandStarted":true,"id":N,"command":"label"}`, `{"commandOutput":true,"id":N,"stdout":[...],"stderr":[...]}`, `{"commandFinished":true,"id":N,"success":bool}`. Order is mandatory — the phone registers a display row on `commandStarted` and keys every later packet for that execution to the same `id`. `id` is read with `getInt`, so it must fit a 32-bit int. Both `stdout` and `stderr` must be present on every `commandOutput` batch; the phone iterates both lists without a null check. |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
 | `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |
+| `kdeconnect.digitizer.session` | Digitizer | `SessionBody{Action, Width, Height, ResolutionX, ResolutionY}` |
+| `kdeconnect.digitizer` | Digitizer | `DigitizerBody{Active, Touching, Tool, X, Y, Pressure}` |
 
 ---
 
@@ -1622,7 +1845,4 @@ Common error strings:
 
 ### Concurrency
 
-The IPC server is single-threaded per connection; each connection is handled
-in its own goroutine. Long-running commands (`pair_listen`, `watch`) block
-that connection but do not block other connections. Send one request per
-connection and use a separate connection for concurrent commands.
+By default, legacy IPC requests operate as one request per connection. When a client initiates a session with `{"cmd":"hello","payload":{"keepAlive":true}}`, the connection enters persistent mode: requests may include an `id` field and can be pipelined concurrently across worker goroutines, with responses correlated by ID. Streaming commands (`watch`, `pair_listen`) dedicate the connection to the event stream; concurrent commands should use a separate connection or persistent session.

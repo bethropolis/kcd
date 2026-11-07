@@ -34,6 +34,23 @@ func TestArtCacheKey(t *testing.T) {
 	}
 }
 
+func TestArtCacheKeyRejectsTraversal(t *testing.T) {
+	c := &ArtCache{dir: t.TempDir()}
+	maliciousURL := "kdeconnect:/artUri?kdeArtHash=../../../../etc/passwd"
+	key := c.Key(maliciousURL)
+	if strings.Contains(key, "..") || strings.Contains(key, "/") {
+		t.Fatalf("cache key contains traversal: %s", key)
+	}
+
+	validURL := "kdeconnect:/artUri?kdeArtHash=safe-hash_123"
+	if got := c.Key(validURL); got != "safe-hash_123" {
+		t.Fatalf("expected safe-hash_123, got: %s", got)
+	}
+	if _, err := c.safePath("../traversal", ".jpg"); err == nil {
+		t.Fatal("expected error on traversal safePath, got nil")
+	}
+}
+
 // tinyPNG encodes a real w×h image for Commit inputs.
 func tinyPNG(t *testing.T, w, h int) []byte {
 	t.Helper()

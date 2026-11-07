@@ -16,18 +16,14 @@ import (
 
 type stubSender struct{}
 
-func (stubSender) ID() string                   { return "dev1" }
-func (stubSender) Name() string                 { return "test" }
-func (stubSender) SetName(string)               {}
-func (stubSender) State() device.PairingState   { return device.StatePaired }
-func (stubSender) SetState(device.PairingState) {}
-func (stubSender) Send(*protocol.Packet) error  { return nil }
-func (stubSender) IsConnected() bool            { return true }
-func (stubSender) RemoteIP() net.IP             { return nil }
-func (stubSender) PeerCert() *x509.Certificate  { return nil }
-func (stubSender) HasCapability(string) bool    { return true }
-func (stubSender) UpdateBattery(int, bool)      {}
-func (stubSender) GetBattery() (int, bool)      { return 0, false }
+func (stubSender) ID() string                  { return "dev1" }
+func (stubSender) Name() string                { return "test" }
+func (stubSender) State() device.PairingState  { return device.StatePaired }
+func (stubSender) Send(*protocol.Packet) error { return nil }
+func (stubSender) IsConnected() bool           { return true }
+func (stubSender) RemoteIP() net.IP            { return nil }
+func (stubSender) PeerCert() *x509.Certificate { return nil }
+func (stubSender) HasCapability(string) bool   { return true }
 
 func nextEvent(t *testing.T, ch <-chan events.Event) events.Event {
 	t.Helper()
@@ -78,5 +74,27 @@ func TestHandleMissedCallEvent(t *testing.T) {
 	}
 	if ev := nextEvent(t, sub.C); ev.Type != events.TypeTelephonyMissed {
 		t.Errorf("event type = %q, want %q", ev.Type, events.TypeTelephonyMissed)
+	}
+}
+
+func TestHandleUnknownEventIgnored(t *testing.T) {
+	logger := log.NewTest(t)
+	bus := events.NewBus(logger)
+	p := NewTelephonyPlugin(bus, log.Nop())
+	sub := bus.Subscribe(0)
+	defer sub.Close()
+
+	pkt := &protocol.Packet{
+		Type: "kdeconnect.telephony",
+		Body: json.RawMessage(`{"event":"unsupported_event","contactName":"Eve"}`),
+	}
+	if err := p.Handle(context.Background(), stubSender{}, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("unexpected event published for unknown telephony event: %v", ev)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

@@ -17,33 +17,52 @@ type hasDeviceID interface {
 
 // deviceRoute handles the decode → plugin → device preamble shared by most
 // IPC handlers. Error strings match docs/IPC_PROTOCOL.md byte-for-byte.
-func deviceRoute[P hasDeviceID](req ipc.Request, payload P, devices *device.Registry, plugins *plugin.Registry, pluginName string, action func(dev *device.Device, pl plugin.Plugin) ipc.Response) ipc.Response {
+func deviceRoute[P hasDeviceID, T plugin.Plugin](req ipc.Request, payload P, devices *device.Registry, plugins *plugin.Registry, pluginName string, action func(dev *device.Device, pl T) ipc.Response) ipc.Response {
 	if err := json.Unmarshal(req.Payload, payload); err != nil {
-		return ipc.Response{OK: false, Error: "invalid payload"}
+		return ipc.Err(ipc.CodeInvalidPayload, "invalid payload", nil)
 	}
-	var pl plugin.Plugin
+	var pl T
 	if pluginName != "" {
-		var ok bool
-		if pl, ok = plugins.GetByName(pluginName); !ok {
-			return ipc.Response{OK: false, Error: strings.ToLower(pluginName) + " plugin not enabled"}
+		p, ok := plugins.GetByName(pluginName)
+		if !ok {
+			return ipc.Err(ipc.CodePluginDisabled, strings.ToLower(pluginName)+" plugin not enabled", map[string]string{"plugin": pluginName})
 		}
+		typed, ok := p.(T)
+		if !ok {
+			return ipc.Err(ipc.CodePluginDisabled, strings.ToLower(pluginName)+" plugin not enabled", map[string]string{"plugin": pluginName})
+		}
+		pl = typed
 	}
 	dev, ok := devices.Get(payload.GetDeviceID())
 	if !ok {
-		return ipc.Response{OK: false, Error: "device not found"}
+		return ipc.Err(ipc.CodeDeviceNotFound, "device not found", map[string]string{"deviceId": payload.GetDeviceID()})
 	}
 	return action(dev, pl)
 }
 
 // pluginRoute handles the decode → plugin preamble for routes that do
 // not address a single device (listings, global status).
-func pluginRoute[P any](req ipc.Request, payload P, plugins *plugin.Registry, pluginName string, action func(pl plugin.Plugin) ipc.Response) ipc.Response {
+func pluginRoute[P any, T plugin.Plugin](req ipc.Request, payload P, plugins *plugin.Registry, pluginName string, action func(pl T) ipc.Response) ipc.Response {
 	if err := json.Unmarshal(req.Payload, payload); err != nil {
-		return ipc.Response{OK: false, Error: "invalid payload"}
+		return ipc.Err(ipc.CodeInvalidPayload, "invalid payload", nil)
 	}
-	pl, ok := plugins.GetByName(pluginName)
-	if !ok {
-		return ipc.Response{OK: false, Error: strings.ToLower(pluginName) + " plugin not enabled"}
+	var pl T
+	if pluginName != "" {
+		p, ok := plugins.GetByName(pluginName)
+		if !ok {
+			return ipc.Err(ipc.CodePluginDisabled, strings.ToLower(pluginName)+" plugin not enabled", map[string]string{"plugin": pluginName})
+		}
+		typed, ok := p.(T)
+		if !ok {
+			return ipc.Err(ipc.CodePluginDisabled, strings.ToLower(pluginName)+" plugin not enabled", map[string]string{"plugin": pluginName})
+		}
+		pl = typed
+	} else {
+		typed, ok := plugin.Lookup[T](plugins)
+		if !ok {
+			return ipc.Err(ipc.CodePluginDisabled, "plugin not enabled", nil)
+		}
+		pl = typed
 	}
 	return action(pl)
 }

@@ -12,6 +12,9 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 )
 
+// APIVersion is the version of the additive IPC contract supported by Client.
+const APIVersion = ipc.APIVersion
+
 // Client connects to the kcd daemon via Unix socket.
 type Client struct {
 	SocketPath string
@@ -23,6 +26,44 @@ type Client struct {
 	// daemon's own deadline, or failures misreport as connection timeouts.
 	// Zero defaults to 60s.
 	SftpTimeout time.Duration
+}
+
+// New creates a client for the daemon listening at socketPath.
+func New(socketPath string) *Client {
+	return &Client{SocketPath: socketPath}
+}
+
+// Hello discovers the daemon's supported IPC commands, events, plugins, and
+// additive features.
+func (c *Client) Hello() (*ipc.HelloResponse, error) {
+	res, err := c.Call(ipc.CmdHello, ipc.HelloPayload{
+		Client:      "pkg/client",
+		APIVersions: []int{APIVersion},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var hello ipc.HelloResponse
+	if err := json.Unmarshal(res.Data, &hello); err != nil {
+		return nil, fmt.Errorf("decode hello response: %w", err)
+	}
+	return &hello, nil
+}
+
+// ConfigSet writes allowlisted configuration values to an IPC drop-in.
+func (c *Client) ConfigSet(values map[string]any) error {
+	_, err := c.Call(ipc.CmdConfigSet, ipc.ConfigSetPayload{Values: marshalConfigValues(values)})
+	return err
+}
+
+func marshalConfigValues(values map[string]any) map[string]json.RawMessage {
+	result := make(map[string]json.RawMessage, len(values))
+	for key, value := range values {
+		if data, err := json.Marshal(value); err == nil {
+			result[key] = data
+		}
+	}
+	return result
 }
 
 // Call dialed the daemon, sends a request, and returns the response.
@@ -80,6 +121,9 @@ func (c *Client) callWithTimeout(cmd string, payload interface{}, timeout time.D
 	}
 
 	if !res.OK {
+		if res.Code != "" {
+			return nil, &Error{Code: res.Code, Message: res.Error, Details: res.Details}
+		}
 		return nil, fmt.Errorf("daemon error: %s", res.Error)
 	}
 

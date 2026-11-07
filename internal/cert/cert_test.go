@@ -4,8 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +82,31 @@ func TestLoadOrGenerate(t *testing.T) {
 	}
 }
 
+func TestLoadOrGenerateRejectsCertificateCNMismatch(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	wrong, err := GenerateSelfSigned("other-device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := x509.MarshalPKCS8PrivateKey(wrong.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: wrong.Certificate[0]}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadOrGenerate(certPath, keyPath, "expected-device")
+	if err == nil || !strings.Contains(err.Error(), "does not match device ID") {
+		t.Fatalf("CN mismatch error = %v", err)
+	}
+}
+
 func TestPinnedFingerprint(t *testing.T) {
 	if got := PinnedFingerprint(nil); got != "" {
 		t.Errorf("expected empty fingerprint for nil cert, got %q", got)
@@ -92,6 +119,20 @@ func TestPinnedFingerprint(t *testing.T) {
 	x509Cert, _ := x509.ParseCertificate(c.Certificate[0])
 	if got := PinnedFingerprint(x509Cert); got != Fingerprint(x509Cert) {
 		t.Error("PinnedFingerprint mismatch with Fingerprint")
+	}
+}
+
+func TestMatchesDeviceIDNormalizesAndroidCN(t *testing.T) {
+	peer := &x509.Certificate{}
+	peer.Subject.CommonName = "device-id"
+	if !MatchesDeviceID(peer, "device_id") {
+		t.Fatal("hyphenated certificate CN did not match identity ID")
+	}
+	if MatchesDeviceID(peer, "other_id") {
+		t.Fatal("unrelated identity ID matched certificate CN")
+	}
+	if MatchesDeviceID(nil, "device_id") {
+		t.Fatal("nil certificate matched identity ID")
 	}
 }
 

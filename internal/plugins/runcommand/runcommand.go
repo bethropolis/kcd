@@ -8,18 +8,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
+var _ plugin.Plugin = (*RunCommandPlugin)(nil)
+
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {
-	Mu                sync.RWMutex // exported so daemon.go can lock it during reload
-	Commands          map[string]string
-	CommandsPerDevice map[string]map[string]string // keyed by device ID
+	mu                sync.RWMutex
+	commands          map[string]string
+	commandsPerDevice map[string]map[string]string // keyed by device ID
 	// pendingLists holds one buffered waiter per device awaiting that
 	// device's command-list reply, keyed by device ID.
 	pendingLists map[string]chan []Command
@@ -32,20 +36,42 @@ type RunCommandPlugin struct {
 	bus     *events.Bus
 	logger  log.Logger
 	wg      sync.WaitGroup // exported for tests to synchronize with background goroutines
+	timeout time.Duration
 }
 
-func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, bus *events.Bus, logger log.Logger) *RunCommandPlugin {
+// Options controls runcommand execution defaults.
+type Options struct {
+	Timeout time.Duration
+}
+
+func NewRunCommandPlugin(commands map[string]string, commandsPerDevice map[string]map[string]string, bus *events.Bus, logger log.Logger, options ...Options) *RunCommandPlugin {
 	if commandsPerDevice == nil {
 		commandsPerDevice = make(map[string]map[string]string)
 	}
+	timeout := 15 * time.Second
+	if len(options) > 0 && options[0].Timeout > 0 {
+		timeout = options[0].Timeout
+	}
 	return &RunCommandPlugin{
-		Commands:          commands,
-		CommandsPerDevice: commandsPerDevice,
+		commands:          commands,
+		commandsPerDevice: commandsPerDevice,
 		pendingLists:      make(map[string]chan []Command),
 		running:           make(map[string]map[int32]context.CancelFunc),
 		bus:               bus,
 		logger:            logger.With(log.String("plugin", "runcommand")),
+		timeout:           timeout,
 	}
+}
+
+// SetCommands updates the global and per-device command tables thread-safely.
+func (p *RunCommandPlugin) SetCommands(global map[string]string, perDev map[string]map[string]string) {
+	p.mu.Lock()
+	p.commands = global
+	if perDev == nil {
+		perDev = make(map[string]map[string]string)
+	}
+	p.commandsPerDevice = perDev
+	p.mu.Unlock()
 }
 
 // RequestBody represents a request from the phone.
@@ -53,9 +79,9 @@ type RequestBody struct {
 	RequestCommandList bool   `json:"requestCommandList,omitempty"`
 	Key                string `json:"key,omitempty"`
 	// Stop cancels a running execution. The phone's stop button sends this
-	// with the execution id.
-	Stop bool  `json:"stop,omitempty"`
-	ID   int32 `json:"id,omitempty"`
+	// with or without the execution id.
+	Stop bool   `json:"stop,omitempty"`
+	ID   *int32 `json:"id,omitempty"`
 }
 
 // Name returns the plugin name.
@@ -77,7 +103,7 @@ func (p *RunCommandPlugin) OutgoingTypes() []string {
 }
 
 // Handle processes incoming command requests.
-func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Type == "kdeconnect.runcommand" {
 		p.handleListReply(dev, pkt)
 		return nil
@@ -88,48 +114,25 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		return err
 	}
 
-	// The phone's stop button sends {"stop": true} with the execution id.
+	// The phone's stop button sends {"stop": true} with or without the execution id.
 	if body.Stop {
-		p.stopRunning(dev.ID(), body.ID)
+		if body.ID != nil {
+			p.stopRunning(dev.ID(), *body.ID)
+		} else {
+			p.stopAll(dev.ID())
+		}
 		return nil
 	}
 
 	if body.RequestCommandList {
-		p.Mu.RLock()
-		cmds := p.Commands
-		perDev := p.CommandsPerDevice[dev.ID()]
-		p.Mu.RUnlock()
-
-		// Merge global + per-device commands. Per-device overrides global.
-		list := make(map[string]map[string]string)
-		for label, cmd := range cmds {
-			list[label] = map[string]string{
-				"name":    label,
-				"command": cmd,
-			}
-		}
-		for label, cmd := range perDev {
-			list[label] = map[string]string{
-				"name":    label,
-				"command": cmd,
-			}
-		}
-
-		listBytes, _ := json.Marshal(list)
-		res, err := protocol.NewPacket("kdeconnect.runcommand", map[string]string{
-			"commandList": string(listBytes),
-		})
-		if err != nil {
-			return err
-		}
-		return dev.Send(res)
+		return p.SendCommandList(dev)
 	}
 
 	if body.Key != "" {
-		p.Mu.RLock()
-		perDev := p.CommandsPerDevice[dev.ID()]
-		cmds := p.Commands
-		p.Mu.RUnlock()
+		p.mu.RLock()
+		perDev := p.commandsPerDevice[dev.ID()]
+		cmds := p.commands
+		p.mu.RUnlock()
 
 		cmdStr, ok := perDev[body.Key]
 		if !ok {
@@ -145,15 +148,15 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			execCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			execCtx, cancel := context.WithTimeout(context.Background(), p.timeout)
 			defer cancel()
 
-			p.Mu.Lock()
+			p.mu.Lock()
 			if p.running[dev.ID()] == nil {
 				p.running[dev.ID()] = make(map[int32]context.CancelFunc)
 			}
 			p.running[dev.ID()][execID] = cancel
-			p.Mu.Unlock()
+			p.mu.Unlock()
 
 			// Registered before the command starts so the phone's stop
 			// button can reach an execution that has just been launched.
@@ -172,9 +175,9 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 			}
 
 			// Do not send notifications for massive outputs (e.g. log dumps)
-			if len(text) > 4096 {
+			if len(text) > streamNotifMaxBytes {
 				p.logger.Warn("command output too large for notification, truncating", log.Int("len", len(text)))
-				text = text[:4000] + "\n...[output truncated]"
+				text = truncateRuneSafe(text, streamNotifMaxBytes) + "\n...[output truncated]"
 			}
 
 			// Sent as a notification: Android uses appName/ticker as title/body,
@@ -205,7 +208,7 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 
 // sendStarted announces a beginning execution. The phone registers the id
 // against a display row here, so it must precede any output for that id.
-func (p *RunCommandPlugin) sendStarted(dev device.Sender, id int32, command string) error {
+func (p *RunCommandPlugin) sendStarted(dev device.Peer, id int32, command string) error {
 	pkt, err := protocol.NewPacket(PacketTypeOutput, map[string]any{
 		"commandStarted": true,
 		"id":             id,
@@ -217,10 +220,63 @@ func (p *RunCommandPlugin) sendStarted(dev device.Sender, id int32, command stri
 	return dev.Send(pkt)
 }
 
-func (p *RunCommandPlugin) OnConnect(dev device.Sender) {}
+// SendCommandList pushes the command list to the peer.
+func (p *RunCommandPlugin) SendCommandList(dev device.Peer) error {
+	p.mu.RLock()
+	cmds := p.commands
+	perDev := p.commandsPerDevice[dev.ID()]
+	p.mu.RUnlock()
+
+	// Merge global + per-device commands. Per-device overrides global.
+	list := make(map[string]map[string]string)
+	for label, cmd := range cmds {
+		list[label] = map[string]string{
+			"name":    label,
+			"command": cmd,
+		}
+	}
+	for label, cmd := range perDev {
+		list[label] = map[string]string{
+			"name":    label,
+			"command": cmd,
+		}
+	}
+
+	listBytes, _ := json.Marshal(list)
+	res, err := protocol.NewPacket("kdeconnect.runcommand", map[string]any{
+		"commandList":   string(listBytes),
+		"canAddCommand": false,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(res)
+}
+
+// OnConnect pushes the command list when a paired device connects.
+func (p *RunCommandPlugin) OnConnect(dev device.Peer) {
+	if err := p.SendCommandList(dev); err != nil {
+		p.logger.Warn("failed to send command list on connect",
+			log.String("device_id", dev.ID()),
+			log.Error(err),
+		)
+	}
+}
 
 // OnDisconnect cancels anything still running for the device, so a command
 // does not outlive the connection that asked for it.
-func (p *RunCommandPlugin) OnDisconnect(dev device.Sender) {
+func (p *RunCommandPlugin) OnDisconnect(dev device.Peer) {
 	p.stopAll(dev.ID())
+}
+
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for i := maxBytes; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	return ""
 }

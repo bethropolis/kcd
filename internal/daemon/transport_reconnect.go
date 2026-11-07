@@ -2,14 +2,12 @@ package daemon
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -17,20 +15,11 @@ import (
 // arrive in bursts, and a burst must dial only once.
 const reconnectTriggerMinGap = 5 * time.Second
 
-// reconnectWithBackoff redials a disconnected pair, escalating to fallback_max
+// ReconnectWithBackoff redials a disconnected pair, escalating to fallback_max
 // and stopping past stale_after (a later sighting respawns it) or on reconnect.
-func reconnectWithBackoff(
-	ctx context.Context,
-	dev *device.Device,
-	ip net.IP,
-	identity *protocol.Packet,
-	cfg *tls.Config,
-	devices *device.Registry,
-	plugins *plugin.Registry,
-	localDeviceID string,
-	logger log.Logger,
-	opts *config.Config,
-) {
+func (env *transportEnv) ReconnectWithBackoff(ctx context.Context, dev *device.Device, ip net.IP) {
+	opts := env.cfg
+	logger := env.logger
 	maxBackoff := config.Duration(opts.Reconnect.MaxBackoff)
 	waitCap := maxBackoff
 	sightingDriven := opts.Reconnect.SightingDriven
@@ -133,7 +122,7 @@ func reconnectWithBackoff(
 		// Prefer the peer's advertised listening port over the default; zero
 		// (absent) falls back.
 		port := reconnectPort(dev, opts.TCPPort)
-		DialDevice(ctx, dialIP, port, dev.ID(), protocol.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+		env.Dial(ctx, dialIP, port, dev.ID(), protocol.ProtocolVersion, false)
 		lastDial = time.Now()
 
 		if dev.IsConnected() {

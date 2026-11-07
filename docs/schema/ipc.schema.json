@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kcd IPC protocol",
+  "type": "object",
+  "definitions": {
+    "request": {
+      "type": "object",
+      "required": ["cmd"],
+      "properties": {
+        "cmd": {"type": "string"},
+        "id": {"type": ["string", "number"]},
+        "payload": {}
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "id": {"type": ["string", "number"]},
+        "ok": {"type": "boolean"},
+        "error": {"type": "string"},
+        "code": {"type": "string"},
+        "details": {},
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    "hello": {
+      "type": "object",
+      "properties": {
+        "client": {"type": "string"},
+        "clientVersion": {"type": "string"},
+        "apiVersions": {"type": "array", "items": {"type": "integer"}},
+        "keepAlive": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

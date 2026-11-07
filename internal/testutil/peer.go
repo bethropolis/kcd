@@ -18,12 +18,16 @@ import (
 type MockPeer struct {
 	t         *testing.T
 	tlsConfig *tls.Config
+	DeviceID  string
 }
+
+// DefaultMockPeerID is a valid protocol device ID for mock peers in tests.
+const DefaultMockPeerID = "mock-peer-0123456789abcdef012345"
 
 // NewMockPeer creates a new MockPeer.
 func NewMockPeer(t *testing.T, tlsConfig *tls.Config) *MockPeer {
 	t.Helper()
-	return &MockPeer{t: t, tlsConfig: tlsConfig}
+	return &MockPeer{t: t, tlsConfig: tlsConfig, DeviceID: DefaultMockPeerID}
 }
 
 // Dial connects, exchanges plaintext identity, then upgrades to TLS as the
@@ -48,9 +52,13 @@ func (p *MockPeer) TryDial(serverAddr string) (net.Conn, error) {
 		return nil, fmt.Errorf("mockpeer: dial %s: %w", serverAddr, err)
 	}
 
+	deviceID := p.DeviceID
+	if deviceID == "" {
+		deviceID = DefaultMockPeerID
+	}
 	// Send plaintext identity
 	identPkt, err := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID:        "mock-peer",
+		DeviceID:        deviceID,
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,

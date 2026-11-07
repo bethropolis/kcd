@@ -13,7 +13,7 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
+	"github.com/bethropolis/kcd/internal/netutil"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 )
@@ -43,15 +43,66 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 // without it a chatty announcer spawns a dial storm.
 const discoveryDialMinInterval = 2 * time.Second
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
-
-	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
-	if err != nil {
-		logger.Error("failed to start TCP listener", log.Error(err))
-		return
+func bindTCPListener(ctx context.Context, opts *config.Config, logger log.Logger) (*transport.Listener, error) {
+	canFallback := opts.TCPPort == 0 || opts.TCPPort == protocol.DefaultTCPPort
+	if canFallback {
+		for port := protocol.TCPPortMin; port <= protocol.TCPPortMax; port++ {
+			l, err := transport.Listen(ctx, fmt.Sprintf(":%d", port))
+			if err == nil {
+				if port != protocol.DefaultTCPPort {
+					logger.Info("default TCP port busy, bound fallback port", log.Int("port", port))
+				}
+				opts.TCPPort = port
+				return l, nil
+			}
+		}
+		return nil, fmt.Errorf("transport: failed to bind TCP listener in range %d-%d", protocol.TCPPortMin, protocol.TCPPortMax)
 	}
-	defer tcpListener.Close()
-	tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
+
+	l, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
+	if err != nil {
+		return nil, fmt.Errorf("transport: failed to bind TCP listener on port %d: %w", opts.TCPPort, err)
+	}
+	return l, nil
+}
+
+func updateIdentityTCPPort(pkt *protocol.Packet, port int) error {
+	if pkt == nil || len(pkt.Body) == 0 {
+		return nil
+	}
+	var body protocol.IdentityBody
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		return err
+	}
+	body.TCPPort = port
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	pkt.Body = data
+	return nil
+}
+
+func runTransport(ctx context.Context, env *transportEnv, bc *discovery.BroadcasterController, tcpListener *transport.Listener) {
+	opts := env.cfg
+	logger := env.logger
+	identity := env.identity
+	devices := env.devices
+	localDeviceID := env.localID
+
+	if tcpListener == nil {
+		var err error
+		tcpListener, err = bindTCPListener(ctx, opts, logger)
+		if err != nil {
+			logger.Error("failed to start TCP listener", log.Error(err))
+			return
+		}
+		defer tcpListener.Close()
+		tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
+		if err := updateIdentityTCPPort(identity, opts.TCPPort); err != nil {
+			logger.Warn("failed to update identity with bound TCP port", log.Error(err))
+		}
+	}
 
 	// Discovery runs timer-free. Stranger dials are throttled (1/s global,
 	// 1/5s per IP) against ID-minting peers; paired and intent dials bypass.
@@ -89,6 +140,10 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if body.DeviceID == localDeviceID {
 			return
 		}
+		if !protocol.ValidDeviceID(body.DeviceID) {
+			logger.Debug("ignoring discovery with invalid device ID", log.String("device_id", body.DeviceID))
+			return
+		}
 
 		// Never dial garbage ports from unauthenticated announcements.
 		if !validDialPort(tcpPort) {
@@ -120,6 +175,8 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			// disconnected or roamed, ignore same-IP (read-idle cannot tell
 			// zombies from healthy sessions). Setup re-verifies the cert.
 			dev.SetLastSeen(time.Now())
+			syncReconnectBroadcastUntil(ctx, devices, bc, config.Duration(opts.Reconnect.StaleAfter))
+			bc.ResetBackoff()
 			if dev.NoteSighting(ip) {
 				dev.ResetReconnectAttempt()
 			}
@@ -133,7 +190,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					if p := dev.LastPort(); validDialPort(p) {
 						port = p
 					}
-					go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+					go env.Dial(ctx, ip, port, body.DeviceID, body.ProtocolVersion, false)
 				}
 			} else if dev.IsConnected() {
 				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
@@ -144,7 +201,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						if p := dev.LastPort(); validDialPort(p) {
 							port = p
 						}
-						go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+						go env.Dial(ctx, ip, port, body.DeviceID, body.ProtocolVersion, false)
 					}
 				}
 			}
@@ -154,7 +211,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				dev.PokeReconnect()
 				if !dev.IsConnected() && dev.TryReconnect() {
 					dev.ResetReconnectAttempt()
-					go reconnectWithBackoff(ctx, dev, ip, identity, cfg, devices, plugins, localDeviceID, logger, opts)
+					go env.ReconnectWithBackoff(ctx, dev, ip)
 				}
 			}
 			return
@@ -173,7 +230,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if pairingMode || dev.ConsumePairDial() {
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, true, opts)
+				env.Dial(ctx, targetIP, targetPort, targetID, targetProto, true)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 			return
 		}
@@ -185,14 +242,14 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			}
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+				env.Dial(ctx, targetIP, targetPort, targetID, targetProto, false)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 		}
 		// Already got its ephemeral dial this era: stay silent on further
 		// announcements. Pairing mode and explicit pair bypass.
 	}
 
-	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
+	udpListener := discovery.NewListener(protocol.DefaultDiscoveryPort, localDeviceID, onDeviceFound, logger)
 	// Active discovery shares the broadcast ownership lifetime: mDNS browsing
 	// runs only while pairing or reconnect owners hold it, never steady state.
 	if bc != nil {
@@ -202,15 +259,20 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 
 	// Accept loop
 	go func() {
+		var acceptBackoff netutil.ErrorBackoff
 		for {
 			conn, err := tcpListener.Accept()
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				logger.Error("accept error", log.Error(err))
+				logger.Warn("accept error", log.Error(err))
+				if !acceptBackoff.Wait(ctx) {
+					return
+				}
 				continue
 			}
+			acceptBackoff.Reset()
 
 			go func(c net.Conn) {
 				defer func() {
@@ -219,32 +281,45 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					}
 				}()
 
+				_ = c.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout)))
 				preTlsPkt, newConn, err := transport.ReadPlaintextPacket(c)
 				if err != nil {
 					return
 				}
+				_ = c.SetReadDeadline(time.Time{})
 				// Refuse duplicate bursts inside the cooldown: the peer already
 				// has a live session. Pairing traffic always passes through.
 				var preBody protocol.IdentityBody
 				if err := json.Unmarshal(preTlsPkt.Body, &preBody); err == nil {
+					if !protocol.ValidDeviceID(preBody.DeviceID) {
+						protocol.ReleasePacket(preTlsPkt)
+						return
+					}
+					if protocol.SanitizeDeviceName(preBody.DeviceName) == "" {
+						protocol.ReleasePacket(preTlsPkt)
+						return
+					}
 					if preBody.TargetDeviceID != "" && preBody.TargetDeviceID != localDeviceID {
-						// Log-only: a stale cached ID on the peer (e.g. our reinstall
-						// minted a new one) must not kill a legitimate inbound.
-						logger.Debug("inbound addressed to another device",
+						logger.Warn("inbound addressed to another device, dropping",
 							log.String("device_id", preBody.DeviceID),
 							log.String("target_device_id", preBody.TargetDeviceID))
+						protocol.ReleasePacket(preTlsPkt)
+						return
 					}
-					if dev, ok := devices.Get(preBody.DeviceID); ok && dev.InCooldown() &&
-						(bc == nil || !bc.IsRunning()) {
+					pairingMode := bc != nil && bc.IsRunning()
+					if shouldRefuseInboundCooldown(preBody, devices, pairingMode) {
 						logger.Debug("refusing inbound inside reconnect cooldown",
 							log.String("device_id", preBody.DeviceID))
 						protocol.ReleasePacket(preTlsPkt)
 						return
 					}
+				} else {
+					protocol.ReleasePacket(preTlsPkt)
+					return
 				}
 				protocol.ReleasePacket(preTlsPkt)
 
-				tlsConn := tls.Client(newConn, cfg)
+				tlsConn := tls.Client(newConn, env.tls)
 				handshakeCtx, cancel := context.WithTimeout(ctx, config.Duration(opts.Network.HandshakeTimeout))
 				defer cancel()
 				if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
@@ -254,7 +329,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				transConn := transport.NewConn(tlsConn)
 				c = nil // Prevent defer from closing the active connection
 
-				if err := handleNewConnection(ctx, transConn, identity, devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
+				if err := env.HandleNewConnection(ctx, transConn, &preBody, ""); err != nil {
 					logger.Debug("new connection setup failed", log.Error(err))
 					transConn.Close()
 				}
@@ -263,4 +338,12 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 	}()
 
 	<-ctx.Done()
+}
+
+func shouldRefuseInboundCooldown(identity protocol.IdentityBody, devices *device.Registry, pairingMode bool) bool {
+	if pairingMode {
+		return false
+	}
+	dev, ok := devices.Get(identity.DeviceID)
+	return ok && dev.InCooldown()
 }

@@ -10,14 +10,17 @@ These flags apply to every command:
 
 | Flag | Default | Description |
 |---|---|---|
+| `--instance <name>` | — | Named isolated daemon instance (`$XDG_RUNTIME_DIR/kcd/<name>/kcd.sock`) |
 | `--config <path>` | `~/.config/kcd/kcd.toml` | Path to config file |
 | `--log-level <level>` | `info` | Log verbosity: `debug`, `info`, `warn`, `error`, `quiet` |
 | `--help`, `-h` | — | Show help |
 | `--version`, `-v` | — | Show version, commit, and build date |
 
-`--config` and `--log-level` can also be set via environment variables `KCD_CONFIG` and `KCD_LOG_LEVEL`.
+`--instance`, `--config`, and `--log-level` can also be set via environment variables `KCD_INSTANCE`, `KCD_CONFIG`, and `KCD_LOG_LEVEL`.
 
 Flags must come before positional arguments (`kcd battery --json <device-id>`, not `kcd battery <device-id> --json`). Anything after the first positional is treated as an argument, so a trailing flag is silently ignored rather than rejected.
+
+Commands supporting `--json` emit two-space indented JSON for readability and easy piping into tools like `jq`. Streaming commands (`kcd watch --json` and `kcd pair --advertise-only --json`) emit newline-delimited JSON (NDJSON) where each event is a single line.
 
 ---
 
@@ -46,7 +49,7 @@ configuration is captured at startup. Running the daemon directly, send
 | `[reconnect]` | `initial_backoff = "2s"`, `max_backoff = "5m"`, `flap_threshold = "15s"`, `sighting_driven = true`, `fallback_max = "1h"`, `stale_after = "24h"` |
 | `[discovery]` | `broadcast_interval = "30s"`, `broadcast_idle_interval = "60s"` |
 | `[mpris]` | `poll_while_playing = true`, `position_interval = "2s"` |
-| `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`; existing `timeout_secs = 30` still controls the pairing response wait |
+| `[pairing]` | `intent_ttl = "5m"`, `listen_timeout = "60s"`, `timeout_secs = 30` controls pending pairing, capped at Android's 30-second requester and 25-second receiver windows |
 | `[cache]` | `sms_attachments_dir = ""`, `album_art_dir = ""`, `contacts_dir = ""` |
 | `[notifications]` | `app_name = "KDE Connect"`; per-app `"show"`/`"silent"` filters and `"*"` fallback remain supported |
 | `[ping]` | `app_name = ""` inherits the notification application name; a non-empty value overrides it |
@@ -70,6 +73,26 @@ override even after changing the global name; remove it or set it to `""` to
 inherit. Protocol version, payload limits, packet buffers and queues
 remain fixed implementation settings, not configuration knobs. TCP
 keepalive is tunable via `[network] keepalive_idle` (minimum `"10s"`).
+
+---
+
+## config
+
+Inspect and validate configuration.
+
+    kcd config check
+    kcd config show [--json] [--origin]
+    kcd config defaults
+    kcd config path
+
+**Subcommands**
+
+- `check`: Parse and validate the effective configuration from the main file and any `.d` drop-ins, reporting unknown-key warnings and validation errors.
+- `show`: Print the merged effective configuration in TOML format. Flags:
+  - `--json`: Output indented JSON.
+  - `--origin`: Print the primary configuration file path to stderr.
+- `defaults`: Output the built-in default configuration in TOML format.
+- `path`: Print the configuration lookup paths (primary config file and `.d` drop-in directory).
 
 ---
 
@@ -162,6 +185,34 @@ Show daemon runtime information.
     Old Laptop deadbeef  laptop  UNPAIRED  —                   —        never
 
     Plugins (20): Pair, Battery, Clipboard, Notification, Share, ...
+
+---
+
+## dbus
+
+Run the optional KDE Connect D-Bus compatibility adapter.
+
+    kcd dbus
+
+Launches a headless D-Bus bridge that claims `org.kde.kdeconnect` on the session bus and exports `/modules/kdeconnect` for desktop applets (such as KDE Plasma widgets). Queries the local `kcd` daemon via IPC to report daemon status and known device IDs. See [docs/DBUS.md](DBUS.md).
+
+---
+
+## version
+
+Show daemon and IPC capability information.
+
+    kcd version [--json]
+
+Without flags, prints the CLI version, git commit hash, and build date.
+
+**Flags**
+
+| Flag | Description |
+|---|---|
+| `--json` | Output machine-readable JSON discovery payload |
+
+With `--json`, outputs an `ipc.HelloResponse` payload including the IPC API version (`2.0`), daemon version, supported commands, event types, opt-in events, plugin enable states, and supported feature flags (`errorCodes`, `keepAlive`, `watchResume`, `prompts`, `config`, `schemas`).
 
 ---
 
@@ -272,6 +323,10 @@ kcd pair <device-id>
 ```
 
 If the device has already sent a pair request to `kcd` (state `PairRequestedByPeer`), this accepts it. Otherwise, it connects to the device on demand (using its last-seen discovery address) and sends a new pair request — accept on your phone.
+
+If a paired device starts a new pairing request, `kcd` asks for confirmation
+again. This covers a phone that lost its saved pairing after reinstall or data
+reset.
 
 When `kcd` sends the request, it prints a **verification code**. Compare it with the code on the phone's prompt: they must match. A mismatch means something is intercepting the connection — cancel and `kcd unpair` the device. No code is printed when the phone initiated the request (use [listen mode](#listen-mode-headless--server) for that direction) or when the device is already paired.
 
@@ -704,6 +759,28 @@ kcd dismiss a1b2... notif-456
 
 ---
 
+## notify
+
+Interact with notifications on a remote device.
+
+### notify action
+
+Trigger a remote notification action (e.g. "Mark as read", "Archive", "Open").
+
+```
+kcd notify action <device-id> <notification-id> <action>
+```
+
+The `action` parameter must match one of the entries in the notification's `actions` array:
+
+```bash
+kcd notify action a1b2... notif-456 "Mark as read"
+```
+
+Subcommands `notify reply` and `notify dismiss` are also supported as aliases for `reply` and `dismiss`.
+
+---
+
 ## call
 
 Manage phone calls.
@@ -738,6 +815,8 @@ kcd unlock [device-id]
 ```
 
 These send the KDE Connect lock packet to the **remote** device — they do not lock this PC. The reverse direction is separate: when a paired device sends a lock request, the daemon runs `loginctl lock-session` / `loginctl unlock-session` on this desktop.
+
+Incoming remote lock requests can lock the desktop by default. Remote unlock is disabled unless `[lockdevice].allow_remote_unlock = true` is set in `kcd.toml`.
 
 > Peer support varies: Plasma desktops and other `kcd` instances honour
 > the request, but the Android app ships no lock plugin and ignores it.
@@ -1158,7 +1237,7 @@ kcd watch [--events <type,...>] [--json]
 | `telephony.missed` | Missed call: `{contactName, phoneNumber}` |
 | `telephony.canceled` | Call ended |
 | `connectivity.update` | Signal strength: `{signal, networkType}` |
-| `volume.update` | Device volume changed: `{name, volume, muted}` |
+| `volume.update` | Device volume or mute changed: `{name, volume?, muted?}` |
 | `mpris.update` | Now playing: `{player, title, artist, album, isPlaying, pos, length, volume}` |
 | `sftp.mount` | SFTP credentials: `{uri, ip, port, user, password, path, multiPaths, pathNames, errorMessage}` |
 | `sftp.mounted` | Mount finished: `{mountPoint, volume?}` |

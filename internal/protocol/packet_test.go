@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -52,6 +53,31 @@ func TestReadPacket_Oversized(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("expected 'too large' error, got: %v", err)
+	}
+}
+
+func TestReadPacketBounded_DiscardsOversizedLine(t *testing.T) {
+	input := strings.Repeat("x", 2048) + "\n" + `{"id":2,"type":"next","body":{}}` + "\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	if _, err := ReadPacketBounded(r, 1024); !errors.Is(err, ErrPacketTooLarge) {
+		t.Fatalf("expected ErrPacketTooLarge, got %v", err)
+	}
+	pkt, err := ReadPacketBounded(r, 1024)
+	if err != nil {
+		t.Fatalf("reading packet after oversized line: %v", err)
+	}
+	defer ReleasePacket(pkt)
+	if pkt.ID != 2 || pkt.Type != "next" {
+		t.Fatalf("got packet %+v after oversized line", pkt)
+	}
+}
+
+func TestReadPacketBounded_StopsBeforeUnboundedInput(t *testing.T) {
+	input := strings.Repeat("x", 2*1024*1024)
+	r := bufio.NewReader(strings.NewReader(input))
+	if _, err := ReadPacketBounded(r, 512*1024); !errors.Is(err, ErrPacketTooLarge) {
+		t.Fatalf("expected ErrPacketTooLarge, got %v", err)
 	}
 }
 

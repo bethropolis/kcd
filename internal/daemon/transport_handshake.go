@@ -17,7 +17,30 @@ import (
 )
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
-func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
+func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, preTLS *protocol.IdentityBody, expectedPeerID string, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
+	env := &transportEnv{
+		tls:      cfg,
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  localDeviceID,
+		cfg:      opts,
+		logger:   logger,
+	}
+	return env.HandleNewConnection(ctx, conn, preTLS, expectedPeerID)
+}
+
+func (env *transportEnv) HandleNewConnection(ctx context.Context, conn *transport.Conn, preTLS *protocol.IdentityBody, expectedPeerID string) error {
+	opts := env.cfg
+	identity := env.identity
+	devices := env.devices
+	plugins := env.plugins
+	logger := env.logger
+	if err := conn.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout))); err != nil {
+		return fmt.Errorf("set handshake read deadline: %w", err)
+	}
+	defer conn.SetReadDeadline(time.Time{})
+
 	if err := conn.WritePacket(identity); err != nil {
 		return fmt.Errorf("failed to send identity: %w", err)
 	}
@@ -31,10 +54,23 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	if peerPkt.Type != protocol.TypeIdentity {
 		return fmt.Errorf("expected identity packet, got %s", peerPkt.Type)
 	}
+	if preTLS == nil {
+		return fmt.Errorf("missing pre-TLS identity")
+	}
 
 	var peerBody protocol.IdentityBody
 	if err := json.Unmarshal(peerPkt.Body, &peerBody); err != nil {
 		return fmt.Errorf("failed to unmarshal peer identity: %w", err)
+	}
+	if !protocol.ValidDeviceID(peerBody.DeviceID) {
+		return fmt.Errorf("invalid device ID %q", peerBody.DeviceID)
+	}
+	if (preTLS.DeviceID != "" && peerBody.DeviceID != preTLS.DeviceID) ||
+		(preTLS.ProtocolVersion > 0 && peerBody.ProtocolVersion != preTLS.ProtocolVersion) {
+		return fmt.Errorf("post-TLS identity differs from pre-TLS identity")
+	}
+	if expectedPeerID != "" && peerBody.DeviceID != expectedPeerID {
+		return fmt.Errorf("post-TLS device ID %q does not match target %q", peerBody.DeviceID, expectedPeerID)
 	}
 
 	peerCert := conn.PeerCert()
@@ -43,7 +79,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	}
 
 	certCN := peerCert.Subject.CommonName
-	if certCN != peerBody.DeviceID {
+	if !cert.MatchesDeviceID(peerCert, peerBody.DeviceID) {
 		return fmt.Errorf("certificate CN (%s) doesn't match device ID (%s)", certCN, peerBody.DeviceID)
 	}
 
@@ -55,14 +91,25 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 	} else {
 		dev.SetName(safeDeviceName)
 	}
+	dev.SetPeerProtocolVersion(peerBody.ProtocolVersion)
 	dev.SetLastSeen(time.Now())
 
 	certFP := cert.Fingerprint(peerCert)
-	if dev.State() == device.StatePaired && dev.CertFP != "" {
-		if dev.CertFP != certFP {
+	if currentCert := dev.PeerCert(); currentCert != nil && cert.Fingerprint(currentCert) != certFP {
+		return fmt.Errorf("certificate fingerprint mismatch on live link (possible MITM)")
+	}
+	switch dev.State() {
+	case device.StatePaired:
+		if dev.CertFP != "" && dev.CertFP != certFP {
 			return fmt.Errorf("certificate fingerprint mismatch (possible MITM)")
 		}
-	} else {
+	case device.StatePairRequested, device.StatePairRequestedByPeer:
+		if dev.CertFP == "" {
+			dev.CertFP = certFP
+		} else if dev.CertFP != certFP {
+			return fmt.Errorf("certificate fingerprint mismatch during pairing")
+		}
+	default:
 		dev.CertFP = certFP
 	}
 
@@ -84,12 +131,10 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 		return plugins.Dispatch(ctx, sender, pkt)
 	}
 
-	onConnect := func(sender *device.Device) {
-		plugins.OnConnect(sender)
-	}
+	onConnect := func(sender *device.Device) { notifyPluginsConnected(plugins, sender) }
 
 	onDisconnect := func(sender *device.Device) {
-		plugins.OnDisconnect(sender)
+		notifyPluginsDisconnected(plugins, sender)
 		// Only attempt reconnection for paired devices whose last IP we know.
 		// Unpaired or manually-disconnected devices are left alone.
 		if sender.State() != device.StatePaired {
@@ -110,9 +155,21 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 				log.String("device_id", sender.ID()))
 			return
 		}
-		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger, opts)
+		go env.ReconnectWithBackoff(ctx, sender, lastIP)
 	}
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)
 	return nil
+}
+
+func notifyPluginsConnected(plugins *plugin.Registry, sender *device.Device) {
+	if sender.State() == device.StatePaired {
+		plugins.OnConnect(sender)
+	}
+}
+
+func notifyPluginsDisconnected(plugins *plugin.Registry, sender *device.Device) {
+	if sender.State() == device.StatePaired {
+		plugins.OnDisconnect(sender)
+	}
 }

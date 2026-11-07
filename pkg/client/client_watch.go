@@ -11,15 +11,31 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 )
 
+// WatchOptions configures event subscription streaming.
+type WatchOptions struct {
+	Filters []string
+	Since   uint64
+}
+
 // Watch subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
+	return c.WatchSince(ctx, filter, 0, ch)
+}
+
+// WatchWithOptions subscribes to events using the provided options.
+func (c *Client) WatchWithOptions(ctx context.Context, opts WatchOptions, ch chan<- events.Event) error {
+	return c.WatchSince(ctx, opts.Filters, opts.Since, ch)
+}
+
+// WatchSince resumes a watch after the supplied event sequence when retained.
+func (c *Client) WatchSince(ctx context.Context, filter []string, since uint64, ch chan<- events.Event) error {
 	dialer := net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
 		return fmt.Errorf("kcd daemon not running or socket error: %w", err)
 	}
 
-	payload, _ := json.Marshal(ipc.WatchPayload{Events: filter})
+	payload, _ := json.Marshal(ipc.WatchPayload{Events: filter, Since: since})
 	req := ipc.Request{
 		Command: ipc.CmdWatch,
 		Payload: payload,

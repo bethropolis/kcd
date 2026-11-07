@@ -1,6 +1,7 @@
 package pair
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -12,20 +13,29 @@ import (
 
 // AcceptPairing accepts an incoming pair request.
 func (p *PairPlugin) AcceptPairing(dev *device.Device) error {
+	state := dev.State()
+	if state != device.StatePairRequestedByPeer && state != device.StatePairRequested {
+		return fmt.Errorf("pair: no pending request for device %s", dev.ID())
+	}
 	pkt, err := protocol.NewPairPacket(protocol.PairAccept, 0)
 	if err != nil {
 		return err
 	}
+	if !p.stopPendingTimeout(dev, state) {
+		return fmt.Errorf("pair: request expired for device %s", dev.ID())
+	}
 
 	if err := dev.Send(pkt); err != nil {
 		p.logger.Error("failed to send pair accept", log.Error(err))
-		dev.SetState(device.StateUnpaired)
+		p.changeStateFrom(dev, state, device.StateUnpaired)
 		dev.ClearEphemeral()
 		dev.ClearPairDial()
 		return err
 	}
 
-	p.pairingDone(dev)
+	if !p.pairingDone(dev) {
+		return fmt.Errorf("pair: request expired for device %s", dev.ID())
+	}
 	return nil
 }
 
@@ -69,12 +79,8 @@ func (p *PairPlugin) RequestPairing(dev *device.Device) (string, error) {
 			log.String("code", verificationKey))
 	}
 
-	dev.SetState(device.StatePairRequested)
+	p.changeState(dev, device.StatePairRequested)
 	p.logger.Info("pair request sent", log.String("device_id", dev.ID()))
-
-	if p.onStateChanged != nil {
-		p.onStateChanged()
-	}
 
 	return verificationKey, nil
 }
@@ -87,17 +93,13 @@ func (p *PairPlugin) RejectPairing(dev *device.Device) error {
 	}
 
 	dev.Send(pkt) // best effort
-	dev.SetState(device.StateUnpaired)
+	p.changeState(dev, device.StateUnpaired)
 	dev.ClearEphemeral()
 	dev.ClearPairDial()
 
 	p.mu.Lock()
 	delete(p.pairingTimestamp, dev.ID())
 	p.mu.Unlock()
-
-	if p.onStateChanged != nil {
-		p.onStateChanged()
-	}
 
 	p.logger.Info("pair request rejected", log.String("device_id", dev.ID()))
 	return nil
@@ -111,7 +113,7 @@ func (p *PairPlugin) Unpair(dev *device.Device) error {
 	}
 
 	dev.Send(pkt) // best effort
-	dev.SetState(device.StateUnpaired)
+	p.changeState(dev, device.StateUnpaired)
 	dev.ClearEphemeral()
 	dev.ClearPairDial()
 
@@ -119,26 +121,21 @@ func (p *PairPlugin) Unpair(dev *device.Device) error {
 	delete(p.pairingTimestamp, dev.ID())
 	p.mu.Unlock()
 
-	if p.onStateChanged != nil {
-		p.onStateChanged()
-	}
-
 	p.logger.Info("device unpaired", log.String("device_id", dev.ID()))
 	return nil
 }
 
-func (p *PairPlugin) pairingDone(dev *device.Device) {
-	dev.SetState(device.StatePaired)
+func (p *PairPlugin) pairingDone(dev *device.Device) bool {
+	if !p.transitionPendingToPaired(dev) {
+		return false
+	}
 	dev.ClearPairDial()
 
 	p.mu.Lock()
 	delete(p.pairingTimestamp, dev.ID())
 	p.mu.Unlock()
 
-	if p.onStateChanged != nil {
-		p.onStateChanged()
-	}
-
 	p.logger.Info("pairing complete", log.String("device_id", dev.ID()))
 	p.emit(events.TypePairAccepted, dev, "")
+	return true
 }
