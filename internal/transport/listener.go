@@ -44,6 +44,11 @@ func (l *Listener) Accept() (net.Conn, error) {
 	return conn, nil
 }
 
+// Addr returns the listener's network address.
+func (l *Listener) Addr() net.Addr {
+	return l.l.Addr()
+}
+
 // Close closes the underlying listener.
 func (l *Listener) Close() error {
 	return l.l.Close()

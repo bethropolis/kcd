@@ -447,6 +447,23 @@ func TestLoadErrors(t *testing.T) {
 	}
 }
 
+func TestTCPPortRange(t *testing.T) {
+	for _, port := range []int{1715, 1765, -1, 0, 8080} {
+		cfg := Defaults()
+		cfg.TCPPort = port
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("expected validation error for tcp_port %d", port)
+		}
+	}
+	for _, port := range []int{1716, 1720, 1764} {
+		cfg := Defaults()
+		cfg.TCPPort = port
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected validation error for valid tcp_port %d: %v", port, err)
+		}
+	}
+}
+
 func TestExampleConfig(t *testing.T) {
 	path := filepath.Join("..", "..", "packaging", "kcd.example.toml")
 	cfg, err := Load(path)

@@ -44,15 +44,63 @@ func shouldEphemeralClose(dev *device.Device, pairingMode bool) bool {
 // without it a chatty announcer spawns a dial storm.
 const discoveryDialMinInterval = 2 * time.Second
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config) {
-
-	tcpListener, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
-	if err != nil {
-		logger.Error("failed to start TCP listener", log.Error(err))
-		return
+func bindTCPListener(ctx context.Context, opts *config.Config, logger log.Logger) (*transport.Listener, error) {
+	canFallback := opts.TCPPort == 0 || opts.TCPPort == protocol.DefaultTCPPort
+	if canFallback {
+		for port := protocol.TCPPortMin; port <= protocol.TCPPortMax; port++ {
+			l, err := transport.Listen(ctx, fmt.Sprintf(":%d", port))
+			if err == nil {
+				if port != protocol.DefaultTCPPort {
+					logger.Info("default TCP port busy, bound fallback port", log.Int("port", port))
+				}
+				opts.TCPPort = port
+				return l, nil
+			}
+		}
+		return nil, fmt.Errorf("transport: failed to bind TCP listener in range %d-%d", protocol.TCPPortMin, protocol.TCPPortMax)
 	}
-	defer tcpListener.Close()
-	tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
+
+	l, err := transport.Listen(ctx, fmt.Sprintf(":%d", opts.TCPPort))
+	if err != nil {
+		return nil, fmt.Errorf("transport: failed to bind TCP listener on port %d: %w", opts.TCPPort, err)
+	}
+	return l, nil
+}
+
+func updateIdentityTCPPort(pkt *protocol.Packet, port int) error {
+	if pkt == nil || len(pkt.Body) == 0 {
+		return nil
+	}
+	var body protocol.IdentityBody
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		return err
+	}
+	body.TCPPort = port
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	pkt.Body = data
+	return nil
+}
+
+func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config, listener ...*transport.Listener) {
+	var tcpListener *transport.Listener
+	if len(listener) > 0 && listener[0] != nil {
+		tcpListener = listener[0]
+	} else {
+		var err error
+		tcpListener, err = bindTCPListener(ctx, opts, logger)
+		if err != nil {
+			logger.Error("failed to start TCP listener", log.Error(err))
+			return
+		}
+		defer tcpListener.Close()
+		tcpListener.SetKeepAliveIdle(config.Duration(opts.Network.KeepAliveIdle))
+		if err := updateIdentityTCPPort(identity, opts.TCPPort); err != nil {
+			logger.Warn("failed to update identity with bound TCP port", log.Error(err))
+		}
+	}
 
 	// Discovery runs timer-free. Stranger dials are throttled (1/s global,
 	// 1/5s per IP) against ID-minting peers; paired and intent dials bypass.
@@ -199,7 +247,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		// announcements. Pairing mode and explicit pair bypass.
 	}
 
-	udpListener := discovery.NewListener(opts.TCPPort, localDeviceID, onDeviceFound, logger)
+	udpListener := discovery.NewListener(protocol.DefaultDiscoveryPort, localDeviceID, onDeviceFound, logger)
 	// Active discovery shares the broadcast ownership lifetime: mDNS browsing
 	// runs only while pairing or reconnect owners hold it, never steady state.
 	if bc != nil {
@@ -250,11 +298,11 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						return
 					}
 					if preBody.TargetDeviceID != "" && preBody.TargetDeviceID != localDeviceID {
-						// Log-only: a stale cached ID on the peer (e.g. our reinstall
-						// minted a new one) must not kill a legitimate inbound.
-						logger.Debug("inbound addressed to another device",
+						logger.Warn("inbound addressed to another device, dropping",
 							log.String("device_id", preBody.DeviceID),
 							log.String("target_device_id", preBody.TargetDeviceID))
+						protocol.ReleasePacket(preTlsPkt)
+						return
 					}
 					pairingMode := bc != nil && bc.IsRunning()
 					if shouldRefuseInboundCooldown(preBody, devices, pairingMode) {

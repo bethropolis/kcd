@@ -49,11 +49,11 @@ func Run() []Check {
 		checks = append(checks, checkBin("wtype", "wtype", "install wtype for Wayland keyboard input"))
 	}
 
-	// port <tcp_port>/udp open (configured tcp_port, 1716 by default)
-	tcpPort := configuredTCPPort()
-	checks = append(checks, checkUDPPort(daemonCheck.Pass, tcpPort))
+	// port 1716/udp open (discovery port is always 1716)
+	checks = append(checks, checkUDPPort(daemonCheck.Pass, protocol.DefaultDiscoveryPort))
 
 	// port <tcp_port>/tcp open
+	tcpPort := configuredTCPPort()
 	checks = append(checks, checkTCPPort(daemonCheck.Pass, tcpPort))
 
 	// config file readable

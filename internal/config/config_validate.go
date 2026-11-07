@@ -41,8 +41,8 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("config: invalid device_type %q (expected desktop, laptop, phone, tablet, tv)", c.DeviceType)
 	}
-	if c.TCPPort < 1 || c.TCPPort > 65535 {
-		return fmt.Errorf("config: tcp_port must be 1-65535, got %d", c.TCPPort)
+	if c.TCPPort < protocol.TCPPortMin || c.TCPPort > protocol.TCPPortMax {
+		return fmt.Errorf("config: tcp_port must be %d-%d, got %d", protocol.TCPPortMin, protocol.TCPPortMax, c.TCPPort)
 	}
 
 	// Battery urgency validation

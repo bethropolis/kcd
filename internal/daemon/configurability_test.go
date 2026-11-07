@@ -14,11 +14,11 @@ import (
 
 func TestReconnectConfiguredPort(t *testing.T) {
 	dev := device.NewDevice("peer", "Peer", "phone", log.Nop())
-	if got := reconnectPort(dev, 1816); got != 1816 {
+	if got := reconnectPort(dev, 1720); got != 1720 {
 		t.Fatalf("fallback = %d", got)
 	}
-	dev.SetLastPort(1916)
-	if got := reconnectPort(dev, 1816); got != 1916 {
+	dev.SetLastPort(1730)
+	if got := reconnectPort(dev, 1720); got != 1730 {
 		t.Fatalf("peer port = %d", got)
 	}
 }
@@ -27,7 +27,7 @@ func TestReconnectConfiguredPort(t *testing.T) {
 // a non-default TCP port without changing the discovery protocol port.
 func TestDialConfiguredPortCanceled(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.TCPPort = 1816
+	cfg.TCPPort = 1720
 	pkt, err := protocol.NewIdentityPacket("local", "Local", "desktop", cfg.TCPPort, nil, nil)
 	if err != nil {
 		t.Fatal(err)

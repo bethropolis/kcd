@@ -140,6 +140,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// 4. Broadcast Controller (starts stopped — activated by `kcd pair`)
 	incomingCaps, outgoingCaps := plugins.Capabilities()
+
+	tcpListener, err := bindTCPListener(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer tcpListener.Close()
+	tcpListener.SetKeepAliveIdle(config.Duration(cfg.Network.KeepAliveIdle))
+
 	identity, err := buildIdentity(cfg, incomingCaps, outgoingCaps)
 	if err != nil {
 		return err
@@ -162,7 +170,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	bc := discovery.NewBroadcasterController(identity, cfg.TCPPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
+	bc := discovery.NewBroadcasterController(identity, protocol.DefaultDiscoveryPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 	go discovery.WatchNetworkChanges(ctx, bc.ResetBackoff)
 
 	// mDNS advertisement is always on: responder-only means zero idle timers,
@@ -290,7 +298,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// 6. Transport Layer
-	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg)
+	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg, tcpListener)
 
 	if notifySocket := os.Getenv("NOTIFY_SOCKET"); notifySocket != "" {
 		addr := &net.UnixAddr{Name: notifySocket, Net: "unixgram"}
