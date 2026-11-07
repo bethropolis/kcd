@@ -716,6 +716,28 @@ kcd dismiss a1b2... notif-456
 
 ---
 
+## notify
+
+Interact with notifications on a remote device.
+
+### notify action
+
+Trigger a remote notification action (e.g. "Mark as read", "Archive", "Open").
+
+```
+kcd notify action <device-id> <notification-id> <action>
+```
+
+The `action` parameter must match one of the entries in the notification's `actions` array:
+
+```bash
+kcd notify action a1b2... notif-456 "Mark as read"
+```
+
+Subcommands `notify reply` and `notify dismiss` are also supported as aliases for `reply` and `dismiss`.
+
+---
+
 ## call
 
 Manage phone calls.

@@ -119,17 +119,28 @@ func (p *NotificationPlugin) resolveAction(appName string) string {
 	return "show"
 }
 
+// ConversationMessage represents a single message in a conversation notification.
+type ConversationMessage struct {
+	Sender  string `json:"sender"`
+	Content string `json:"content"`
+}
+
 // NotificationBody represents the fields of a notification packet.
 type NotificationBody struct {
-	ID             string `json:"id"`
-	AppName        string `json:"appName"`
-	Title          string `json:"title"`
-	Text           string `json:"text"`
-	IsCancel       bool   `json:"isCancel,omitempty"`
-	IsClearable    bool   `json:"isClearable,omitempty"`
-	Silent         bool   `json:"silent,omitempty"`
-	RequestReplyId string `json:"requestReplyId,omitempty"`
-	PayloadHash    string `json:"payloadHash,omitempty"`
+	ID             string                `json:"id"`
+	AppName        string                `json:"appName"`
+	Title          string                `json:"title"`
+	Text           string                `json:"text"`
+	Ticker         string                `json:"ticker,omitempty"`
+	Time           string                `json:"time,omitempty"`
+	GroupName      string                `json:"groupName,omitempty"`
+	Actions        []string              `json:"actions,omitempty"`
+	Conversation   []ConversationMessage `json:"conversation,omitempty"`
+	IsCancel       bool                  `json:"isCancel,omitempty"`
+	IsClearable    bool                  `json:"isClearable,omitempty"`
+	Silent         bool                  `json:"silent,omitempty"`
+	RequestReplyId string                `json:"requestReplyId,omitempty"`
+	PayloadHash    string                `json:"payloadHash,omitempty"`
 }
 
 func (p *NotificationPlugin) Name() string           { return "Notification" }
@@ -138,7 +149,11 @@ func (p *NotificationPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.notification"}
 }
 func (p *NotificationPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.notification.reply", "kdeconnect.notification.request"}
+	return []string{
+		"kdeconnect.notification.reply",
+		"kdeconnect.notification.request",
+		"kdeconnect.notification.action",
+	}
 }
 
 // nonAlphaNumeric sanitises app names to be safe for exec / notify-send args.

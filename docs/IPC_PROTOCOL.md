@@ -494,6 +494,22 @@ The `notificationId` is the `id` field of a `notification` event.
 
 **Response data:** none
 
+#### `notify_action`
+
+Trigger a notification action on the remote device (sends `kdeconnect.notification.action`
+with `{"key": "<id>", "action": "<action>"}`).
+
+**Request payload:**
+
+```json
+{"deviceId": "a1b2c3d4e5f6_...", "notificationId": "notif-456", "action": "Reply"}
+```
+
+The `notificationId` (or `key`) is the notification ID, and `action` is one of the strings
+from the `actions` array in the `notification` event.
+
+**Response data:** none
+
 #### `findmyphone` (also aliased as `ring`)
 
 Make a paired phone ring loudly.
@@ -1062,7 +1078,13 @@ A notification was received from a device.
 |---|---|---|
 | `appName` | string | Application name (Android `appName` field) |
 | `title` | string | Notification title (Android `title` field) |
-| `text` | string | Notification body text (Android `ticker` field) |
+| `text` | string | Notification body text |
+| `ticker` | string | Notification ticker text (if present) |
+| `time` | string | Notification UNIX epoch timestamp (ms) as a string |
+| `groupName` | string | Conversation group name (if from a group message) |
+| `actions` | []string | Action titles available to trigger via `notify_action` |
+| `conversation` | []object | Array of `{sender, content}` conversation messages |
+| `silent` | bool | `true` if the notification was pre-existing (connect sync) |
 | `requestReplyId` | string | Present if the notification supports inline replies |
 | `id` | string | Notification identifier |
 | `payloadHash` | string | Optional 32-character hexadecimal icon hash; icon bytes are sent only when this changes |
@@ -1523,6 +1545,7 @@ who may want to implement a full network-level implementation.
 | `kdeconnect.mpris.request` | MPRIS | Request player list, now-playing, volume, album art; send control actions |
 | `kdeconnect.notification.reply` | Notification | Reply to a notification with inline reply support |
 | `kdeconnect.notification.request` | Notification | Clear a notification on the phone (`{"cancel": "<id>"}`) |
+| `kdeconnect.notification.action` | Notification | Trigger notification action on phone (`{"key": "<id>", "action": "<name>"}`) |
 | `kdeconnect.notification` | RunCommand | Command output notification pushed to phone |
 | `kdeconnect.runcommand` | RunCommand | Send command list to phone |
 | `kdeconnect.runcommand.output` | RunCommand | Stream execution results to the phone's output card |

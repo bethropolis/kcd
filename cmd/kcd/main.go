@@ -216,6 +216,7 @@ func main() {
 			sftpCmd,
 			replyCmd,
 			dismissCmd,
+			notifyCmd,
 			callCmd,
 			findmyphoneCmd,
 			lockCmd,

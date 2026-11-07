@@ -81,19 +81,138 @@ func TestNotificationPlugin_Handle_Cancel(t *testing.T) {
 }
 
 func TestNotificationPlugin_Handle_Silent(t *testing.T) {
-	p := newPlugin(t)
+	p, f := newFakePlugin(t, true)
 	logger := log.NewTest(t)
 	dev := device.NewDevice("dev1", "Test", "phone", logger)
 
+	sub := p.bus.Subscribe(16, events.TypeNotification)
+	defer sub.Close()
+
 	body := NotificationBody{
+		ID:      "notif-silent",
 		AppName: "SilentApp",
 		Title:   "Quiet",
 		Silent:  true,
 	}
 	pkt, _ := protocol.NewPacket("kdeconnect.notification", body)
-	// Silent notifications must be accepted without error and produce no output.
 	if err := p.Handle(context.Background(), dev, pkt); err != nil {
 		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	// Verify no desktop popup was delivered
+	if got := f.lastCall(); got != nil {
+		t.Fatalf("popup was delivered for silent notification: %v", got)
+	}
+
+	// Verify the event was published on the bus with silent=true
+	select {
+	case ev := <-sub.C:
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected payload type: %T", ev.Payload)
+		}
+		if payload["silent"] != true {
+			t.Errorf("expected silent=true in payload, got %v", payload["silent"])
+		}
+		if payload["id"] != "notif-silent" {
+			t.Errorf("expected id=notif-silent, got %v", payload["id"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for silent notification event")
+	}
+}
+
+func TestNotificationPlugin_ConversationAndActions(t *testing.T) {
+	p, f := newFakePlugin(t, true)
+	logger := log.NewTest(t)
+	dev := device.NewDevice("dev1", "Test", "phone", logger)
+
+	sub := p.bus.Subscribe(16, events.TypeNotification)
+	defer sub.Close()
+
+	body := NotificationBody{
+		ID:        "notif-chat",
+		AppName:   "Signal",
+		Title:     "Dr. Konqi",
+		GroupName: "KDE Team",
+		Text:      "Last message",
+		Actions:   []string{"Reply", "Mark as read"},
+		Conversation: []ConversationMessage{
+			{Sender: "Alice", Content: "Hello"},
+			{Sender: "Bob", Content: "Hi there"},
+		},
+	}
+	pkt, _ := protocol.NewPacket("kdeconnect.notification", body)
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	// Verify bus payload contains conversation, actions, and groupName
+	select {
+	case ev := <-sub.C:
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected payload type: %T", ev.Payload)
+		}
+		if payload["groupName"] != "KDE Team" {
+			t.Errorf("expected groupName=KDE Team, got %v", payload["groupName"])
+		}
+		actions, ok := payload["actions"].([]string)
+		if !ok || len(actions) != 2 || actions[0] != "Reply" {
+			t.Errorf("expected actions [Reply, Mark as read], got %v", payload["actions"])
+		}
+		conv, ok := payload["conversation"].([]ConversationMessage)
+		if !ok || len(conv) != 2 || conv[0].Content != "Hello" {
+			t.Errorf("expected conversation with 2 messages, got %v", payload["conversation"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for notification event")
+	}
+
+	// Verify desktop popup received formatted conversation transcript
+	var call []string
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if c := f.lastCall(); c != nil {
+			call = c
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if call == nil {
+		t.Fatal("expected desktop popup invocation, got none")
+	}
+	bodyText := call[len(call)-1]
+	expectedBody := "Alice: Hello\nBob: Hi there"
+	if bodyText != expectedBody {
+		t.Errorf("popup body text = %q, want %q", bodyText, expectedBody)
+	}
+}
+
+func TestNotificationPlugin_TriggerAction(t *testing.T) {
+	p := newPlugin(t)
+	dev := &captureSender{id: "dev1"}
+
+	if err := p.TriggerAction(dev, "notif-99", "Mark as read"); err != nil {
+		t.Fatalf("TriggerAction failed: %v", err)
+	}
+
+	if len(dev.sent) != 1 {
+		t.Fatalf("expected 1 packet sent, got %d", len(dev.sent))
+	}
+	pkt := dev.sent[0]
+	if pkt.Type != "kdeconnect.notification.action" {
+		t.Fatalf("packet type = %q, want kdeconnect.notification.action", pkt.Type)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		t.Fatalf("unmarshal packet body failed: %v", err)
+	}
+	if body["key"] != "notif-99" {
+		t.Errorf("expected key=notif-99, got %q", body["key"])
+	}
+	if body["action"] != "Mark as read" {
+		t.Errorf("expected action=Mark as read, got %q", body["action"])
 	}
 }
 

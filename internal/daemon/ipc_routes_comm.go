@@ -89,5 +89,24 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 				return ipc.Response{OK: true}
 			})
 		})
+		handler.Register(ipc.CmdNotifyAction, func(req ipc.Request) ipc.Response {
+			var p ipc.NotifyActionPayload
+			return deviceRoute(req, &p, devices, plugins, "Notification", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
+				notifID := p.Key
+				if notifID == "" {
+					notifID = p.NotificationID
+				}
+				if notifID == "" {
+					return ipc.Response{OK: false, Error: "missing notification id"}
+				}
+				if p.Action == "" {
+					return ipc.Response{OK: false, Error: "missing action"}
+				}
+				if err := pl.(*notification.NotificationPlugin).TriggerAction(dev, notifID, p.Action); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				return ipc.Response{OK: true}
+			})
+		})
 	}
 }

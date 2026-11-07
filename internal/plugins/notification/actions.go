@@ -17,6 +17,18 @@ func (p *NotificationPlugin) RequestReply(dev device.Sender, replyID, message st
 	return dev.Send(pkt)
 }
 
+// TriggerAction activates a notification action on the remote device.
+func (p *NotificationPlugin) TriggerAction(dev device.Sender, key, action string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.notification.action", map[string]string{
+		"key":    key,
+		"action": action,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}
+
 // Dismiss asks the phone to clear the notification with the given ID and
 // closes the matching desktop popup, if one is tracked.
 func (p *NotificationPlugin) Dismiss(dev device.Sender, id string) error {
