@@ -97,21 +97,3 @@ func (p *BatteryPlugin) handleThreshold(dev device.Peer, body BatteryBody) {
 		})
 	}
 }
-
-// OnConnect sends our local battery state if available.
-func (p *BatteryPlugin) OnConnect(dev device.Peer) {
-	charge, charging, err := readLocalBattery()
-	if err != nil {
-		p.logger.Debug("local battery unavailable on connect", log.Error(err))
-		return
-	}
-	pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
-		CurrentCharge: charge,
-		IsCharging:    charging,
-	})
-	if err == nil {
-		_ = dev.Send(pkt)
-	}
-}
-
-func (p *BatteryPlugin) OnDisconnect(_ device.Peer) {}

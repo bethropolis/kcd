@@ -2,8 +2,6 @@ package sms
 
 import (
 	"crypto/tls"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -11,12 +9,9 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 )
-
-var _ plugin.Plugin = (*SMSPlugin)(nil)
 
 const (
 	PacketTypeSMSMessages       = "kdeconnect.sms.messages"
@@ -62,54 +57,6 @@ type Options struct {
 	CacheDir      string
 	Sidechannel   transport.SidechannelOptions
 	Notifications config.NotificationConfig
-}
-
-func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...Options) *SMSPlugin {
-	var opts Options
-	if len(options) > 0 {
-		opts = options[0]
-	}
-	cacheDir := opts.CacheDir
-	if cacheDir == "" {
-		cacheDir = filepath.Join(os.TempDir(), "kcd", "sms-attachments")
-	}
-	_ = os.MkdirAll(cacheDir, 0700)
-
-	p := &SMSPlugin{
-		sidechannel:   opts.Sidechannel,
-		notifications: opts.Notifications,
-		cfg:           cfg,
-		bus:           bus,
-		tlsConfig:     tlsConfig,
-		logger:        logger.With(log.String("plugin", "sms")),
-		cacheDir:      cacheDir,
-		devices:       make(map[string]device.Peer),
-		armedAt:       make(map[string]time.Time),
-	}
-
-	// Arming is owner-gated: the phone is only asked to push while a client
-	// is watching sms.incoming, or when always_arm is set.
-	if bus != nil {
-		bus.OnSubscriberChange(p.syncArming)
-	}
-
-	return p
-}
-
-func (p *SMSPlugin) Name() string           { return "SMS" }
-func (p *SMSPlugin) Timeout() time.Duration { return 5 * time.Second }
-
-func (p *SMSPlugin) IncomingTypes() []string {
-	return []string{PacketTypeSMSMessages, PacketTypeSMSAttachmentFile}
-}
-
-func (p *SMSPlugin) OutgoingTypes() []string {
-	return []string{
-		PacketTypeSMSRequest,
-		PacketTypeSMSRequestConvs,
-		PacketTypeSMSRequestConv,
-		PacketTypeSMSRequestAtt,
-	}
 }
 
 // --- Packet body types -------------------------------------------------------

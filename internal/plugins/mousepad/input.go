@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/bendahl/uinput"
-	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/protocol"
 )
 
 func (p *MousepadPlugin) handleMove(body MousepadBody) {
@@ -246,12 +244,3 @@ func (p *MousepadPlugin) runCmd(name string, arg ...string) {
 
 // inputCommandTimeout bounds a stuck display-server tool without interrupting a normal input action.
 const inputCommandTimeout = 2 * time.Second
-
-// OnConnect explicitly tells the Android app that this device supports Keyboard input.
-// Without this, the Android app will not show the keyboard icon in the Remote Input UI.
-func (p *MousepadPlugin) OnConnect(dev device.Peer) {
-	pkt, _ := protocol.NewPacket("kdeconnect.mousepad.keyboardstate", map[string]bool{"state": true})
-	dev.Send(pkt)
-}
-
-func (p *MousepadPlugin) OnDisconnect(_ device.Peer) {}

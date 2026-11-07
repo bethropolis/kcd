@@ -6,19 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/sysexec"
 	"github.com/bethropolis/kcd/internal/transport"
 )
-
-var _ plugin.Plugin = (*NotificationPlugin)(nil)
 
 // NotificationPlugin handles incoming notifications and displays them on the desktop.
 type NotificationPlugin struct {
@@ -36,53 +31,6 @@ type NotificationPlugin struct {
 	newExec        func(ctx context.Context, name string, args ...string) *exec.Cmd
 	popups         config.PopupsConfig
 	backend        string
-}
-
-// NewNotificationPlugin creates a NotificationPlugin; nil tlsConfig disables
-// icon fetching over the side-channel.
-func NewNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, options ...transport.SidechannelOptions) *NotificationPlugin {
-	popups := config.PopupsConfig{}
-	popups.Defaults()
-	return newNotificationPlugin(cfg, bus, tlsConfig, logger, popups, "auto", options...)
-}
-
-// NewNotificationPluginWithPopup creates a notification plugin with popup policy.
-func NewNotificationPluginWithPopup(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, popups config.PopupsConfig, backend string, options ...transport.SidechannelOptions) *NotificationPlugin {
-	return newNotificationPlugin(cfg, bus, tlsConfig, logger, popups, backend, options...)
-}
-
-func newNotificationPlugin(cfg config.NotificationPluginConfig, bus *events.Bus, tlsConfig *tls.Config, logger log.Logger, popups config.PopupsConfig, backend string, options ...transport.SidechannelOptions) *NotificationPlugin {
-	var sidechannel transport.SidechannelOptions
-	if len(options) > 0 {
-		sidechannel = options[0]
-	}
-	p := &NotificationPlugin{
-		sidechannel: sidechannel,
-		cfg:         cfg,
-		bus:         bus,
-		tlsConfig:   tlsConfig,
-		logger:      logger.With(log.String("plugin", "notification")),
-		newExec:     exec.CommandContext,
-		popups:      popups,
-		backend:     backend,
-	}
-
-	// Probe --print-id support by checking --help output.
-	// This is side-effect-free and immune to version string format changes.
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer probeCancel()
-	if out, err := sysexec.Run(probeCtx, "notify-send", "--help"); err == nil {
-		p.canCloseNotifs = strings.Contains(string(out), "--print-id")
-	}
-
-	// Create a persistent temp directory for icon files so they survive
-	// long enough for the notification daemon to read them.
-	baseDir := cfg.IconCacheDir
-	if dir, err := os.MkdirTemp(baseDir, "kcd-notif-icons-*"); err == nil {
-		p.iconDir = dir
-	}
-
-	return p
 }
 
 // Close removes the icon temp directory. Call when the plugin is no longer needed.
@@ -144,19 +92,6 @@ type NotificationBody struct {
 	Silent         bool                  `json:"silent,omitempty"`
 	RequestReplyId string                `json:"requestReplyId,omitempty"`
 	PayloadHash    string                `json:"payloadHash,omitempty"`
-}
-
-func (p *NotificationPlugin) Name() string           { return "Notification" }
-func (p *NotificationPlugin) Timeout() time.Duration { return 5 * time.Second }
-func (p *NotificationPlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.notification"}
-}
-func (p *NotificationPlugin) OutgoingTypes() []string {
-	return []string{
-		"kdeconnect.notification.reply",
-		"kdeconnect.notification.request",
-		"kdeconnect.notification.action",
-	}
 }
 
 // nonAlphaNumeric sanitises app names to be safe for exec / notify-send args.

@@ -90,36 +90,3 @@ func (p *ClipboardPlugin) readClipboard() string {
 	}
 	return string(out)
 }
-
-func (p *ClipboardPlugin) OnConnect(dev device.Peer) {
-	p.mu.Lock()
-	send := p.send
-	p.mu.Unlock()
-	if !p.pushOnConnect || !send {
-		return
-	}
-	content := p.readClipboard()
-	if content == "" {
-		return
-	}
-
-	p.mu.Lock()
-	p.lastPushedContent = content
-	ts := p.localChangedAt
-	p.mu.Unlock()
-
-	body := ClipboardBody{
-		Content:   content,
-		Timestamp: ts,
-	}
-	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", body)
-	if err != nil {
-		p.logger.Debug("clipboard: OnConnect: failed to build packet", log.Error(err))
-		return
-	}
-	// Best-effort — device may still be completing the TLS handshake.
-	_ = dev.Send(pkt)
-}
-
-func (p *ClipboardPlugin) OnDisconnect(dev device.Peer) {
-}

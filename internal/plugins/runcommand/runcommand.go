@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
@@ -174,9 +175,9 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Peer, pkt *pro
 			}
 
 			// Do not send notifications for massive outputs (e.g. log dumps)
-			if len(text) > 4096 {
+			if len(text) > streamNotifMaxBytes {
 				p.logger.Warn("command output too large for notification, truncating", log.Int("len", len(text)))
-				text = text[:4000] + "\n...[output truncated]"
+				text = truncateRuneSafe(text, streamNotifMaxBytes) + "\n...[output truncated]"
 			}
 
 			// Sent as a notification: Android uses appName/ticker as title/body,
@@ -266,4 +267,16 @@ func (p *RunCommandPlugin) OnConnect(dev device.Peer) {
 // does not outlive the connection that asked for it.
 func (p *RunCommandPlugin) OnDisconnect(dev device.Peer) {
 	p.stopAll(dev.ID())
+}
+
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for i := maxBytes; i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	return ""
 }

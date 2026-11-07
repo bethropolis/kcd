@@ -132,24 +132,3 @@ func (p *SMSPlugin) syncArming() {
 		}
 	}()
 }
-
-// --- Lifecycle ---------------------------------------------------------------
-
-// OnConnect tracks the device and re-arms it: the phone's arm flag survives
-// reconnects but not app restarts, so per-connection arming is the only recovery.
-func (p *SMSPlugin) OnConnect(dev device.Peer) {
-	p.mu.Lock()
-	p.devices[dev.ID()] = dev
-	delete(p.armedAt, dev.ID())
-	p.mu.Unlock()
-
-	p.syncArming()
-}
-
-// OnDisconnect forgets the device so the next connect re-arms it.
-func (p *SMSPlugin) OnDisconnect(dev device.Peer) {
-	p.mu.Lock()
-	delete(p.devices, dev.ID())
-	delete(p.armedAt, dev.ID())
-	p.mu.Unlock()
-}

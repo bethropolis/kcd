@@ -153,3 +153,18 @@ func (p *MPRISPlugin) IncomingTypes() []string {
 func (p *MPRISPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.mpris", "kdeconnect.mpris.request"}
 }
+
+func (p *MPRISPlugin) OnConnect(dev device.Peer) {
+	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
+	p.requestReconcile()
+	go p.requestPlayerListPeriodic(dev)
+}
+
+func (p *MPRISPlugin) OnDisconnect(dev device.Peer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.devices, dev.ID())
+	delete(p.remoteStates, dev.ID())
+	delete(p.remoteStateTimes, dev.ID())
+	delete(p.positionTrackers, dev.ID())
+}

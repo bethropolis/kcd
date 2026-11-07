@@ -90,29 +90,5 @@ func credentialsComplete(body SftpBody) bool {
 	return err == nil && body.IP != "" && port > 0 && port <= 65535 && body.User != "" && body.Password != ""
 }
 
-func (p *SftpPlugin) OnConnect(_ device.Peer) {}
-
-func (p *SftpPlugin) OnDisconnect(dev device.Peer) {
-	deviceID := dev.ID()
-	// Via MountedPath, so a mount adopted from the kernel is cleaned up too
-	// rather than surviving every disconnect untouched.
-	if p.MountedPath(deviceID) != "" {
-		p.logger.Info("device disconnected, cleaning up SFTP mount",
-			log.String("device_id", deviceID),
-		)
-		if err := p.Unmount(deviceID); err != nil {
-			p.logger.Warn("failed to unmount on disconnect",
-				log.String("device_id", deviceID),
-				log.Error(err),
-			)
-		}
-	}
-
-	// Evict cached credentials to prevent slow memory leak.
-	p.mu.Lock()
-	delete(p.lastBody, deviceID)
-	p.mu.Unlock()
-}
-
 // mountIsReadOnly reports whether the device's existing mount is read-only.
 // False for a mount kcd did not create or no longer tracks.

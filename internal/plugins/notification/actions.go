@@ -50,6 +50,3 @@ func (p *NotificationPlugin) Dismiss(dev device.Peer, id string) error {
 	}
 	return nil
 }
-
-func (p *NotificationPlugin) OnConnect(_ device.Peer)    {}
-func (p *NotificationPlugin) OnDisconnect(_ device.Peer) {}

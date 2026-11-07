@@ -130,6 +130,3 @@ func (p *SharePlugin) SendURL(ctx context.Context, dev device.Peer, url string) 
 	}
 	return dev.Send(pkt)
 }
-
-func (p *SharePlugin) OnConnect(dev device.Peer)    {}
-func (p *SharePlugin) OnDisconnect(dev device.Peer) {}

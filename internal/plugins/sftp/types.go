@@ -6,15 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 )
-
-var _ plugin.Plugin = (*SftpPlugin)(nil)
 
 // SftpPlugin handles KDE Connect SFTP negotiation and optional sshfs mounting.
 type SftpPlugin struct {
@@ -32,19 +28,6 @@ type SftpPlugin struct {
 	// already fired for, so it is logged once per location per run.
 	warnedDirs map[string]bool
 	mountPIDs  map[string]int // deviceID -> sshfs PID for graceful shutdown
-}
-
-func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *SftpPlugin {
-	return &SftpPlugin{
-		cfg:           cfg,
-		bus:           bus,
-		logger:        logger.With(log.String("plugin", "sftp")),
-		lastBody:      make(map[string]SftpBody),
-		pending:       make(map[string]chan sftpResult),
-		mountPoints:   make(map[string]string),
-		mountReadOnly: make(map[string]bool),
-		mountPIDs:     make(map[string]int),
-	}
 }
 
 // SftpBody matches the body of a kdeconnect.sftp packet sent by the Android app.
@@ -94,11 +77,6 @@ type SftpInfo struct {
 	Mounted    bool   `json:"mounted"`
 	MountPoint string `json:"mountPoint,omitempty"`
 }
-
-func (p *SftpPlugin) Name() string            { return "SFTP" }
-func (p *SftpPlugin) Timeout() time.Duration  { return 5 * time.Second }
-func (p *SftpPlugin) IncomingTypes() []string { return []string{"kdeconnect.sftp"} }
-func (p *SftpPlugin) OutgoingTypes() []string { return []string{"kdeconnect.sftp.request"} }
 
 // mountPointFor derives the mount path per device (identifiable after a
 // restart); empty MountDir means the default, never a tmp dir.

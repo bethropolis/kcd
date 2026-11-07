@@ -1,16 +1,11 @@
 package battery
 
 import (
-	"time"
-
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
-
-var _ plugin.Plugin = (*BatteryPlugin)(nil)
 
 // ThresholdEvent values from the KDE Connect protocol.
 const (
@@ -28,21 +23,6 @@ type BatteryPlugin struct {
 	exec          *sysexec.Exec
 }
 
-// NewBatteryPlugin creates a BatteryPlugin.
-func NewBatteryPlugin(cfg config.BatteryConfig, bus *events.Bus, logger log.Logger, notifications ...config.NotificationConfig) *BatteryPlugin {
-	var notificationCfg config.NotificationConfig
-	if len(notifications) > 0 {
-		notificationCfg = notifications[0]
-	}
-	return &BatteryPlugin{
-		notifications: notificationCfg,
-		cfg:           cfg,
-		bus:           bus,
-		logger:        logger.With(log.String("plugin", "battery")),
-		exec:          sysexec.New(nil),
-	}
-}
-
 // BatteryBody represents a kdeconnect.battery body. Request-only asks the peer
 // to report; it is not a state update and must never touch stored charge.
 type BatteryBody struct {
@@ -50,13 +30,4 @@ type BatteryBody struct {
 	IsCharging     bool `json:"isCharging"`
 	ThresholdEvent int  `json:"thresholdEvent"`
 	Request        bool `json:"request,omitempty"`
-}
-
-func (p *BatteryPlugin) Name() string           { return "Battery" }
-func (p *BatteryPlugin) Timeout() time.Duration { return 5 * time.Second }
-func (p *BatteryPlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
-}
-func (p *BatteryPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.battery"}
 }

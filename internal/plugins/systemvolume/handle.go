@@ -74,18 +74,3 @@ func (p *SystemVolumePlugin) sendSinks(dev device.Peer, sinks []SinkInfo) {
 		p.logger.Error("systemvolume: failed to send sink list", log.Error(err))
 	}
 }
-
-func (p *SystemVolumePlugin) OnConnect(dev device.Peer) {
-	if !p.audio.Available() {
-		return
-	}
-	go func() {
-		sinks := p.getSinks()
-		pkt, err := protocol.NewPacket("kdeconnect.systemvolume", sinkListBody{SinkList: sinks})
-		if err != nil {
-			return
-		}
-		_ = dev.Send(pkt)
-	}()
-}
-func (p *SystemVolumePlugin) OnDisconnect(dev device.Peer) {}
