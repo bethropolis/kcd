@@ -64,7 +64,9 @@ func AcceptAndSend(ln net.Listener, path string, tlsConfig *tls.Config, expected
 	if onProgress != nil {
 		src = io.TeeReader(f, &transferProgress{total: stat.Size(), fn: onProgress})
 	}
-	if _, err := io.Copy(dst, src); err != nil {
+	buf := acquireTransferBuf()
+	defer releaseTransferBuf(buf)
+	if _, err := io.CopyBuffer(dst, src, *buf); err != nil {
 		return fmt.Errorf("transport: send payload: %w", err)
 	}
 	return nil

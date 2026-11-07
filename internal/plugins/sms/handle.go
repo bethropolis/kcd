@@ -1,6 +1,7 @@
 package sms
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,7 +34,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Peer, pkt *prot
 	}
 
 	var batch SMSMessagesPacket
-	if err := json.Unmarshal(pkt.Body, &batch); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(pkt.Body)).Decode(&batch); err != nil {
 		return fmt.Errorf("sms: unmarshal messages batch: %w", err)
 	}
 

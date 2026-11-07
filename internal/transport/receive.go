@@ -65,7 +65,9 @@ func ReceiveToFile(ctx context.Context, ip net.IP, port int, size int64, dest st
 	if progress != nil {
 		src = io.TeeReader(reader, progress)
 	}
-	n, copyErr := io.Copy(tmp, src)
+	buf := acquireTransferBuf()
+	defer releaseTransferBuf(buf)
+	n, copyErr := io.CopyBuffer(tmp, src, *buf)
 	if copyErr == nil && n > limit {
 		copyErr = fmt.Errorf("payload exceeds limit %d", limit)
 	}

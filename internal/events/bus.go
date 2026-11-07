@@ -138,12 +138,12 @@ func (s *Subscriber) matches(typ EventType) bool {
 }
 
 func isOptInOnly(typ EventType) bool {
-	for _, t := range OptInOnly() {
-		if t == typ {
-			return true
-		}
+	switch typ {
+	case TypeSMSIncoming, TypeSMSAttachment, TypePrompt:
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // Bus distributes events to multiple subscribers.

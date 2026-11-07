@@ -177,17 +177,10 @@ func discardLine(r *bufio.Reader, chunk []byte, err error) {
 
 // WritePacket serializes a Packet as a single line of JSON followed by \n.
 func WritePacket(w io.Writer, p *Packet) error {
-	data, err := json.Marshal(p)
-	if err != nil {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(p); err != nil {
 		return fmt.Errorf("protocol: marshal: %w", err)
-	}
-
-	// Append newline — packets are line-delimited.
-	data = append(data, '\n')
-
-	_, err = w.Write(data)
-	if err != nil {
-		return fmt.Errorf("protocol: write: %w", err)
 	}
 	return nil
 }

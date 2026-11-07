@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -67,6 +69,10 @@ func buildIdentity(cfg *config.Config, incoming, outgoing []string) (*protocol.P
 }
 
 func Run(ctx context.Context, cfg *config.Config) error {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(64 * 1024 * 1024)
+	}
+
 	startedAt := time.Now()
 
 	logger, err := log.New(cfg.LogLevel)

@@ -3,8 +3,11 @@ package transport
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"fmt"
 	"net"
 	"time"
 
@@ -14,18 +17,23 @@ import (
 // Conn wraps a tls.Conn to provide packet-level reads and writes.
 // It maintains a single bufio.Reader to avoid per-packet allocations.
 type Conn struct {
-	tlsConn *tls.Conn
-	reader  *bufio.Reader
-	addr    net.Addr
+	tlsConn  *tls.Conn
+	reader   *bufio.Reader
+	addr     net.Addr
+	writeBuf bytes.Buffer
+	encoder  *json.Encoder
 }
 
 // NewConn constructs a new Conn from a tls.Conn.
 func NewConn(tc *tls.Conn) *Conn {
-	return &Conn{
+	c := &Conn{
 		tlsConn: tc,
 		reader:  bufio.NewReader(tc),
 		addr:    tc.RemoteAddr(),
 	}
+	c.encoder = json.NewEncoder(&c.writeBuf)
+	c.encoder.SetEscapeHTML(false)
+	return c
 }
 
 // ReadPacket reads a single KDE Connect packet from the TLS connection.
@@ -35,7 +43,14 @@ func (c *Conn) ReadPacket() (*protocol.Packet, error) {
 
 // WritePacket writes a single KDE Connect packet to the TLS connection.
 func (c *Conn) WritePacket(p *protocol.Packet) error {
-	return protocol.WritePacket(c.tlsConn, p)
+	c.writeBuf.Reset()
+	if err := c.encoder.Encode(p); err != nil {
+		return fmt.Errorf("protocol: marshal: %w", err)
+	}
+	if _, err := c.tlsConn.Write(c.writeBuf.Bytes()); err != nil {
+		return fmt.Errorf("protocol: write: %w", err)
+	}
+	return nil
 }
 
 // Close closes the underlying TLS connection.
