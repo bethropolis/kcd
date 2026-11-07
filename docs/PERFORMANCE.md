@@ -19,7 +19,7 @@ been collected on a live daemon.
 | Scenario | Before | After | Date, host, build, notes |
 |---|---|---|---|
 | A | Pending live measurement | Pending live measurement | |
-| B | Pending live measurement | Pending live measurement | |
+| B | Standing wakeups, discovery broadcast spin | Mean CPU: 0.02%, Peak: 2.0%, Total: ~870ms user+kernel, RSS: 8.9 MiB (peak 17.5 MiB), Ctx switch: 0.0/s | 2026-11-07, Linux 7.2.15-1-omarchy, dev/next (5a8e84c), ryuk continuous 1h 4m (3,864 samples) |
 | C | Pending live measurement | Pending live measurement | |
 | D | Pending live measurement | Pending live measurement | |
 | E | Pending live measurement | Pending live measurement | |
