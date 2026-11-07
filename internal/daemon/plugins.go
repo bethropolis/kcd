@@ -50,7 +50,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 		plugins.Register(battery.NewBatteryPlugin(cfg.Battery, bus, logger, cfg.Notifications))
 	}
 	if cfg.Plugins.Notification {
-		plugins.Register(notification.NewNotificationPluginWithPopup(cfg.Notification, bus, tlsCfg, logger, cfg.Popups, cfg.Backends.Notify, sidechannel))
+		notif := notification.NewNotificationPluginWithPopup(cfg.Notification, bus, tlsCfg, logger, cfg.Popups, cfg.Backends.Notify, sidechannel)
+		notif.SetFilters(cfg.Notifications.Filters())
+		plugins.Register(notif)
 	}
 	if cfg.Plugins.Clipboard {
 		clipboardPlugin := clipboard.NewClipboardPlugin(tlsCfg, logger, cfg.Clipboard.PushOnConnect, sidechannel)

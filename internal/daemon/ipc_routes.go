@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,9 +15,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/log"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/plugins/mpris"
-	"github.com/bethropolis/kcd/internal/plugins/notification"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
@@ -30,7 +27,11 @@ func eventNames(types []events.EventType) []string {
 	return names
 }
 
-func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device.Registry, plugins *plugin.Registry, bc *discovery.BroadcasterController, ctx context.Context, tlsCfg *tls.Config, logger log.Logger, startedAt time.Time) {
+func registerIPCRoutes(handler *ipc.Handler, env *transportEnv, bc *discovery.BroadcasterController, ctx context.Context, startedAt time.Time) {
+	cfg := env.cfg
+	devices := env.devices
+	plugins := env.plugins
+	logger := env.logger
 	handler.Register(ipc.CmdConfigGet, func(req ipc.Request) ipc.Response {
 		var payload ipc.ConfigGetPayload
 		if len(req.Payload) > 0 {
@@ -102,11 +103,6 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		}
 		return ipc.Response{OK: true, Data: data}
 	})
-	if cfg.Plugins.Notification {
-		if notifPl, ok := plugins.GetByName("Notification"); ok {
-			notifPl.(*notification.NotificationPlugin).SetFilters(cfg.Notifications.Filters())
-		}
-	}
 
 	if cfg.Plugins.Battery {
 		registerBatteryRoutes(handler, devices, plugins)
@@ -149,14 +145,9 @@ func registerIPCRoutes(handler *ipc.Handler, cfg *config.Config, devices *device
 		}
 
 		go func() {
-			incomingCaps, outgoingCaps := plugins.Capabilities()
-			identityPkt, err := buildIdentity(cfg, incomingCaps, outgoingCaps)
-			if err != nil {
-				return
-			}
 			// No target ID: the peer is whoever answers here. Empty omits
 			// targetDeviceId; stock peers drop misaddressed identities.
-			DialDevice(ctx, addr, cfg.TCPPort, "", protocol.ProtocolVersion, identityPkt, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
+			env.Dial(ctx, addr, env.cfg.TCPPort, "", protocol.ProtocolVersion, true)
 		}()
 
 		return ipc.Response{OK: true}

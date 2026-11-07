@@ -18,6 +18,24 @@ import (
 
 // Returning an error ensures the caller can close the connection if it fails mid-setup.
 func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *protocol.Packet, preTLS *protocol.IdentityBody, expectedPeerID string, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, cfg *tls.Config, logger log.Logger, opts *config.Config) error {
+	env := &transportEnv{
+		tls:      cfg,
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  localDeviceID,
+		cfg:      opts,
+		logger:   logger,
+	}
+	return env.HandleNewConnection(ctx, conn, preTLS, expectedPeerID)
+}
+
+func (env *transportEnv) HandleNewConnection(ctx context.Context, conn *transport.Conn, preTLS *protocol.IdentityBody, expectedPeerID string) error {
+	opts := env.cfg
+	identity := env.identity
+	devices := env.devices
+	plugins := env.plugins
+	logger := env.logger
 	if err := conn.SetReadDeadline(time.Now().Add(config.Duration(opts.Network.HandshakeTimeout))); err != nil {
 		return fmt.Errorf("set handshake read deadline: %w", err)
 	}
@@ -137,7 +155,7 @@ func handleNewConnection(ctx context.Context, conn *transport.Conn, identity *pr
 				log.String("device_id", sender.ID()))
 			return
 		}
-		go reconnectWithBackoff(ctx, sender, lastIP, identity, cfg, devices, plugins, localDeviceID, logger, opts)
+		go env.ReconnectWithBackoff(ctx, sender, lastIP)
 	}
 
 	dev.Connect(ctx, conn, dispatch, onConnect, onDisconnect)

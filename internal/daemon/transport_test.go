@@ -362,7 +362,16 @@ func TestInboundTargetDeviceIDMismatchDropped(t *testing.T) {
 	devices := device.NewRegistry(nil)
 	plugins := plugin.NewRegistry(logger)
 
-	go runTransport(ctx, &tls.Config{}, nil, identity, devices, plugins, "local-dev-id", logger, cfg, l)
+	env := &transportEnv{
+		tls:      &tls.Config{},
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  "local-dev-id",
+		cfg:      cfg,
+		logger:   logger,
+	}
+	go runTransport(ctx, env, nil, l)
 
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))

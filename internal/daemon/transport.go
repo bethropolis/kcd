@@ -14,7 +14,6 @@ import (
 	"github.com/bethropolis/kcd/internal/discovery"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/netutil"
-	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 )
@@ -84,11 +83,14 @@ func updateIdentityTCPPort(pkt *protocol.Packet, port int) error {
 	return nil
 }
 
-func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.BroadcasterController, identity *protocol.Packet, devices *device.Registry, plugins *plugin.Registry, localDeviceID string, logger log.Logger, opts *config.Config, listener ...*transport.Listener) {
-	var tcpListener *transport.Listener
-	if len(listener) > 0 && listener[0] != nil {
-		tcpListener = listener[0]
-	} else {
+func runTransport(ctx context.Context, env *transportEnv, bc *discovery.BroadcasterController, tcpListener *transport.Listener) {
+	opts := env.cfg
+	logger := env.logger
+	identity := env.identity
+	devices := env.devices
+	localDeviceID := env.localID
+
+	if tcpListener == nil {
 		var err error
 		tcpListener, err = bindTCPListener(ctx, opts, logger)
 		if err != nil {
@@ -188,7 +190,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 					if p := dev.LastPort(); validDialPort(p) {
 						port = p
 					}
-					go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+					go env.Dial(ctx, ip, port, body.DeviceID, body.ProtocolVersion, false)
 				}
 			} else if dev.IsConnected() {
 				if currIP := dev.RemoteIP(); currIP == nil || !currIP.Equal(ip) {
@@ -199,7 +201,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 						if p := dev.LastPort(); validDialPort(p) {
 							port = p
 						}
-						go DialDevice(ctx, ip, port, body.DeviceID, body.ProtocolVersion, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+						go env.Dial(ctx, ip, port, body.DeviceID, body.ProtocolVersion, false)
 					}
 				}
 			}
@@ -209,7 +211,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				dev.PokeReconnect()
 				if !dev.IsConnected() && dev.TryReconnect() {
 					dev.ResetReconnectAttempt()
-					go reconnectWithBackoff(ctx, dev, ip, identity, cfg, devices, plugins, localDeviceID, logger, opts)
+					go env.ReconnectWithBackoff(ctx, dev, ip)
 				}
 			}
 			return
@@ -228,7 +230,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 		if pairingMode || dev.ConsumePairDial() {
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, true, opts)
+				env.Dial(ctx, targetIP, targetPort, targetID, targetProto, true)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 			return
 		}
@@ -240,7 +242,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 			}
 			// Spawn goroutine to prevent blocking the discovery listener
 			go func(targetIP net.IP, targetPort int, targetID string, targetProto int) {
-				DialDevice(ctx, targetIP, targetPort, targetID, targetProto, identity, cfg, devices, plugins, localDeviceID, logger, false, opts)
+				env.Dial(ctx, targetIP, targetPort, targetID, targetProto, false)
 			}(ip, tcpPort, body.DeviceID, body.ProtocolVersion)
 		}
 		// Already got its ephemeral dial this era: stay silent on further
@@ -317,7 +319,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				}
 				protocol.ReleasePacket(preTlsPkt)
 
-				tlsConn := tls.Client(newConn, cfg)
+				tlsConn := tls.Client(newConn, env.tls)
 				handshakeCtx, cancel := context.WithTimeout(ctx, config.Duration(opts.Network.HandshakeTimeout))
 				defer cancel()
 				if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
@@ -327,7 +329,7 @@ func runTransport(ctx context.Context, cfg *tls.Config, bc *discovery.Broadcaste
 				transConn := transport.NewConn(tlsConn)
 				c = nil // Prevent defer from closing the active connection
 
-				if err := handleNewConnection(ctx, transConn, identity, &preBody, "", devices, plugins, localDeviceID, cfg, logger, opts); err != nil {
+				if err := env.HandleNewConnection(ctx, transConn, &preBody, ""); err != nil {
 					logger.Debug("new connection setup failed", log.Error(err))
 					transConn.Close()
 				}

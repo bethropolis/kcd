@@ -4,11 +4,6 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
-	"net"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/cert"
@@ -20,8 +15,6 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/plugins/notification"
-	"github.com/bethropolis/kcd/internal/plugins/runcommand"
 	"github.com/bethropolis/kcd/internal/plugins/sftp"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -98,33 +91,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// 2. Event Bus & Device Registry
 	bus := events.NewBus(logger)
 	devices := device.NewRegistry(bus)
-	statePath := cfg.StatePath()
-	stateLock, err := config.AcquireStateLock(statePath)
+
+	sm, requestSave, saveDevices, err := initStateManager(ctx, cfg, devices, logger)
 	if err != nil {
 		return err
-	}
-	defer stateLock.Close() //nolint:errcheck
-	if err := devices.Load(statePath, logger); err != nil {
-		logger.Warn("failed to load devices", log.Error(err))
-	}
-
-	pruneThreshold, _ := time.ParseDuration(cfg.PruneStaleThreshold)
-	if pruned := devices.Prune(pruneThreshold); pruned > 0 {
-		logger.Info("pruned stale devices on startup", log.Int("count", pruned))
-	}
-
-	// Pair callbacks only enqueue writes because Handle must never wait on disk.
-	saveQueue := make(chan struct{}, 1)
-	saveWorkerDone := make(chan struct{})
-	requestSave := func() {
-		select {
-		case saveQueue <- struct{}{}:
-		default:
-		}
-	}
-	saveDevices := func() error {
-		devices.Prune(pruneThreshold)
-		return devices.Save(statePath)
 	}
 
 	// 3. Plugin Registry
@@ -153,22 +123,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	go func() {
-		defer close(saveWorkerDone)
-		for {
-			select {
-			case <-saveQueue:
-				if err := saveDevices(); err != nil {
-					logger.Error("device state save failed", log.Error(err))
-				}
-			case <-ctx.Done():
-				if err := saveDevices(); err != nil {
-					logger.Error("device state save failed", log.Error(err))
-				}
-				return
-			}
-		}
-	}()
+	env := &transportEnv{
+		tls:      tlsCfg,
+		identity: identity,
+		devices:  devices,
+		plugins:  plugins,
+		localID:  cfg.DeviceID,
+		cfg:      cfg,
+		logger:   logger,
+	}
 
 	bc := discovery.NewBroadcasterController(identity, protocol.DefaultDiscoveryPort, config.Duration(cfg.Discovery.BroadcastInterval), logger, devices.AllPairedDevicesConnected, config.Duration(cfg.Discovery.BroadcastIdleInterval))
 	go discovery.WatchNetworkChanges(ctx, bc.ResetBackoff)
@@ -230,54 +193,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	// Explicit `kcd pair <id>` dials on demand: background dial never touches
-	// strangers, so arm a one-shot flag and dial now if last-seen is known.
-	pairDialHook := func(deviceID string) error {
-		dev, ok := devices.Get(deviceID)
-		if !ok {
-			return fmt.Errorf("device not found")
-		}
-		if dev.State() == device.StatePaired {
-			return fmt.Errorf("device already paired")
-		}
-		dev.RequestPairDial(config.Duration(cfg.Pairing.IntentTTL))
-		ip, port := dev.DiscoveryAddr()
-		if ip == nil {
-			// No address yet — the flagged dial fires on the next
-			// broadcast from the phone; tell the user to retry then.
-			return fmt.Errorf("device address unknown yet, wait for discovery and retry")
-		}
-		if port == 0 {
-			port = cfg.TCPPort
-		}
-		go func() {
-			DialDevice(ctx, ip, port, deviceID, protocol.ProtocolVersion, identity, tlsCfg, devices, plugins, cfg.DeviceID, logger, true, cfg)
-			if !dev.IsConnected() {
-				logger.Warn("on-demand pair dial failed", log.String("device_id", deviceID))
-				return
-			}
-			// A successful immediate dial consumes the one-shot trigger; on
-			// failure it stays for the next sighting. PairDialActive outlives it.
-			dev.ConsumePairDial()
-			if dev.State() == device.StatePairRequestedByPeer {
-				if err := pairPlugin.AcceptPairing(dev); err != nil {
-					logger.Warn("auto-accept on pair dial failed", log.Error(err))
-				}
-			} else if dev.State() != device.StatePaired {
-				// No CLI is attached to this dial, so the verification code
-				// only reaches the log; RequestPairing already logs it.
-				if _, err := pairPlugin.RequestPairing(dev); err != nil {
-					logger.Warn("pair request on dial failed", log.Error(err))
-				}
-			}
-		}()
-		return nil
-	}
-
 	// 5. IPC Server
+	pairDialHook := makePairDialHook(ctx, env, pairPlugin)
 	handler := ipc.NewHandler(devices, plugins, bus)
-	registerPairRoutes(handler, cfg, devices, plugins, bus, saveDevices, pruneThreshold, pairDialHook)
-	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
+	registerPairRoutes(handler, cfg, devices, plugins, bus, saveDevices, sm.pruneThreshold, pairDialHook)
+	registerIPCRoutes(handler, env, bc, ctx, startedAt)
 
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 
@@ -297,67 +217,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// 6. Transport Layer
-	go runTransport(ctx, tlsCfg, bc, identity, devices, plugins, cfg.DeviceID, logger, cfg, tcpListener)
+	go runTransport(ctx, env, bc, tcpListener)
 
-	if notifySocket := os.Getenv("NOTIFY_SOCKET"); notifySocket != "" {
-		addr := &net.UnixAddr{Name: notifySocket, Net: "unixgram"}
-		if strings.HasPrefix(notifySocket, "@") {
-			addr.Name = "\x00" + notifySocket[1:]
-		}
-		if conn, err := net.DialUnix("unixgram", nil, addr); err == nil {
-			_, _ = conn.Write([]byte("READY=1\n"))
-			conn.Close()
-		}
-	}
+	notifySystemdReady()
 
-	// Hot-reload on SIGHUP.
-	sighupCh := make(chan os.Signal, 1)
-	signal.Notify(sighupCh, syscall.SIGHUP)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-sighupCh:
-				logger.Info("SIGHUP received, reloading config")
-				newCfg, err := config.Load(cfg.ConfigPath)
-				if err != nil {
-					logger.Error("config reload failed", log.Error(err))
-					continue
-				}
-
-				// Reload RunCommand plugin commands.
-				if pl, ok := plugins.GetByName("RunCommand"); ok {
-					rc := pl.(*runcommand.RunCommandPlugin)
-					rc.SetCommands(newCfg.Commands, newCfg.CommandsPerDevice)
-					for _, dev := range devices.Connected() {
-						if err := rc.SendCommandList(dev); err != nil {
-							logger.Warn("failed to push commands on reload",
-								log.String("device_id", dev.ID()),
-								log.Error(err),
-							)
-						}
-					}
-					logger.Info("reloaded commands",
-						log.Int("global", len(newCfg.Commands)),
-						log.Int("per_device", len(newCfg.CommandsPerDevice)),
-					)
-				}
-
-				// Reload notification filters.
-				if pl, ok := plugins.GetByName("Notification"); ok {
-					pl.(*notification.NotificationPlugin).SetFilters(newCfg.Notifications.Filters())
-					logger.Info("reloaded notification filters")
-				}
-
-				// Reload log level.
-				logger.SetLevel(newCfg.LogLevel)
-			}
-		}
-	}()
+	watchConfigReload(ctx, cfg, devices, plugins, logger)
 
 	<-ctx.Done()
-	<-saveWorkerDone
+	sm.wait()
 
 	logger.Info("kcd daemon shutting down")
 
