@@ -94,7 +94,7 @@ Never violate these. If a change would break one, stop and reconsider the approa
 
 ## Daemon Startup Order
 
-`daemon.Run()` (`internal/daemon/daemon.go`) wires things in this order. Keep
+`daemon.Run()` (`internal/daemon/daemon.go`) wires things in this order (detailed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#9-daemon-lifecycle-internaldaemon)). Keep
 the order when modifying startup:
 
 1. Build the logger: `log.New(cfg.LogLevel)`.

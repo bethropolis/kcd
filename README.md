@@ -321,34 +321,14 @@ done
 
 ## Events
 
-`kcd watch --json` streams NDJSON events. All events include `type`, `timestamp` (RFC3339), and `deviceId` fields.
+`kcd watch --json` streams newline-delimited JSON events. All events include `type`, `timestamp` (RFC3339), and `deviceId` fields.
 
-| Event type | Payload fields | Description |
-|---|---|---|
-| `state.snapshot` | `devices[]` (enriched summaries, online and offline) | Full-state bootstrap, once per watch connection |
-| `device.added` | `name`, `type` | New device seen for the first time |
-| `device.removed` | — | Device unpaired and removed |
-| `device.connected` | `name`, `type` | TCP connection established |
-| `device.disconnected` | — | Connection dropped |
-| `pair.requested` | — | Phone sent a pairing request |
-| `pair.accepted` | — | Pairing completed on both sides |
-| `pair.rejected` | — | Pairing denied or cancelled |
-| `battery.update` | `charge`, `charging` | Battery reading received |
-| `battery.threshold` | `charge`, `charging`, `event` | Low (event=1) or full (event=2) |
-| `notification` | `appName`, `title`, `text`, `requestReplyId` | Phone notification forwarded |
-| `notification.canceled` | `id` | Phone dismissed a notification |
-| `share.progress` | `file`, `current`, `total` | File transfer in progress (~2/sec) |
-| `share.complete` | `file`, `path` | File transfer finished |
-| `share.text` | `text` | Plain text received |
-| `share.url` | `url` | URL received |
-| `ping.received` | — | Ping arrived |
-| `telephony.ringing` | `contactName`, `phoneNumber` | Incoming call |
-| `telephony.missed` | `contactName`, `phoneNumber` | Missed call |
-| `telephony.canceled` | — | Call ended |
-| `connectivity.update` | `signal`, `networkType` | Signal strength report |
-| `mpris.update` | `player`, `title`, `artist`, `album`, `isPlaying`, `pos`, `posAnchorMs`, `length`, `volume`, `albumArtUrl`, `artPending` | Phone now playing state changed |
-| `volume.update` | `name`, `volume`, `muted` | Desktop volume changed from phone |
-| `sftp.mount` | `uri`, `ip`, `port`, `user`, `password`, `path` | SFTP credentials received |
+Example events:
+- `battery.update`: Device battery charge level and charging status (`{"charge": 85, "charging": true}`).
+- `notification`: Incoming phone notifications forwarded to the desktop (`{"appName": "Signal", "title": "...", "text": "..."}`).
+- `share.progress`: Progress updates during active side-channel file transfers (`{"file": "photo.jpg", "current": 1048576, "total": 4194304}`).
+
+For the full catalog of event types, payload schemas, and watch filter options, see [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md#5-events).
 
 ---
 

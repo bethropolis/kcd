@@ -305,11 +305,25 @@ Plugins depend on these neutral packages, never on each other.
 | `ping` | `kdeconnect.ping` | Fires `ping.received`; can be sent outbound |
 | `runcommand` | `kdeconnect.runcommand`, `kdeconnect.runcommand.output` | Executes commands from the `[commands]` config table; results stream to the phone's output card via `runcommand.output` (`commandStarted` → batched `commandOutput` → `commandFinished`, all sharing one 32-bit id). A capped notification is still sent as a fallback. A 15s bound per execution; `{"stop":true}` from the phone cancels it, as does disconnect. Execution output is also published as `runcommand.output` bus events so `kcd watch` can follow it: lifecycle events are unconditional, but per-batch output is gated on `HasSubscribers`, so a chatty command does not flood the bus when nobody is listening. |
 | `sms` | `kdeconnect.sms.messages`, `kdeconnect.sms.attachment_file` | Sends `kdeconnect.sms.request`, `kdeconnect.sms.request_conversations`, `kdeconnect.sms.request_conversation`, `kdeconnect.sms.request_attachment` |
-| `sftp` | `kdeconnect.sftp` | Parses `multiPaths`, `pathNames`, and `errorMessage` from the phone's response. `Info()` returns cached credentials + `StorageVolume` slices; `Volumes()` lists storage roots with human-readable names. `Handle()` logs errors when the phone returns `errorMessage` (e.g. missing storage permission). Mounts at server root to avoid chroot double-path bug; tracks mounts in `mountPoints` map; `Unmount()` calls `fusermount3`/`fusermount`. Mounting is idempotent (`mountWithBody` returns an existing mount point rather than re-running `sshfs` over a live one), tracked state is dropped only after `fusermount` actually releases the mount so failures stay retryable — except when the kernel no longer has the mount at all, where there is nothing to release, so it is forgotten and reported unmounted, and a still-present unresponsive mount is retried with a lazy unmount, and `Info(deviceID, includePassword)` gates the credential — `kcd sftp info` masks it by default because the output lands in scrollback and logs. `mountPoints` is a **cache**, not the source of truth: `MountedPath` checks the configured path and then the pre-v1.22 `~/Downloads` one, parsing `/proc/mounts` for a `fuse.*` entry at either, so a mount that outlived a daemon restart is still reported mounted, cleaned up on disconnect, and unmountable by device id. The default mount directory is `$XDG_RUNTIME_DIR/kcd/mnt` — `/run` is a tmpfs, is what GNOME uses for its own remote file access, and is the one place a routine `rm -rf ~/…`, a dotfile cleaner or a backup tool will not descend into a live mount. A mount that resolves under a bulk-deletable user folder (`user-dirs.dirs`, else the conventional names) logs a warning, since the default is only as good as what the user overrides it with. `read_only` mounts pass `-o ro`, which makes the kernel reject `unlink`/`rmdir` before they reach the phone; it is emitted before `extra_sshfs_opts` so an operator override still wins. On graceful shutdown `daemon.Run` calls `UnmountAll`, because `OnDisconnect` only fires on a dropped connection and would otherwise leave every mount live |
+| `sftp` | `kdeconnect.sftp` | Remote filesystem browsing via sshfs with multi-path support, kernel mount tracking, and safe unmount cleanup. See [SFTP mounts](#sftp-mounts). |
 | `share` | `kdeconnect.share.request` | Streaming file receive + URL/text handling; fires progress events; bounded by `share.max_file_size` |
 | `systemvolume` | `kdeconnect.systemvolume` | Accepts `bus`; publishes `volume.update` on volume/mute changes |
 | `telephony` | `kdeconnect.telephony` | Fires `telephony.ringing`, `.missed`, `.canceled` |
 | `connectivity` | `kdeconnect.connectivity_report` | Fires `connectivity.update` |
+| `contacts` | `kdeconnect.contacts.response_uids_timestamps`, `kdeconnect.contacts.response_vcards` | Synchronizes contact list and vCard details on demand |
+| `findthisdevice` | `kdeconnect.findthisdevice.request` | Plays alarm sound on the local machine when requested by the phone |
+| `sendnotifications` | `kdeconnect.notification` (outbound) | Forwards desktop notifications to the phone |
+| `digitizer` | `kdeconnect.digitizer`, `kdeconnect.digitizer.session` | Emulates a virtual drawing tablet via Linux uinput |
+
+### SFTP mounts
+
+The `sftp` plugin coordinates remote filesystem access using `sshfs`:
+- **Mount root:** Mounts at the remote server root to avoid chroot double-path issues; parses `multiPaths`, `pathNames`, and error messages.
+- **Idempotency & tracking:** Mounting is idempotent; `mountWithBody` reuses existing active mounts. Tracked mounts in `mountPoints` are cleaned up only after `fusermount`/`fusermount3` releases them. Unresponsive mounts retry with lazy unmount (`-u -z`).
+- **Source of truth:** `/proc/mounts` is the kernel source of truth. `MountedPath` checks the configured mount directory and legacy fallback paths, allowing daemon restarts to discover and clean up active mounts.
+- **Mount directory:** Defaults to `$XDG_RUNTIME_DIR/kcd/mnt` (a tmpfs user runtime dir) to prevent recursive file operations (backups, disk cleaners) from descending into remote phone storage. Configured paths under bulk-deletable directories emit a warning.
+- **Read-only protection:** Read-only mode passes `-o ro` to `sshfs`, letting the kernel enforce write protection locally before requests touch the remote phone.
+- **Shutdown:** On daemon shutdown, `daemon.Run` calls `UnmountAll` with a bounded budget to prevent orphaned mounts on exit.
 
 ---
 
@@ -427,18 +441,23 @@ kcd watch [--events=...] [--json]  — stream live events
 
 ## 9. Daemon Lifecycle (`internal/daemon`)
 
-`daemon.Run` orchestrates startup in this order:
+`daemon.Run` wires subsystems in this exact sequence:
 
-1. Validate config; ensure TLS certificate exists
-2. Load persisted device state from disk
-3. Start the event bus
-4. Register all enabled plugins
-5. Start the TCP listener (inbound connections)
-6. Start the IPC Unix socket server
-7. Start the UDP listener (always on) and register mDNS browsing with the broadcast controller (active only while pairing or reconnect owners hold it)
-8. Create the `BroadcasterController` in stopped state (broadcast is off by default)
-9. Block until context is cancelled (SIGINT / SIGTERM)
-10. Graceful shutdown: close listener, shutdown mDNS, stop broadcaster (if running)
+1. Build the logger: `log.New(cfg.LogLevel)`.
+2. Load or generate the TLS certificate (`cert.LoadOrGenerate`), and build `cert.TLSConfig`.
+3. Create the event bus (`events.NewBus`).
+4. Create the device registry (`device.NewRegistry`), load `devices.json` (with migrations), and prune stale unpaired devices.
+5. Create the plugin registry (`plugin.NewRegistry`).
+6. Register plugins (`setupPlugins`): **pair first**, then each one enabled in `cfg.Plugins`.
+7. Build the identity packet from `plugins.Capabilities()`.
+8. Create the broadcaster controller. Start the mDNS advertisement (always on) and the reconnect-broadcast sync on connect/disconnect events.
+9. Create the IPC handler (`ipc.NewHandler`), register IPC routes (`registerIPCRoutes`), and set the pair-dial hook.
+10. Start the IPC server.
+11. Start the transport (`runTransport`): TCP listener, UDP listener, discovery.
+12. Send `READY=1` to `$NOTIFY_SOCKET` if set (systemd `Type=notify`).
+13. Install the SIGHUP reload handler for commands, notification filters, and log levels.
+14. Block on `<-ctx.Done()`.
+15. On shutdown, call `SftpPlugin.UnmountAll` (bounded by `shutdownUnmountBudget`) and close all listeners.
 
 ---
 
