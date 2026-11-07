@@ -11,6 +11,7 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/fsutil"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
@@ -33,7 +34,7 @@ func TestCleanFilename(t *testing.T) {
 			t.Errorf("cleanFilename(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
-	if got := cleanFilename(strings.Repeat("a", 200) + ".jpg"); len(got) > maxFilenameLength+4 {
+	if got := cleanFilename(strings.Repeat("a", 300) + ".jpg"); len(got) > fsutil.MaxFilenameBytes {
 		t.Errorf("long filename not truncated: %d bytes", len(got))
 	}
 }

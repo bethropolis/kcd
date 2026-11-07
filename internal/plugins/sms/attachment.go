@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/fsutil"
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
@@ -95,25 +94,7 @@ func (p *SMSPlugin) receiveAttachment(ctx context.Context, ip net.IP, port int, 
 	return nil
 }
 
-// maxFilenameLength caps attachment filenames to keep them manageable.
-const maxFilenameLength = 128
-
-// cleanFilename hardens attachment paths: normalize backslashes, drop
-// controls, strip components (traversal), truncate overlong names.
+// cleanFilename hardens attachment paths by delegating to the unified fsutil sanitizer.
 func cleanFilename(name string) string {
-	name = strings.ReplaceAll(name, "\\", "/")
-	name = filepath.Base(name)
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, name)
-	if len(name) > maxFilenameLength {
-		name = strings.ToValidUTF8(name[:maxFilenameLength], "")
-	}
-	if name == "." || name == ".." || name == "/" || name == "" {
-		return "downloaded_attachment"
-	}
-	return name
+	return fsutil.SanitizeFilename(name, "downloaded_attachment")
 }
