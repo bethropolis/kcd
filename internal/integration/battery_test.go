@@ -65,7 +65,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	// Dial daemon TCP port with a mock peer
 	peerCertFile := dir + "/peer-cert.pem"
 	peerKeyFile := dir + "/peer-key.pem"
-	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, "mock-peer")
+	peerCertPair, err := cert.LoadOrGenerate(peerCertFile, peerKeyFile, testutil.DefaultMockPeerID)
 	if err != nil {
 		t.Fatalf("peer cert: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 
 	// Send our identity back inside TLS
 	identPkt, _ := protocol.NewPacket(protocol.TypeIdentity, protocol.IdentityBody{
-		DeviceID:        "mock-peer",
+		DeviceID:        testutil.DefaultMockPeerID,
 		DeviceName:      "Mock Peer",
 		DeviceType:      "phone",
 		ProtocolVersion: protocol.ProtocolVersion,
@@ -95,7 +95,7 @@ func TestBatteryUpdateFlowIntegration(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Accept the pending pair request via IPC (auto_accept removed in v1.10)
-	if _, err := cl.Pair("mock-peer"); err != nil {
+	if _, err := cl.Pair(testutil.DefaultMockPeerID); err != nil {
 		t.Fatalf("accept pair: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)

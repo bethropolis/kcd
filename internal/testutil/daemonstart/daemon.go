@@ -18,7 +18,9 @@ import (
 func StartTestDaemon(t *testing.T, cfg *config.Config) (context.CancelFunc, *client.Client) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		if err := daemon.Run(ctx, cfg); err != nil && ctx.Err() == nil {
 			t.Logf("daemon exited with error: %v", err)
 		}
@@ -38,6 +40,7 @@ func StartTestDaemon(t *testing.T, cfg *config.Config) (context.CancelFunc, *cli
 	cl := &client.Client{SocketPath: cfg.SocketPath, Timeout: 5 * time.Second}
 	t.Cleanup(func() {
 		cancel()
+		<-done
 		_ = os.Remove(cfg.SocketPath)
 	})
 	return cancel, cl
