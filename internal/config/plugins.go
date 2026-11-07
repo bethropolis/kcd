@@ -126,6 +126,7 @@ type PluginConfig struct {
 	Presenter          bool `toml:"presenter"`
 	FindThisDevice     bool `toml:"findthisdevice"`
 	RemoteSystemVolume bool `toml:"remotesystemvolume"`
+	Digitizer          bool `toml:"digitizer"`
 }
 
 // BackendsConfig defines external desktop tools as argv templates.
@@ -315,6 +316,7 @@ func (p *PluginConfig) Defaults() {
 	p.Presenter = true
 	p.FindThisDevice = true
 	p.RemoteSystemVolume = true
+	p.Digitizer = true
 }
 
 func (c *BatteryConfig) Defaults() {

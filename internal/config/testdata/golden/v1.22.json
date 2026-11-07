@@ -53,7 +53,8 @@
     "Contacts": true,
     "Presenter": true,
     "FindThisDevice": true,
-    "RemoteSystemVolume": true
+    "RemoteSystemVolume": true,
+    "Digitizer": true
   },
   "Commands": {
     "lock": "loginctl lock-session",

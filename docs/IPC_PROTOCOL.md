@@ -1523,6 +1523,13 @@ cleared when it overflows.
 The peer's reported lock state, or the desktop's state after a requested local
 lock action. Payload is `{"isLocked": bool}`; the boolean is always present.
 
+### Digitizer Events
+
+#### `digitizer.session`
+
+A drawing tablet session started or ended.
+Payload is `{"active": true, "width": 1920, "height": 1080}` or `{"active": false}`.
+
 ---
 
 ## 6. Outbound Packet Reference
@@ -1602,6 +1609,8 @@ plugin processes it and a link to the body struct definition.
 | `kdeconnect.runcommand.output` | RunCommand | Execution results. One packet type, three shapes distinguished by which key is present: `{"commandStarted":true,"id":N,"command":"label"}`, `{"commandOutput":true,"id":N,"stdout":[...],"stderr":[...]}`, `{"commandFinished":true,"id":N,"success":bool}`. Order is mandatory — the phone registers a display row on `commandStarted` and keys every later packet for that execution to the same `id`. `id` is read with `getInt`, so it must fit a 32-bit int. Both `stdout` and `stderr` must be present on every `commandOutput` batch; the phone iterates both lists without a null check. |
 | `kdeconnect.presenter` | Presenter | `PresenterBody{Dx, Dy *float64, Stop *bool}` |
 | `kdeconnect.systemvolume` | RemoteSystemVolume | `VolumeBody{SinkList, Name, Volume, Muted}` |
+| `kdeconnect.digitizer.session` | Digitizer | `SessionBody{Action, Width, Height, ResolutionX, ResolutionY}` |
+| `kdeconnect.digitizer` | Digitizer | `DigitizerBody{Active, Touching, Tool, X, Y, Pressure}` |
 
 ---
 

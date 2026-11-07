@@ -14,6 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/plugins/clipboard"
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
 	"github.com/bethropolis/kcd/internal/plugins/contacts"
+	"github.com/bethropolis/kcd/internal/plugins/digitizer"
 	"github.com/bethropolis/kcd/internal/plugins/findmyphone"
 	"github.com/bethropolis/kcd/internal/plugins/findthisdevice"
 	"github.com/bethropolis/kcd/internal/plugins/lockdevice"
@@ -112,6 +113,9 @@ func setupPlugins(cfg *config.Config, bus *events.Bus, tlsCfg *tls.Config, logge
 	}
 	if cfg.Plugins.RemoteSystemVolume {
 		plugins.Register(remotesystemvolume.NewRemoteSystemVolumePlugin(bus, logger))
+	}
+	if cfg.Plugins.Digitizer {
+		plugins.Register(digitizer.NewDigitizerPlugin(bus, logger))
 	}
 
 	return pairPlugin

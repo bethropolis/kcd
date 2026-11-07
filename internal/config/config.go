@@ -142,7 +142,7 @@ func globalPluginEnabled(p PluginConfig, name string) bool {
 		"sftp": p.SFTP, "findmyphone": p.FindMyPhone, "lockdevice": p.LockDevice,
 		"systemvolume": p.SystemVolume, "pausemusic": p.PauseMusic, "sms": p.SMS,
 		"contacts": p.Contacts, "presenter": p.Presenter, "findthisdevice": p.FindThisDevice,
-		"remotesystemvolume": p.RemoteSystemVolume,
+		"remotesystemvolume": p.RemoteSystemVolume, "digitizer": p.Digitizer,
 	}
 	return values[name]
 }

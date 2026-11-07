@@ -164,6 +164,10 @@ presenter = true
 # See `kcd volume --help`.
 remotesystemvolume = true
 
+# Use a phone/tablet as a drawing tablet with active stylus/pressure.
+# Creates a virtual tablet device via /dev/uinput.
+digitizer = true
+
 # ─── Desktop popups ───────────────────────────────────────────────────────────
 
 # Popup events still flow to IPC watchers when delivery is disabled.

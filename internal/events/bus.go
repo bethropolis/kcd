@@ -50,6 +50,7 @@ const (
 	TypeStateSnapshot        EventType = "state.snapshot"
 	TypeStreamGap            EventType = "stream.gap"
 	TypePrompt               EventType = "prompt"
+	TypeDigitizerSession     EventType = "digitizer.session"
 )
 
 // All returns every known event type. TestAllMatchesConstants keeps it in step
@@ -70,6 +71,7 @@ func All() []EventType {
 		TypeSMSIncoming, TypeSMSAttachment,
 		TypeRingReceived, TypeContactsUpdated,
 		TypeMprisUpdate, TypeStateSnapshot, TypeStreamGap, TypePrompt,
+		TypeDigitizerSession,
 	}
 }
 
