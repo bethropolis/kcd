@@ -10,9 +10,12 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/transport"
 	"github.com/godbus/dbus/v5"
 )
+
+var _ plugin.Plugin = (*MPRISPlugin)(nil)
 
 type trackedPlayer struct {
 	busName     string

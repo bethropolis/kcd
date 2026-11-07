@@ -378,3 +378,12 @@ type MprisRemotePlayer struct {
 type MprisRemoteResponse struct {
 	Players []MprisRemotePlayer `json:"players"`
 }
+
+// ContactSummary is the parsed, display-safe view of one contact.
+type ContactSummary struct {
+	UID       string   `json:"uid"`
+	Name      string   `json:"name"`
+	Phones    []string `json:"phones,omitempty"`
+	Emails    []string `json:"emails,omitempty"`
+	Timestamp int64    `json:"timestamp"`
+}

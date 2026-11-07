@@ -9,9 +9,12 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*PingPlugin)(nil)
 
 type PingPlugin struct {
 	cfg    config.PingConfig
@@ -73,3 +76,18 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 
 func (p *PingPlugin) OnConnect(dev device.Sender)    {}
 func (p *PingPlugin) OnDisconnect(dev device.Sender) {}
+
+// Ping sends a ping packet to the device.
+func (p *PingPlugin) Ping(dev device.Sender, message ...string) error {
+	msg := "Ping!"
+	if len(message) > 0 && message[0] != "" {
+		msg = message[0]
+	} else if p.cfg.DefaultMessage != "" {
+		msg = p.cfg.DefaultMessage
+	}
+	pkt, err := protocol.NewPacket("kdeconnect.ping", map[string]string{"message": msg})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}

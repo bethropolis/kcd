@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+var _ plugin.Plugin = (*FindMyPhonePlugin)(nil)
 
 // FindMyPhonePlugin sends a ring request to the paired device.
 type FindMyPhonePlugin struct{}

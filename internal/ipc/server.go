@@ -139,6 +139,12 @@ func (s *Server) serve(ctx context.Context, l net.Listener, activated bool) erro
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic in ipc handler", log.Any("recovered", r))
+			s.writeResponse(conn, Err(CodeInternal, "internal error", nil))
+		}
+	}()
 	reader := bufio.NewReader(conn)
 	_ = conn.SetReadDeadline(time.Now().Add(ipcReadDeadline))
 	line, err := readIPCLine(reader)

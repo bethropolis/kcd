@@ -8,8 +8,11 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+var _ plugin.Plugin = (*ConnectivityPlugin)(nil)
 
 type ConnectivityPlugin struct {
 	bus         *events.Bus
@@ -97,6 +100,29 @@ func (p *ConnectivityPlugin) Report(deviceID string) (ConnectivityBody, bool) {
 	}
 	body, ok := p.lastReports[deviceID]
 	return body, ok
+}
+
+// ConnectivitySummary implements plugin.ConnectivitySupplier.
+func (p *ConnectivityPlugin) ConnectivitySummary(deviceID string) (any, bool) {
+	body, ok := p.Report(deviceID)
+	if !ok {
+		return nil, false
+	}
+	return body, true
+}
+
+// Replay implements plugin.Replayer.
+func (p *ConnectivityPlugin) Replay(deviceID string) []events.Event {
+	body, ok := p.Report(deviceID)
+	if !ok {
+		return nil
+	}
+	return []events.Event{{
+		Type:      events.TypeConnectivityUpdate,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().UTC(),
+		Payload:   body,
+	}}
 }
 
 func (p *ConnectivityPlugin) OnDisconnect(dev device.Sender) {

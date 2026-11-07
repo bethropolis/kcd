@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
-	"github.com/bethropolis/kcd/internal/plugins/connectivity"
-	"github.com/bethropolis/kcd/internal/plugins/mpris"
+	"github.com/bethropolis/kcd/internal/plugin"
 )
 
 func (s *Server) handleWatch(conn net.Conn, payload []byte) {
@@ -82,40 +81,18 @@ func (s *Server) handleWatch(conn net.Conn, payload []byte) {
 			}
 		}
 
-		// Send initial connectivity only if reported: unlike battery it has
-		// no meaningful zero, so absence skips instead of emitting empty.
-		if pl, ok := s.handler.plugins.GetByName("Connectivity"); ok {
-			if report, ok := pl.(*connectivity.ConnectivityPlugin).Report(dev.ID()); ok {
-				connEv := map[string]interface{}{
-					"type":      "connectivity.update",
-					"deviceId":  dev.ID(),
-					"timestamp": time.Now().UTC(),
-					"payload":   report,
-				}
-				data, _ = json.Marshal(connEv)
-				data = append(data, '\n')
-				if _, err := conn.Write(data); err != nil {
-					return
-				}
-			}
-		}
-
-		// Send initial mpris state only if fresh (10s): older means playback
-		// likely stopped, and stale state shows a ghost "now playing".
-		if pl, ok := s.handler.plugins.GetByName("MPRIS"); ok {
-			mp := pl.(*mpris.MPRISPlugin)
-			if mp.RemoteStateAge(dev.ID()) < 10*time.Second {
-				if state := mp.RemoteState(dev.ID()); state != nil {
-					mprisEv := map[string]interface{}{
-						"type":      "mpris.update",
-						"deviceId":  dev.ID(),
-						"timestamp": time.Now().UTC(),
-						"payload":   state,
-					}
-					data, _ = json.Marshal(mprisEv)
-					data = append(data, '\n')
-					if _, err := conn.Write(data); err != nil {
-						return
+		if s.handler.plugins != nil {
+			for _, pl := range s.handler.plugins.All() {
+				if rep, ok := pl.(plugin.Replayer); ok {
+					for _, ev := range rep.Replay(dev.ID()) {
+						if ev.Timestamp.IsZero() {
+							ev.Timestamp = time.Now().UTC()
+						}
+						data, _ = json.Marshal(ev)
+						data = append(data, '\n')
+						if _, err := conn.Write(data); err != nil {
+							return
+						}
 					}
 				}
 			}

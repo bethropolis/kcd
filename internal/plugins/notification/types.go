@@ -13,9 +13,12 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/sysexec"
 	"github.com/bethropolis/kcd/internal/transport"
 )
+
+var _ plugin.Plugin = (*NotificationPlugin)(nil)
 
 // NotificationPlugin handles incoming notifications and displays them on the desktop.
 type NotificationPlugin struct {

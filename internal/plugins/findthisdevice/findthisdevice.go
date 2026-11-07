@@ -10,9 +10,12 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*FindThisDevicePlugin)(nil)
 
 type FindThisDevicePlugin struct {
 	bus     *events.Bus

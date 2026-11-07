@@ -2,6 +2,7 @@ package ipc_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,8 +25,32 @@ func TestIPCRoundTrip(t *testing.T) {
 	dev1 := device.NewDevice("dev123", "Pixel 5", "phone", logger)
 	devReg.Add(dev1)
 
-	// Pass nil for pairPlugin (uses fallback path) and for the optional saver.
-	handler := ipc.NewHandler(devReg, pluginReg, nil, nil, nil, 0)
+	handler := ipc.NewHandler(devReg, pluginReg, nil)
+	handler.Register(ipc.CmdDevices, func(req ipc.Request) ipc.Response {
+		data, _ := json.Marshal([]ipc.DeviceSummary{{DeviceInfo: dev1.Info()}})
+		return ipc.Response{OK: true, Data: data}
+	})
+	handler.Register(ipc.CmdPair, func(req ipc.Request) ipc.Response {
+		var p ipc.PairPayload
+		if err := json.Unmarshal(req.Payload, &p); err != nil {
+			return ipc.Response{OK: false, Error: "invalid payload"}
+		}
+		if _, ok := devReg.Get(p.DeviceID); !ok {
+			return ipc.Response{OK: false, Error: "device not found"}
+		}
+		return ipc.Response{OK: true}
+	})
+	handler.Register(ipc.CmdPing, func(req ipc.Request) ipc.Response {
+		return ipc.Response{OK: true}
+	})
+	handler.Register(ipc.CmdUnpair, func(req ipc.Request) ipc.Response {
+		var p ipc.DevicePayload
+		if err := json.Unmarshal(req.Payload, &p); err != nil {
+			return ipc.Response{OK: false, Error: "invalid payload"}
+		}
+		devReg.Remove(p.DeviceID)
+		return ipc.Response{OK: true}
+	})
 	server := ipc.NewServer(sockPath, handler, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())

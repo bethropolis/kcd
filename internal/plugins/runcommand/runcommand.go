@@ -12,8 +12,11 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 )
+
+var _ plugin.Plugin = (*RunCommandPlugin)(nil)
 
 // RunCommandPlugin allows remote devices to trigger pre-configured local commands.
 type RunCommandPlugin struct {

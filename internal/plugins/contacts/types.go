@@ -9,7 +9,10 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 )
+
+var _ plugin.Plugin = (*ContactsPlugin)(nil)
 
 // KDE Connect contacts packet types (see kdeconnect-kde
 // plugins/contacts/contactsplugin.h and the Android ContactsPlugin).

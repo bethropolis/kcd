@@ -15,8 +15,8 @@ func registerRunCommandRoutes(handler *ipc.Handler, devices *device.Registry, pl
 		var p ipc.DevicePayload
 		// The list lives on the phone: block until it answers or the plugin
 		// deadline expires (same shape as the sftp mount route).
-		return deviceRoute(req, &p, devices, plugins, "RunCommand", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-			commands, err := pl.(*runcommand.RunCommandPlugin).RequestList(context.Background(), dev)
+		return deviceRoute(req, &p, devices, plugins, "RunCommand", func(dev *device.Device, rcPl *runcommand.RunCommandPlugin) ipc.Response {
+			commands, err := rcPl.RequestList(context.Background(), dev)
 			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}

@@ -289,3 +289,29 @@ func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
 	delete(p.remoteStateTimes, dev.ID())
 	delete(p.positionTrackers, dev.ID())
 }
+
+// MediaSummary implements plugin.MediaSupplier for device summaries.
+func (p *MPRISPlugin) MediaSummary(deviceID string) (any, time.Duration, bool) {
+	st := p.RemoteState(deviceID)
+	if st == nil {
+		return nil, 0, false
+	}
+	return st, p.RemoteStateAge(deviceID), true
+}
+
+// Replay implements plugin.Replayer, returning a recent NowPlaying update if fresh.
+func (p *MPRISPlugin) Replay(deviceID string) []events.Event {
+	if p.RemoteStateAge(deviceID) >= 10*time.Second {
+		return nil
+	}
+	st := p.RemoteState(deviceID)
+	if st == nil {
+		return nil
+	}
+	return []events.Event{{
+		Type:      events.TypeMprisUpdate,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().UTC(),
+		Payload:   st,
+	}}
+}

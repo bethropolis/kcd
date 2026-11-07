@@ -230,15 +230,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	// 5. IPC Server
-	handler := ipc.NewHandler(devices, plugins, pairPlugin, saveDevices, bus, pruneThreshold)
-	handler.SetPairListenTimeout(config.Duration(cfg.Pairing.ListenTimeout))
-
-	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
-
 	// Explicit `kcd pair <id>` dials on demand: background dial never touches
 	// strangers, so arm a one-shot flag and dial now if last-seen is known.
-	handler.SetPairDialHook(func(deviceID string) error {
+	pairDialHook := func(deviceID string) error {
 		dev, ok := devices.Get(deviceID)
 		if !ok {
 			return fmt.Errorf("device not found")
@@ -278,7 +272,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			}
 		}()
 		return nil
-	})
+	}
+
+	// 5. IPC Server
+	handler := ipc.NewHandler(devices, plugins, bus)
+	registerPairRoutes(handler, cfg, devices, plugins, bus, saveDevices, pruneThreshold, pairDialHook)
+	registerIPCRoutes(handler, cfg, devices, plugins, bc, ctx, tlsCfg, logger, startedAt)
 
 	ipcServer := ipc.NewServer(cfg.SocketPath, handler, logger)
 

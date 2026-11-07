@@ -12,8 +12,7 @@ import (
 func registerMprisRoutes(handler *ipc.Handler, devices *device.Registry, plugins *plugin.Registry) {
 	handler.Register(ipc.CmdMprisAction, func(req ipc.Request) ipc.Response {
 		var p ipc.MprisActionPayload
-		return pluginRoute(req, &p, plugins, "MPRIS", func(pl plugin.Plugin) ipc.Response {
-			mprisPl := pl.(*mpris.MPRISPlugin)
+		return pluginRoute(req, &p, plugins, "MPRIS", func(mprisPl *mpris.MPRISPlugin) ipc.Response {
 
 			targetDeviceID := p.DeviceID
 			if targetDeviceID == "" {

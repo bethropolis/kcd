@@ -8,7 +8,10 @@ import (
 	"github.com/bethropolis/kcd/internal/desktop/audio"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 )
+
+var _ plugin.Plugin = (*SystemVolumePlugin)(nil)
 
 // SystemVolumePlugin handles volume control packets from the phone.
 type SystemVolumePlugin struct {

@@ -58,7 +58,7 @@ Never violate these. If a change would break one, stop and reconsider the approa
 | `internal/plugin` (interface and registry) imports only `internal/protocol` and `internal/device` | Plugins depend on the interface, not on each other |
 | **A plugin never imports another plugin.** Shared code goes in a neutral package (`internal/transport`, or a new `internal/<name>`) | Keeps plugins independently removable |
 | Plugins are registered in `internal/daemon/plugins.go` (`setupPlugins`), pair first, never in `init()` | Explicit, ordered, conditional on config |
-| `pkg/client` imports from `internal/` only `device`, `events`, `ipc` and `plugins/contacts` | The public API must not drag in daemon internals. Shrink this list over time; never grow it |
+| `pkg/client` imports from `internal/` only `device`, `events`, and `ipc` | The public API must not drag in daemon internals. Shrink this list over time; never grow it |
 | All shipped binaries are built with `CGO_ENABLED=0` | Static distribution |
 
 ---

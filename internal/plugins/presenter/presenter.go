@@ -13,9 +13,12 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*PresenterPlugin)(nil)
 
 // PresenterPlugin handles kdeconnect.presenter packets containing
 // gyroscope-based pointer deltas (dx/dy) from the Android presenter remote.

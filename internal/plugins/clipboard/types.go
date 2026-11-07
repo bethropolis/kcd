@@ -6,8 +6,11 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/transport"
 )
+
+var _ plugin.Plugin = (*ClipboardPlugin)(nil)
 
 type clipboardBackend int
 

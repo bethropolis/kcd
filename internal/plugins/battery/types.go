@@ -6,8 +6,11 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*BatteryPlugin)(nil)
 
 // ThresholdEvent values from the KDE Connect protocol.
 const (

@@ -206,3 +206,20 @@ func (r *Registry) GetByName(name string) (Plugin, bool) {
 	p, ok := r.byName[name]
 	return p, ok
 }
+
+// Lookup finds the registered plugin implementing type T.
+func Lookup[T Plugin](r *Registry) (T, bool) {
+	if r == nil {
+		var zero T
+		return zero, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, p := range r.list {
+		if typed, ok := p.(T); ok {
+			return typed, true
+		}
+	}
+	var zero T
+	return zero, false
+}

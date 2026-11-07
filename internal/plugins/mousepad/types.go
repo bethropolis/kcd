@@ -10,8 +10,11 @@ import (
 	"github.com/bendahl/uinput"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
+
+var _ plugin.Plugin = (*MousepadPlugin)(nil)
 
 type MousepadPlugin struct {
 	logger     log.Logger

@@ -11,9 +11,12 @@ import (
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/internal/transport"
 )
+
+var _ plugin.Plugin = (*SMSPlugin)(nil)
 
 const (
 	PacketTypeSMSMessages       = "kdeconnect.sms.messages"

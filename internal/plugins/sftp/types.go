@@ -11,7 +11,10 @@ import (
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/plugin"
 )
+
+var _ plugin.Plugin = (*SftpPlugin)(nil)
 
 // SftpPlugin handles KDE Connect SFTP negotiation and optional sshfs mounting.
 type SftpPlugin struct {

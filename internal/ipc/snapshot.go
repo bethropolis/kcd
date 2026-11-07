@@ -1,13 +1,11 @@
 package ipc
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/plugin"
-	"github.com/bethropolis/kcd/internal/plugins/connectivity"
-	"github.com/bethropolis/kcd/internal/plugins/mpris"
-	"github.com/bethropolis/kcd/internal/plugins/sftp"
 )
 
 // BatteryStatus mirrors the battery state for embedding in summaries.
@@ -17,21 +15,58 @@ type BatteryStatus struct {
 	BatteryAgeMs int64 `json:"batteryAgeMs"`
 }
 
+// NowPlaying represents current media playback details in a device summary.
+type NowPlaying struct {
+	Player         string `json:"player"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist"`
+	Album          string `json:"album"`
+	AlbumArtUrl    string `json:"albumArtUrl"`
+	ArtPending     bool   `json:"artPending,omitempty"`
+	Url            string `json:"url,omitempty"`
+	Length         int64  `json:"length"`
+	Pos            int64  `json:"pos"`
+	PosAnchorMs    int64  `json:"posAnchorMs,omitempty"`
+	IsPlaying      bool   `json:"isPlaying"`
+	Volume         int    `json:"volume"`
+	CanControl     bool   `json:"canControl"`
+	CanGoNext      bool   `json:"canGoNext"`
+	CanGoPrevious  bool   `json:"canGoPrevious"`
+	CanPause       bool   `json:"canPause"`
+	CanPlay        bool   `json:"canPlay"`
+	CanSeek        bool   `json:"canSeek"`
+	PlaybackStatus string `json:"playbackStatus"`
+	Shuffle        *bool  `json:"shuffle,omitempty"`
+	LoopStatus     string `json:"loopStatus,omitempty"`
+}
+
 // MediaState is the cached now-playing state plus its age, so clients can
 // apply their own staleness rules instead of the daemon hiding paused media.
 type MediaState struct {
-	mpris.NowPlaying
+	NowPlaying
 	MediaAgeMs int64 `json:"mediaAgeMs"`
+}
+
+// SignalStrength represents cellular signal status for a subscription.
+type SignalStrength struct {
+	NetworkType         string `json:"networkType"`
+	NetworkDetailedType string `json:"networkDetailedType,omitempty"`
+	SignalStrength      int    `json:"signalStrength"`
+}
+
+// SignalState represents cellular connectivity information in a device summary.
+type SignalState struct {
+	SignalStrengths map[string]SignalStrength `json:"signalStrengths"`
 }
 
 // DeviceSummary enriches DeviceInfo with cached sub-states for clients only;
 // DeviceInfo stays the on-disk shape so persisted state never grows them.
 type DeviceSummary struct {
 	device.DeviceInfo
-	Battery *BatteryStatus                 `json:"battery,omitempty"`
-	Media   *MediaState                    `json:"media,omitempty"`
-	Signal  *connectivity.ConnectivityBody `json:"signal,omitempty"`
-	Sftp    *SftpMountState                `json:"sftp,omitempty"`
+	Battery *BatteryStatus  `json:"battery,omitempty"`
+	Media   *MediaState     `json:"media,omitempty"`
+	Signal  *SignalState    `json:"signal,omitempty"`
+	Sftp    *SftpMountState `json:"sftp,omitempty"`
 }
 
 // SftpMountState carries a device's current SFTP mount state so clients can
@@ -75,26 +110,35 @@ func SummarizeDevice(dev *device.Device, plugins *plugin.Registry) DeviceSummary
 	if plugins == nil {
 		return sum
 	}
-	if pl, ok := plugins.GetByName("MPRIS"); ok {
-		mp := pl.(*mpris.MPRISPlugin)
-		if state := mp.RemoteState(dev.ID()); state != nil {
-			sum.Media = &MediaState{
-				NowPlaying: *state,
-				MediaAgeMs: mp.RemoteStateAge(dev.ID()).Milliseconds(),
+
+	for _, pl := range plugins.All() {
+		if ms, ok := pl.(plugin.MediaSupplier); ok {
+			if state, age, ok := ms.MediaSummary(dev.ID()); ok && state != nil {
+				if b, err := json.Marshal(state); err == nil {
+					var np NowPlaying
+					if err := json.Unmarshal(b, &np); err == nil {
+						sum.Media = &MediaState{
+							NowPlaying: np,
+							MediaAgeMs: age.Milliseconds(),
+						}
+					}
+				}
 			}
 		}
-	}
-	if pl, ok := plugins.GetByName("Connectivity"); ok {
-		if report, ok := pl.(*connectivity.ConnectivityPlugin).Report(dev.ID()); ok {
-			r := report
-			sum.Signal = &r
+		if cs, ok := pl.(plugin.ConnectivitySupplier); ok {
+			if state, ok := cs.ConnectivitySummary(dev.ID()); ok && state != nil {
+				if b, err := json.Marshal(state); err == nil {
+					var sig SignalState
+					if err := json.Unmarshal(b, &sig); err == nil {
+						sum.Signal = &sig
+					}
+				}
+			}
 		}
-	}
-	// Report mounts only when they exist: advertising a permanent "not
-	// mounted" would force clients to special-case it.
-	if pl, ok := plugins.GetByName("SFTP"); ok {
-		if mp := pl.(*sftp.SftpPlugin).MountedPath(dev.ID()); mp != "" {
-			sum.Sftp = &SftpMountState{Mounted: true, MountPoint: mp}
+		if ms, ok := pl.(plugin.MountSupplier); ok {
+			if mp := ms.MountedPath(dev.ID()); mp != "" {
+				sum.Sftp = &SftpMountState{Mounted: true, MountPoint: mp}
+			}
 		}
 	}
 	return sum
