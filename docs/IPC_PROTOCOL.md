@@ -1702,7 +1702,4 @@ Common error strings:
 
 ### Concurrency
 
-The IPC server is single-threaded per connection; each connection is handled
-in its own goroutine. Long-running commands (`pair_listen`, `watch`) block
-that connection but do not block other connections. Send one request per
-connection and use a separate connection for concurrent commands.
+By default, legacy IPC requests operate as one request per connection. When a client initiates a session with `{"cmd":"hello","payload":{"keepAlive":true}}`, the connection enters persistent mode: requests may include an `id` field and can be pipelined concurrently across worker goroutines, with responses correlated by ID. Streaming commands (`watch`, `pair_listen`) dedicate the connection to the event stream; concurrent commands should use a separate connection or persistent session.
