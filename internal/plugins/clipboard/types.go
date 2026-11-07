@@ -24,6 +24,7 @@ type ClipboardPlugin struct {
 	receive           bool
 	send              bool
 	lastTimestamp     int64
+	localChangedAt    int64
 	tlsConfig         *tls.Config
 	logger            log.Logger
 	backend           clipboardBackend
@@ -80,7 +81,21 @@ func (p *ClipboardPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.clipboard", "kdeconnect.clipboard.connect", "kdeconnect.clipboard.file"}
 }
 
+// LocalChangedAt returns the timestamp of the last local clipboard change in epoch ms.
+func (p *ClipboardPlugin) LocalChangedAt() int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.localChangedAt
+}
+
+// SetLocalChangedAt sets the timestamp of the last local clipboard change in epoch ms.
+func (p *ClipboardPlugin) SetLocalChangedAt(ts int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.localChangedAt = ts
+}
+
 // OutgoingTypes returns the packet types this plugin may send.
 func (p *ClipboardPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.clipboard"}
+	return []string{"kdeconnect.clipboard", "kdeconnect.clipboard.connect"}
 }

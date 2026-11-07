@@ -45,14 +45,25 @@ func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		p.mu.Unlock()
 		return nil
 	}
-	// Guard lastTimestamp under the same lock as lastContent — they form a
-	// consistent pair and both fields are written from the TCP read goroutine.
-	if body.Timestamp > 0 {
-		if body.Timestamp < p.lastTimestamp {
+	if pkt.Type == "kdeconnect.clipboard.connect" {
+		// Spec schemas/kdeconnect.clipboard.connect.json: If the timestamp is 0
+		// or less than the local timestamp, the content should be ignored.
+		if body.Timestamp == 0 || body.Timestamp < p.localChangedAt {
 			p.mu.Unlock()
 			return nil
 		}
-		p.lastTimestamp = body.Timestamp
+		p.localChangedAt = body.Timestamp
+	} else {
+		// Guard lastTimestamp under the same lock as lastContent — they form a
+		// consistent pair and both fields are written from the TCP read goroutine.
+		if body.Timestamp > 0 {
+			if body.Timestamp < p.lastTimestamp {
+				p.mu.Unlock()
+				return nil
+			}
+			p.lastTimestamp = body.Timestamp
+		}
+		p.localChangedAt = time.Now().UnixMilli()
 	}
 	p.lastContent = body.Content
 	p.mu.Unlock()

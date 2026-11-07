@@ -53,6 +53,7 @@ func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
 		return nil
 	}
 	p.lastPushedContent = content
+	p.localChangedAt = time.Now().UnixMilli()
 	p.mu.Unlock()
 
 	pkt, err := protocol.NewPacket("kdeconnect.clipboard", ClipboardBody{
@@ -98,14 +99,18 @@ func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
 		return
 	}
 	content := p.readClipboard()
+	if content == "" {
+		return
+	}
 
 	p.mu.Lock()
 	p.lastPushedContent = content
+	ts := p.localChangedAt
 	p.mu.Unlock()
 
 	body := ClipboardBody{
 		Content:   content,
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: ts,
 	}
 	pkt, err := protocol.NewPacket("kdeconnect.clipboard.connect", body)
 	if err != nil {

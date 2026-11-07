@@ -355,3 +355,141 @@ func TestClipboardPlugin_Handle(t *testing.T) {
 		t.Fatalf("Handle failed: %v", err)
 	}
 }
+
+func TestClipboardPlugin_OutgoingTypes(t *testing.T) {
+	p := NewClipboardPlugin(nil, log.Nop(), false)
+	types := p.OutgoingTypes()
+	wantTypes := map[string]bool{
+		"kdeconnect.clipboard":         false,
+		"kdeconnect.clipboard.connect": false,
+	}
+	for _, typ := range types {
+		if _, ok := wantTypes[typ]; ok {
+			wantTypes[typ] = true
+		}
+	}
+	for typ, found := range wantTypes {
+		if !found {
+			t.Errorf("expected %q in OutgoingTypes, got %v", typ, types)
+		}
+	}
+}
+
+func TestClipboardPlugin_HandleConnect_Timestamps(t *testing.T) {
+	logger := log.Nop()
+	dev := device.NewDevice("dev1", "Test", "phone", logger)
+	p := NewClipboardPlugin(nil, logger, false)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendUnknown, "" })
+
+	// Set local timestamp to 1000.
+	p.SetLocalChangedAt(1000)
+
+	// Case 1: timestamp == 0 must be ignored per spec.
+	pkt0, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "ignore-zero",
+		Timestamp: 0,
+	})
+	if err := p.Handle(context.Background(), dev, pkt0); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if p.LocalChangedAt() != 1000 {
+		t.Errorf("expected localChangedAt 1000, got %d", p.LocalChangedAt())
+	}
+	p.mu.Lock()
+	lastContent := p.lastContent
+	p.mu.Unlock()
+	if lastContent == "ignore-zero" {
+		t.Errorf("content with timestamp 0 was accepted")
+	}
+
+	// Case 2: timestamp < localChangedAt (e.g. 500 < 1000) must be ignored.
+	pktOlder, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "ignore-older",
+		Timestamp: 500,
+	})
+	if err := p.Handle(context.Background(), dev, pktOlder); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	p.mu.Lock()
+	lastContent = p.lastContent
+	p.mu.Unlock()
+	if lastContent == "ignore-older" {
+		t.Errorf("content with older timestamp was accepted")
+	}
+
+	// Case 3: timestamp >= localChangedAt (e.g. 2000 >= 1000) must be accepted.
+	pktNewer, _ := protocol.NewPacket("kdeconnect.clipboard.connect", ClipboardBody{
+		Content:   "accept-newer",
+		Timestamp: 2000,
+	})
+	if err := p.Handle(context.Background(), dev, pktNewer); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	p.mu.Lock()
+	lastContent = p.lastContent
+	p.mu.Unlock()
+	if lastContent != "accept-newer" {
+		t.Errorf("expected lastContent 'accept-newer', got %q", lastContent)
+	}
+	if p.LocalChangedAt() != 2000 {
+		t.Errorf("expected localChangedAt 2000, got %d", p.LocalChangedAt())
+	}
+}
+
+func TestClipboardPlugin_OnConnect_SendsLocalChangedAt(t *testing.T) {
+	dir := t.TempDir()
+	// Fake tool returning "local text"
+	script := "#!/bin/sh\nprintf 'local text'\n"
+	if err := os.WriteFile(filepath.Join(dir, "wl-paste"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake wl-paste: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	logger := log.Nop()
+	sender := testutil.NewFakeSender("dev1")
+	p := NewClipboardPlugin(nil, logger, true)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "" })
+
+	p.SetLocalChangedAt(123456789)
+	p.OnConnect(sender)
+
+	sent := sender.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 packet sent, got %d", len(sent))
+	}
+	pkt := sent[0]
+	if pkt.Type != "kdeconnect.clipboard.connect" {
+		t.Fatalf("packet type = %q, want kdeconnect.clipboard.connect", pkt.Type)
+	}
+	var body ClipboardBody
+	if err := json.Unmarshal(pkt.Body, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Content != "local text" {
+		t.Errorf("body.Content = %q, want 'local text'", body.Content)
+	}
+	if body.Timestamp != 123456789 {
+		t.Errorf("body.Timestamp = %d, want 123456789", body.Timestamp)
+	}
+}
+
+func TestClipboardPlugin_OnConnect_SkipsEmptyClipboard(t *testing.T) {
+	dir := t.TempDir()
+	// Fake tool returning nothing
+	script := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "wl-paste"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake wl-paste: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	logger := log.Nop()
+	sender := testutil.NewFakeSender("dev1")
+	p := NewClipboardPlugin(nil, logger, true)
+	setProbe(t, p, func() (clipboardBackend, string) { return backendWayland, "" })
+
+	p.OnConnect(sender)
+
+	if len(sender.Sent()) != 0 {
+		t.Fatalf("expected 0 packets sent when clipboard is empty, got %d", len(sender.Sent()))
+	}
+}
