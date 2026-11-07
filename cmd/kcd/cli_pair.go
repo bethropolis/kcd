@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/internal/protocol"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var pairCmd = &cli.Command{
@@ -49,21 +50,21 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 			Usage: "With --advertise-only: print a machine-readable line when advertising starts",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		if c.Bool("advertise-only") {
-			if err := checkAdvertiseOnly(c); err != nil {
+		if cmd.Bool("advertise-only") {
+			if err := checkAdvertiseOnly(cmd); err != nil {
 				return err
 			}
-			return advertiseOnly(c, cl)
+			return advertiseOnly(cmd, cl)
 		}
 
-		if c.NArg() >= 1 {
-			targetID := c.Args().First()
+		if cmd.NArg() >= 1 {
+			targetID := cmd.Args().First()
 			verificationKey, err := cl.Pair(targetID)
 			if err != nil {
 				return err
@@ -79,7 +80,7 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 		// Listen mode — wait for any incoming pair request
 		fmt.Println("Listening for pair requests… (Ctrl+C to cancel)")
 
-		if c.Bool("yes") && c.String("expected-fingerprint") == "" && !c.Bool("known-only") {
+		if cmd.Bool("yes") && cmd.String("expected-fingerprint") == "" && !cmd.Bool("known-only") {
 			fmt.Fprintln(os.Stderr, "WARNING: auto-accepting pairing requests from ANY device on the local network.")
 			fmt.Fprintln(os.Stderr, "Use --expected-fingerprint or --known-only to restrict which device may pair.")
 		}
@@ -87,7 +88,7 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 		// Snapshot of previously seen devices for --known-only. A stranger
 		// that was never recorded in the state file is never auto-accepted.
 		var known map[string]bool
-		if c.Bool("known-only") {
+		if cmd.Bool("known-only") {
 			known = loadKnownDeviceIDs()
 		}
 
@@ -121,6 +122,8 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 			case <-sigCh:
 				fmt.Println("\nCancelled")
 				return nil
+			case <-ctx.Done():
+				return nil
 			case r := <-resultCh:
 				if r.err != nil {
 					if strings.Contains(r.err.Error(), "timed out") {
@@ -137,8 +140,8 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 				}
 
 				// Headless / auto-accept flag
-				if c.Bool("yes") {
-					if err := checkPairCandidate(c.String("expected-fingerprint"), c.Bool("known-only"), r.result, known); err != nil {
+				if cmd.Bool("yes") {
+					if err := checkPairCandidate(cmd.String("expected-fingerprint"), cmd.Bool("known-only"), r.result, known); err != nil {
 						fmt.Printf("Refusing candidate: %s\n", err)
 						_ = cl.Unpair(r.result.DeviceID)
 						fmt.Println("Still listening… (Ctrl+C to cancel)")
@@ -158,7 +161,7 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 
 				response = strings.TrimSpace(strings.ToLower(response))
 				if response == "y" || response == "yes" {
-					if err := checkPairCandidate(c.String("expected-fingerprint"), c.Bool("known-only"), r.result, known); err != nil {
+					if err := checkPairCandidate(cmd.String("expected-fingerprint"), cmd.Bool("known-only"), r.result, known); err != nil {
 						fmt.Printf("Refusing candidate: %s\n", err)
 						_ = cl.Unpair(r.result.DeviceID)
 						return nil
@@ -170,9 +173,9 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 					return nil
 				}
 
-				// User rejected: reject and cancel request
+				// User declined
+				fmt.Println("Rejected pairing request")
 				_ = cl.Unpair(r.result.DeviceID)
-				fmt.Printf("Rejected pairing with %s\n", protocol.DisplayName(r.result.DeviceName))
 				return nil
 			}
 		}
@@ -181,11 +184,11 @@ With --advertise-only: make this machine discoverable and wait, accepting nothin
 
 // checkAdvertiseOnly rejects flag combinations that contradict the mode's
 // one guarantee: it never accepts, so --yes and device IDs are refused.
-func checkAdvertiseOnly(c *cli.Context) error {
-	if c.NArg() >= 1 {
+func checkAdvertiseOnly(cmd *cli.Command) error {
+	if cmd.NArg() >= 1 {
 		return fmt.Errorf("pair: --advertise-only takes no device ID")
 	}
-	if c.Bool("yes") {
+	if cmd.Bool("yes") {
 		return fmt.Errorf("pair: --advertise-only never accepts, so it cannot be combined with --yes")
 	}
 	return nil
@@ -193,7 +196,7 @@ func checkAdvertiseOnly(c *cli.Context) error {
 
 // advertiseOnly makes the daemon discoverable, then blocks without ever
 // accepting anything. It exists for clients that cannot drive a prompt.
-func advertiseOnly(c *cli.Context, cl *client.Client) error {
+func advertiseOnly(cmd *cli.Command, cl *client.Client) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -204,12 +207,12 @@ func advertiseOnly(c *cli.Context, cl *client.Client) error {
 		close(stop)
 	}()
 
-	return advertiseUntil(c, cl, stop)
+	return advertiseUntil(cmd, cl, stop)
 }
 
 // advertiseUntil is advertiseOnly with the stop condition injected, so tests do
 // not have to signal the test binary itself.
-func advertiseUntil(c *cli.Context, cl *client.Client, stop <-chan struct{}) error {
+func advertiseUntil(cmd *cli.Command, cl *client.Client, stop <-chan struct{}) error {
 	if err := cl.BroadcastStart(); err != nil {
 		return fmt.Errorf("failed to start broadcast: %w", err)
 	}
@@ -219,7 +222,7 @@ func advertiseUntil(c *cli.Context, cl *client.Client, stop <-chan struct{}) err
 
 	// A supervising client needs to know when the daemon is actually
 	// discoverable, not merely that the process launched.
-	if c.Bool("json") {
+	if cmd.Bool("json") {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"advertising": true})
 	} else {
 		fmt.Println("Advertising for pairing requests. Nothing will be accepted; Ctrl+C to stop.")
@@ -227,7 +230,7 @@ func advertiseUntil(c *cli.Context, cl *client.Client, stop <-chan struct{}) err
 
 	<-stop
 
-	if c.Bool("json") {
+	if cmd.Bool("json") {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"advertising": false})
 	} else {
 		fmt.Println("\nStopped advertising")
@@ -240,15 +243,15 @@ var unpairCmd = &cli.Command{
 	Name:      "unpair",
 	Usage:     "Revoke trust and unpair from a device",
 	ArgsUsage: "<device-id>",
-	Action: func(c *cli.Context) error {
-		if c.NArg() < 1 {
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		if cmd.NArg() < 1 {
 			return fmt.Errorf("missing device ID")
 		}
-		cl, err := getClient(c)
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
-		if err := cl.Unpair(c.Args().First()); err != nil {
+		if err := cl.Unpair(cmd.Args().First()); err != nil {
 			return err
 		}
 		fmt.Println("Unpaired successfully")

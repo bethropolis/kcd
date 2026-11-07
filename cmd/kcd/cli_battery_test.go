@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // startBatteryStub serves one paired device and a fixed battery reading.
@@ -48,21 +47,17 @@ func startBatteryStub(t *testing.T) *client.Client {
 	return &client.Client{SocketPath: sock, Timeout: 2 * time.Second}
 }
 
-func batteryContext(t *testing.T, args ...string) *cli.Context {
-	t.Helper()
-	set := flag.NewFlagSet("battery", flag.ContinueOnError)
-	set.Bool("json", false, "")
-	if err := set.Parse(args); err != nil {
-		t.Fatal(err)
-	}
-	return cli.NewContext(cli.NewApp(), set, nil)
-}
-
 func runBatteryJSON(t *testing.T, cl *client.Client, args ...string) map[string]any {
 	t.Helper()
 	var out map[string]any
 	raw := captureStdout(t, func() {
-		if err := runBattery(batteryContext(t, args...), cl); err != nil {
+		cmd := &cli.Command{
+			Flags: []cli.Flag{&cli.BoolFlag{Name: "json"}},
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				return runBattery(cmd, cl)
+			},
+		}
+		if err := cmd.Run(context.Background(), append([]string{"battery"}, args...)); err != nil {
 			t.Fatalf("runBattery: %v", err)
 		}
 	})

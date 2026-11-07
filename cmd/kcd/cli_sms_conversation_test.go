@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,10 +13,10 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-// convStub records the raw payload of each conversation request.
+// convStub records the payload delivered to the sms.request_conversation route.
 type convStub struct {
 	cl       *client.Client
 	mu       sync.Mutex
@@ -48,15 +47,18 @@ func startConvStub(t *testing.T) *convStub {
 	return stub
 }
 
-func smsConvContext(t *testing.T, args ...string) *cli.Context {
+func runTestSmsConversation(t *testing.T, cl *client.Client, args ...string) error {
 	t.Helper()
-	set := flag.NewFlagSet("conversation", flag.ContinueOnError)
-	set.Int64("before", 0, "")
-	set.Int64("limit", 0, "")
-	if err := set.Parse(args); err != nil {
-		t.Fatal(err)
+	cmd := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.Int64Flag{Name: "before"},
+			&cli.Int64Flag{Name: "limit"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runSmsConversation(cmd, cl)
+		},
 	}
-	return cli.NewContext(cli.NewApp(), set, nil)
+	return cmd.Run(context.Background(), append([]string{"conversation"}, args...))
 }
 
 func (s *convStub) last(t *testing.T) map[string]any {
@@ -79,7 +81,7 @@ func (s *convStub) last(t *testing.T) map[string]any {
 func TestSmsConversationOmitsRangeByDefault(t *testing.T) {
 	stub := startConvStub(t)
 	captureStdout(t, func() {
-		if err := runSmsConversation(smsConvContext(t, "phone1", "42"), stub.cl); err != nil {
+		if err := runTestSmsConversation(t, stub.cl, "phone1", "42"); err != nil {
 			t.Fatalf("runSmsConversation: %v", err)
 		}
 	})
@@ -98,7 +100,7 @@ func TestSmsConversationOmitsRangeByDefault(t *testing.T) {
 func TestSmsConversationRangeFlags(t *testing.T) {
 	stub := startConvStub(t)
 	captureStdout(t, func() {
-		err := runSmsConversation(smsConvContext(t, "--before", "1791666622866", "--limit", "25", "phone1", "42"), stub.cl)
+		err := runTestSmsConversation(t, stub.cl, "--before", "1791666622866", "--limit", "25", "phone1", "42")
 		if err != nil {
 			t.Fatalf("runSmsConversation: %v", err)
 		}
@@ -123,7 +125,7 @@ func TestSmsConversationRejectsBadInput(t *testing.T) {
 		stub.mu.Lock()
 		stub.payloads = nil
 		stub.mu.Unlock()
-		if err := runSmsConversation(smsConvContext(t, args...), stub.cl); err == nil {
+		if err := runTestSmsConversation(t, stub.cl, args...); err == nil {
 			t.Errorf("args %v: expected an error, got nil", args)
 		}
 		stub.mu.Lock()

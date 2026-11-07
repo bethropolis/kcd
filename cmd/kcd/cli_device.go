@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,14 +10,14 @@ import (
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // resolveDeviceID returns the device to act on: an explicit argument, the
 // sole paired connected device, or an error naming the candidates.
-func resolveDeviceID(c *cli.Context, cl *client.Client) (string, error) {
-	if c.NArg() >= 1 {
-		return c.Args().First(), nil
+func resolveDeviceID(cmd *cli.Command, cl *client.Client) (string, error) {
+	if cmd.NArg() >= 1 {
+		return cmd.Args().First(), nil
 	}
 
 	devs, err := cl.Devices()
@@ -47,12 +48,12 @@ func deviceActionCmd(name, usage, okMsg string, fn func(*client.Client, string) 
 		Name:      name,
 		Usage:     usage,
 		ArgsUsage: "[device-id]",
-		Action: func(c *cli.Context) error {
-			cl, err := getClient(c)
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cl, err := getClient(cmd)
 			if err != nil {
 				return err
 			}
-			deviceID, err := resolveDeviceID(c, cl)
+			deviceID, err := resolveDeviceID(cmd, cl)
 			if err != nil {
 				return err
 			}

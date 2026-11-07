@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/bethropolis/kcd/internal/plugins/connectivity"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var connectivityCmd = &cli.Command{
@@ -20,13 +21,13 @@ var connectivityCmd = &cli.Command{
 			Usage: "Output the raw report as JSON",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		targetID, err := resolveDeviceID(c, cl)
+		targetID, err := resolveDeviceID(cmd, cl)
 		if err != nil {
 			return err
 		}
@@ -35,7 +36,7 @@ var connectivityCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
-		if c.Bool("json") {
+		if cmd.Bool("json") {
 			fmt.Println(string(raw))
 			return nil
 		}

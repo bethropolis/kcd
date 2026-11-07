@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var actionFlags = []cli.Flag{
@@ -18,33 +19,33 @@ var actionFlags = []cli.Flag{
 
 // actionDeviceID returns the device for an mpris action: positional wins,
 // --device is the fallback. (volume and seek take values positionally.)
-func actionDeviceID(c *cli.Context) string {
-	if c.NArg() >= 1 {
-		return c.Args().First()
+func actionDeviceID(cmd *cli.Command) string {
+	if cmd.NArg() >= 1 {
+		return cmd.Args().First()
 	}
-	return c.String("device")
+	return cmd.String("device")
 }
 
-func actionCmd(action string) cli.ActionFunc {
-	return func(c *cli.Context) error {
-		cl, err := getClient(c)
+func actionCmd(action string) func(context.Context, *cli.Command) error {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
-		return cl.MprisAction(actionDeviceID(c), c.String("player"), action)
+		return cl.MprisAction(actionDeviceID(cmd), cmd.String("player"), action)
 	}
 }
 
 // skipCmd builds next/previous, nudging with Play only when playing: some
 // phones stop after a skip, but waking a paused player starts unasked audio.
-func skipCmd(action string) cli.ActionFunc {
-	return func(c *cli.Context) error {
-		cl, err := getClient(c)
+func skipCmd(action string) func(context.Context, *cli.Command) error {
+	return func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
-		deviceID := actionDeviceID(c)
-		player := c.String("player")
+		deviceID := actionDeviceID(cmd)
+		player := cmd.String("player")
 		wasPlaying := remotePlayerPlaying(cl, deviceID, player)
 
 		if err := cl.MprisAction(deviceID, player, action); err != nil {
@@ -79,7 +80,7 @@ func remotePlayerPlaying(cl *client.Client, deviceID, player string) bool {
 var mprisCmd = &cli.Command{
 	Name:  "mpris",
 	Usage: "Media player control (remote devices)",
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:  "list",
 			Usage: "List active media players on remote devices",
@@ -89,8 +90,8 @@ var mprisCmd = &cli.Command{
 					Usage: "Output as JSON",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
@@ -98,7 +99,7 @@ var mprisCmd = &cli.Command{
 				if err != nil {
 					return fmt.Errorf("mpris: %w", err)
 				}
-				if c.Bool("json") {
+				if cmd.Bool("json") {
 					enc := json.NewEncoder(os.Stdout)
 					enc.SetIndent("", "  ")
 					return enc.Encode(remote.Players)
@@ -137,8 +138,8 @@ var mprisCmd = &cli.Command{
 					Usage: "Output as JSON",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
@@ -150,8 +151,8 @@ var mprisCmd = &cli.Command{
 					fmt.Println("No remote media players found")
 					return nil
 				}
-				deviceFilter := c.String("device")
-				isJSON := c.Bool("json")
+				deviceFilter := cmd.String("device")
+				isJSON := cmd.Bool("json")
 
 				if isJSON {
 					if deviceFilter != "" {
@@ -245,19 +246,19 @@ var mprisCmd = &cli.Command{
 				&cli.StringFlag{Name: "device", Usage: "Target device ID"},
 				&cli.StringFlag{Name: "player", Aliases: []string{"p"}, Usage: "Player name"},
 			},
-			Action: func(c *cli.Context) error {
-				if c.Args().Len() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.Args().Len() < 1 {
 					return fmt.Errorf("volume: missing volume argument (0-100)")
 				}
-				vol, err := strconv.Atoi(c.Args().First())
+				vol, err := strconv.Atoi(cmd.Args().First())
 				if err != nil || vol < 0 || vol > 100 {
 					return fmt.Errorf("volume: must be 0-100")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				return cl.MprisVolume(c.String("device"), c.String("player"), vol)
+				return cl.MprisVolume(cmd.String("device"), cmd.String("player"), vol)
 			},
 		},
 		{
@@ -271,10 +272,10 @@ var mprisCmd = &cli.Command{
 				&cli.StringFlag{Name: "device", Usage: "Target device ID"},
 				&cli.StringFlag{Name: "player", Aliases: []string{"p"}, Usage: "Player name"},
 			},
-			Action: func(c *cli.Context) error {
-				opts, err := splitSeekArgs(c.Args().Slice())
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				opts, err := splitSeekArgs(cmd.Args().Slice())
 				if errors.Is(err, errSeekHelp) {
-					return cli.ShowSubcommandHelp(c)
+					return cli.ShowSubcommandHelp(cmd)
 				}
 				if err != nil {
 					return err
@@ -283,7 +284,7 @@ var mprisCmd = &cli.Command{
 				if err != nil {
 					return fmt.Errorf("seek: %w", err)
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
@@ -294,8 +295,8 @@ var mprisCmd = &cli.Command{
 			Name:      "raw",
 			Usage:     "Dump raw MPRIS debug state as JSON (local players)",
 			ArgsUsage: "",
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}

@@ -10,7 +10,7 @@ Threat model and reporting: [SECURITY.md](SECURITY.md).
 
 **`kcd`** is a headless Go daemon implementing the KDE Connect protocol v8.
 One static binary is both the daemon (`kcd daemon`) and the CLI client (every
-other subcommand), built on `urfave/cli/v2`.
+other subcommand), built on `urfave/cli/v3`.
 
 - The daemon serves a Unix socket (newline-delimited JSON). The CLI, `pkg/client` and third-party tools are all clients of it.
 - There's no GUI. The daemon links D-Bus (`godbus`) only in the MPRIS plugin. Other desktop integration goes through external tools (`notify-send`, `gdbus`, `pactl`/`wpctl`, `loginctl`…). Every desktop dependency must degrade gracefully (log and continue) when it's missing.
@@ -34,7 +34,7 @@ Never violate these. If a change would break one, stop and reconsider the approa
 8. **The device ID is permanent.** It's generated once and bound to the certificate's CN. Never regenerate or rewrite it, or every pairing breaks.
 9. **TLS uses self-signed certs with `InsecureSkipVerify: true`.** Authentication is the SHA-256 fingerprint pinned in `devices.json` at pairing, not a CA chain. Never accept a paired device whose fingerprint doesn't match.
 10. **`Plugin.Handle()` returns immediately.** D-Bus calls, subprocesses, disk and network I/O run in a goroutine. **That goroutine must not use `Handle`'s `ctx`**: the dispatcher cancels it when `Handle` returns. Use the plugin's lifetime context, or `context.WithoutCancel(ctx)` plus its own timeout.
-11. **No deprecated or forbidden packages.** No `io/ioutil`, no stdlib `log`, no direct `go.uber.org/zap` (use `internal/log`; depguard enforces the zap rule), no `cobra` (use `urfave/cli/v2`).
+11. **No deprecated or forbidden packages.** No `io/ioutil`, no stdlib `log`, no direct `go.uber.org/zap` (use `internal/log`; depguard enforces the zap rule), no `cobra` (use `urfave/cli/v3`).
 12. **The router never decodes bodies.** `Packet.Body` is `json.RawMessage`; each plugin decodes its own types.
 13. **One reader goroutine per connection; dispatch is sequential per device.** That's intentional and removes the need for per-plugin locks on the receive path. Don't parallelise dispatch.
 14. **TLS handshake order:**
@@ -323,4 +323,4 @@ a check passed without running it.
 - Android app (reference behaviour): https://invent.kde.org/network/kdeconnect-android
 - KDE desktop implementation: https://invent.kde.org/network/kdeconnect-kde
 - `godbus`: https://pkg.go.dev/github.com/godbus/dbus/v5 · MPRIS2: https://specifications.freedesktop.org/mpris-spec/latest/
-- `libp2p/zeroconf/v2`: https://github.com/libp2p/zeroconf · `urfave/cli/v2`: https://cli.urfave.org/v2/
+- `libp2p/zeroconf/v2`: https://github.com/libp2p/zeroconf · `urfave/cli/v3`: https://cli.urfave.org/

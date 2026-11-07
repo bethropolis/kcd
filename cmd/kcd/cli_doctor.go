@@ -1,17 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/bethropolis/kcd/internal/doctor"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var doctorCmd = &cli.Command{
 	Name:  "doctor",
 	Usage: "Check runtime dependencies and configuration",
-	Action: func(c *cli.Context) error {
+	Action: func(ctx context.Context, cmd *cli.Command) error {
 		checks := doctor.Run()
 		useColor := os.Getenv("TERM") != "" && os.Getenv("NO_COLOR") == ""
 		green := ""

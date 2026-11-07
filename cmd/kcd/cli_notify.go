@@ -1,28 +1,29 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var notifyCmd = &cli.Command{
 	Name:  "notify",
 	Usage: "Interact with notifications on a remote device",
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:      "action",
 			Usage:     "Trigger a notification action on a remote device",
 			ArgsUsage: "<device-id> <notification-id> <action>",
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 3 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 3 {
 					return fmt.Errorf("missing device ID, notification ID, or action")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				if err := cl.NotifyAction(c.Args().Get(0), c.Args().Get(1), c.Args().Get(2)); err != nil {
+				if err := cl.NotifyAction(cmd.Args().Get(0), cmd.Args().Get(1), cmd.Args().Get(2)); err != nil {
 					return err
 				}
 				fmt.Println("Notification action sent")

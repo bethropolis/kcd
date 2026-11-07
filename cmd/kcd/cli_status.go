@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -8,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bethropolis/kcd/internal/ipc"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var statusCmd = &cli.Command{
@@ -17,8 +18,8 @@ var statusCmd = &cli.Command{
 	Flags: []cli.Flag{
 		jsonFlag,
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -26,7 +27,7 @@ var statusCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
-		if c.Bool("json") {
+		if cmd.Bool("json") {
 			return printJSON(os.Stdout, st)
 		}
 		fmt.Print(formatStatus(st))

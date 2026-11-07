@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var clipboardCmd = &cli.Command{
@@ -21,17 +21,17 @@ var clipboardCmd = &cli.Command{
 			Usage:   "Watch for local clipboard changes and auto-sync to connected devices",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		if c.Bool("watch") {
-			return clipboardWatch()
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		if cmd.Bool("watch") {
+			return clipboardWatch(ctx)
 		}
 
-		cl, err := getClient(c)
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		targetID, err := resolveDeviceID(c, cl)
+		targetID, err := resolveDeviceID(cmd, cl)
 		if err != nil {
 			return err
 		}
@@ -43,7 +43,7 @@ var clipboardCmd = &cli.Command{
 	},
 }
 
-func clipboardWatch() error {
+func clipboardWatch(ctx context.Context) error {
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		return fmt.Errorf("clipboard --watch requires a Wayland session (WAYLAND_DISPLAY not set)")
 	}
@@ -56,10 +56,16 @@ func clipboardWatch() error {
 	fmt.Println("Watching for clipboard changes (Ctrl+C to stop)…")
 
 	for {
-		cmd := exec.CommandContext(context.Background(), "wl-paste", "--watch", self, "clipboard")
+		if ctx.Err() != nil {
+			return nil
+		}
+		cmd := exec.CommandContext(ctx, "wl-paste", "--watch", self, "clipboard")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			fmt.Fprintf(os.Stderr, "clipboard watch error: %v\n", err)
 			// A failing wl-paste returns instantly; without this the loop
 			// pegs a core and floods stderr.

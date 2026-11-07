@@ -1,17 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/bethropolis/kcd/internal/plugins/remotesystemvolume"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var volumeCmd = &cli.Command{
 	Name:  "volume",
 	Usage: "Control remote device volume",
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:      "list",
 			Usage:     "List audio sinks on a remote device",
@@ -22,12 +23,12 @@ var volumeCmd = &cli.Command{
 					Usage: "Output raw JSON",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				deviceID, err := resolveDeviceID(c, cl)
+				deviceID, err := resolveDeviceID(cmd, cl)
 				if err != nil {
 					return err
 				}
@@ -35,7 +36,7 @@ var volumeCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-				if c.Bool("json") {
+				if cmd.Bool("json") {
 					fmt.Println(string(data))
 					return nil
 				}
@@ -61,20 +62,20 @@ var volumeCmd = &cli.Command{
 			Name:      "set",
 			Usage:     "Set volume on a remote device sink",
 			ArgsUsage: "<device-id> <sink-name> <0-100>",
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 3 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 3 {
 					return fmt.Errorf("usage: kcd volume set <device-id> <sink-name> <0-100>")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				volume := c.Args().Get(2)
+				volume := cmd.Args().Get(2)
 				var vol int
 				if _, err := fmt.Sscanf(volume, "%d", &vol); err != nil || vol < 0 || vol > 100 {
 					return fmt.Errorf("volume must be 0-100")
 				}
-				if err := cl.RemoteVolumeSet(c.Args().First(), c.Args().Get(1), vol); err != nil {
+				if err := cl.RemoteVolumeSet(cmd.Args().First(), cmd.Args().Get(1), vol); err != nil {
 					return err
 				}
 				fmt.Println("Volume set.")
@@ -85,16 +86,16 @@ var volumeCmd = &cli.Command{
 			Name:      "mute",
 			Usage:     "Mute or unmute a remote device sink",
 			ArgsUsage: "<device-id> <sink-name> <true|false>",
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 3 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 3 {
 					return fmt.Errorf("usage: kcd volume mute <device-id> <sink-name> <true|false>")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				muted := c.Args().Get(2) == "true"
-				if err := cl.RemoteVolumeMute(c.Args().First(), c.Args().Get(1), muted); err != nil {
+				muted := cmd.Args().Get(2) == "true"
+				if err := cl.RemoteVolumeMute(cmd.Args().First(), cmd.Args().Get(1), muted); err != nil {
 					return err
 				}
 				state := "muted"

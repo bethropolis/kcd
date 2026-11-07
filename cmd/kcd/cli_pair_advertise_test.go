@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,7 +16,7 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // pairStub records the IPC commands that reach the daemon, so a test can assert
@@ -69,17 +68,26 @@ func startPairStub(t *testing.T) *pairStub {
 	return stub
 }
 
-func advertiseContext(args ...string) *cli.Context {
-	set := flag.NewFlagSet("pair", flag.ContinueOnError)
-	set.Bool("advertise-only", false, "")
-	set.Bool("json", false, "")
-	set.Bool("yes", false, "")
-	set.Bool("known-only", false, "")
-	set.String("expected-fingerprint", "", "")
-	if err := set.Parse(args); err != nil {
-		panic(err)
+func advertiseCommand(t *testing.T, args ...string) *cli.Command {
+	t.Helper()
+	var ranCmd *cli.Command
+	c := &cli.Command{
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "advertise-only"},
+			&cli.BoolFlag{Name: "json"},
+			&cli.BoolFlag{Name: "yes"},
+			&cli.BoolFlag{Name: "known-only"},
+			&cli.StringFlag{Name: "expected-fingerprint"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ranCmd = cmd
+			return nil
+		},
 	}
-	return cli.NewContext(cli.NewApp(), set, nil)
+	if err := c.Run(context.Background(), append([]string{"pair"}, args...)); err != nil {
+		t.Fatal(err)
+	}
+	return ranCmd
 }
 
 // captureStdout swaps os.Stdout for a pipe while f runs. advertiseUntil writes
@@ -129,7 +137,7 @@ func TestAdvertiseOnlyNeverAccepts(t *testing.T) {
 	done := make(chan error, 1)
 
 	captureStdout(t, func() {
-		go func() { done <- advertiseUntil(advertiseContext(), stub.cl, stop) }()
+		go func() { done <- advertiseUntil(advertiseCommand(t), stub.cl, stop) }()
 		waitFor(t, "broadcast_start", func() bool { return stub.saw(ipc.CmdBroadcastStart) })
 		close(stop)
 		if err := <-done; err != nil {
@@ -161,7 +169,7 @@ func TestAdvertiseOnlyJSONReportsBothTransitions(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		done := make(chan error, 1)
-		go func() { done <- advertiseUntil(advertiseContext("-json"), stub.cl, stop) }()
+		go func() { done <- advertiseUntil(advertiseCommand(t, "--json"), stub.cl, stop) }()
 		waitFor(t, "broadcast_start", func() bool { return stub.saw(ipc.CmdBroadcastStart) })
 		close(stop)
 		if err := <-done; err != nil {
@@ -194,13 +202,13 @@ func TestAdvertiseOnlyJSONReportsBothTransitions(t *testing.T) {
 // Contradictory flags are refused, not silently dropped: the caller is a
 // program relying on "never accepts".
 func TestCheckAdvertiseOnly(t *testing.T) {
-	if err := checkAdvertiseOnly(advertiseContext()); err != nil {
+	if err := checkAdvertiseOnly(advertiseCommand(t)); err != nil {
 		t.Errorf("plain --advertise-only should be accepted: %v", err)
 	}
-	if err := checkAdvertiseOnly(advertiseContext("-yes")); err == nil {
+	if err := checkAdvertiseOnly(advertiseCommand(t, "--yes")); err == nil {
 		t.Error("--advertise-only with --yes should be refused")
 	}
-	if err := checkAdvertiseOnly(advertiseContext("-json")); err != nil {
+	if err := checkAdvertiseOnly(advertiseCommand(t, "--json")); err != nil {
 		t.Errorf("--advertise-only with --json should be accepted: %v", err)
 	}
 }
