@@ -214,6 +214,7 @@ type SMSPayload struct {
 	DeviceID    string `json:"deviceId"`
 	PhoneNumber string `json:"phoneNumber"`
 	Message     string `json:"message"`
+	SubID       *int64 `json:"subID,omitempty"`
 }
 
 // SMSConvPayload is used for CmdSmsRequestConv.
@@ -231,6 +232,7 @@ type SMSAttachmentPayload struct {
 	DeviceID         string `json:"deviceId"`
 	PartID           int64  `json:"partID"`
 	UniqueIdentifier string `json:"uniqueIdentifier"`
+	ThreadID         *int64 `json:"threadID,omitempty"`
 }
 
 // StatusBattery is a cached device battery reading in CmdStatus output.

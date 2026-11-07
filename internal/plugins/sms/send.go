@@ -11,7 +11,7 @@ import (
 
 // --- SMS sending -----------------------------------------------------------
 
-func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) error {
+func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string, subID ...int64) error {
 	// v2 schema: the phone reads only messageBody with addresses as recipients
 	// (phoneNumber is legacy fallback); without them it sends a blank SMS.
 	body := map[string]any{
@@ -19,6 +19,9 @@ func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string) erro
 		"addresses":   []map[string]string{{"address": phoneNumber}},
 		"messageBody": message,
 		"phoneNumber": phoneNumber,
+	}
+	if len(subID) > 0 && subID[0] >= 0 {
+		body["subID"] = subID[0]
 	}
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequest, body)
 	if err != nil {
@@ -39,8 +42,10 @@ func (p *SMSPlugin) RequestConversations(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
+const defaultNumberToRequest = 500
+
 // RequestConversation asks the phone for messages in a specific thread.
-// Pass -1 for rangeStartTimestamp or numberToRequest for no limit.
+// Pass -1 for rangeStartTimestamp; if numberToRequest < 0 it defaults to 500.
 func (p *SMSPlugin) RequestConversation(dev device.Sender, threadID int64, rangeStartTimestamp int64, numberToRequest int64) error {
 	body := map[string]any{
 		"threadID": threadID,
@@ -48,9 +53,10 @@ func (p *SMSPlugin) RequestConversation(dev device.Sender, threadID int64, range
 	if rangeStartTimestamp >= 0 {
 		body["rangeStartTimestamp"] = rangeStartTimestamp
 	}
-	if numberToRequest >= 0 {
-		body["numberToRequest"] = numberToRequest
+	if numberToRequest < 0 {
+		numberToRequest = defaultNumberToRequest
 	}
+	body["numberToRequest"] = numberToRequest
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequestConv, body)
 	if err != nil {
 		return err
@@ -59,7 +65,11 @@ func (p *SMSPlugin) RequestConversation(dev device.Sender, threadID int64, range
 }
 
 // RequestAttachment asks the phone to send an MMS attachment file.
-func (p *SMSPlugin) RequestAttachment(dev device.Sender, partID int64, uniqueIdentifier string) error {
+// Optional threadID is tracked to enrich the subsequent sms.attachment event.
+func (p *SMSPlugin) RequestAttachment(dev device.Sender, partID int64, uniqueIdentifier string, threadID ...int64) error {
+	if len(threadID) > 0 && threadID[0] > 0 {
+		p.attachmentThreads.Store(uniqueIdentifier, threadID[0])
+	}
 	body := map[string]any{
 		"part_id":           partID,
 		"unique_identifier": uniqueIdentifier,

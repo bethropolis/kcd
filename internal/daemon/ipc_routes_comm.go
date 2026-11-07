@@ -15,7 +15,11 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 		handler.Register(ipc.CmdSendSMS, func(req ipc.Request) ipc.Response {
 			var p ipc.SMSPayload
 			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-				if err := pl.(*sms.SMSPlugin).SendSMS(dev, p.PhoneNumber, p.Message); err != nil {
+				var subID []int64
+				if p.SubID != nil {
+					subID = append(subID, *p.SubID)
+				}
+				if err := pl.(*sms.SMSPlugin).SendSMS(dev, p.PhoneNumber, p.Message, subID...); err != nil {
 					return ipc.Response{OK: false, Error: err.Error()}
 				}
 				return ipc.Response{OK: true}
@@ -52,7 +56,11 @@ func registerCommRoutes(handler *ipc.Handler, cfg *config.Config, devices *devic
 		handler.Register(ipc.CmdSmsRequestAttachment, func(req ipc.Request) ipc.Response {
 			var p ipc.SMSAttachmentPayload
 			return deviceRoute(req, &p, devices, plugins, "SMS", func(dev *device.Device, pl plugin.Plugin) ipc.Response {
-				if err := pl.(*sms.SMSPlugin).RequestAttachment(dev, p.PartID, p.UniqueIdentifier); err != nil {
+				var threadID []int64
+				if p.ThreadID != nil {
+					threadID = append(threadID, *p.ThreadID)
+				}
+				if err := pl.(*sms.SMSPlugin).RequestAttachment(dev, p.PartID, p.UniqueIdentifier, threadID...); err != nil {
 					return ipc.Response{OK: false, Error: err.Error()}
 				}
 				return ipc.Response{OK: true}

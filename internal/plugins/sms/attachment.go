@@ -61,11 +61,19 @@ func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender,
 			log.String("path", destPath),
 			log.String("filename", body.Filename),
 		)
+		threadID := body.ThreadID
+		if threadID == 0 {
+			if v, ok := p.attachmentThreads.LoadAndDelete(body.Filename); ok {
+				if id, ok := v.(int64); ok {
+					threadID = id
+				}
+			}
+		}
 		if p.bus != nil {
 			p.bus.Publish(events.TypeSMSAttachment, dev.ID(), map[string]any{
 				"filename":  body.Filename,
 				"path":      destPath,
-				"thread_id": body.ThreadID,
+				"thread_id": threadID,
 			})
 		}
 	}()

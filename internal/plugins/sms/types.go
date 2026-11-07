@@ -49,6 +49,9 @@ type SMSPlugin struct {
 	// armedAt records per-device arm times, doubling as the armed set: arming
 	// twice would re-trigger a full history burst for no benefit.
 	armedAt map[string]time.Time
+
+	// attachmentThreads maps uniqueIdentifier -> threadID for requested attachments.
+	attachmentThreads sync.Map
 }
 
 // Options customizes storage, network timeouts, and desktop notification identity.

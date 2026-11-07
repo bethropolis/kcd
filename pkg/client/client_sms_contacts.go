@@ -9,12 +9,16 @@ import (
 )
 
 // SendSMS requests the remote device to send an SMS.
-func (c *Client) SendSMS(deviceID, phoneNumber, message string) error {
-	_, err := c.Call(ipc.CmdSendSMS, ipc.SMSPayload{
+func (c *Client) SendSMS(deviceID, phoneNumber, message string, subID ...int64) error {
+	payload := ipc.SMSPayload{
 		DeviceID:    deviceID,
 		PhoneNumber: phoneNumber,
 		Message:     message,
-	})
+	}
+	if len(subID) > 0 {
+		payload.SubID = &subID[0]
+	}
+	_, err := c.Call(ipc.CmdSendSMS, payload)
 	return err
 }
 
@@ -43,12 +47,16 @@ func (c *Client) SmsRequestConversationRange(deviceID string, threadID int64, ra
 }
 
 // SmsRequestAttachment asks a device to send an MMS attachment file.
-func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdentifier string) error {
-	_, err := c.Call(ipc.CmdSmsRequestAttachment, ipc.SMSAttachmentPayload{
+func (c *Client) SmsRequestAttachment(deviceID string, partID int64, uniqueIdentifier string, threadID ...int64) error {
+	payload := ipc.SMSAttachmentPayload{
 		DeviceID:         deviceID,
 		PartID:           partID,
 		UniqueIdentifier: uniqueIdentifier,
-	})
+	}
+	if len(threadID) > 0 {
+		payload.ThreadID = &threadID[0]
+	}
+	_, err := c.Call(ipc.CmdSmsRequestAttachment, payload)
 	return err
 }
 

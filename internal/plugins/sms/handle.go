@@ -44,7 +44,11 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	}
 
 	if len(batch.Messages) > maxSMSMessages {
-		return fmt.Errorf("sms: messages batch too large: %d (max %d)", len(batch.Messages), maxSMSMessages)
+		p.logger.Warn("sms: messages batch exceeded limit, truncating to newest",
+			log.Int("received", len(batch.Messages)),
+			log.Int("limit", maxSMSMessages),
+		)
+		batch.Messages = batch.Messages[:maxSMSMessages]
 	}
 
 	// Resolved once per batch: the arm time and whether we are still
@@ -54,7 +58,7 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 	stillArmed := p.armed()
 
 	for _, msg := range batch.Messages {
-		if msg.Body == "" {
+		if msg.Body == "" && len(msg.Attachments) == 0 {
 			continue
 		}
 
@@ -96,7 +100,9 @@ func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *pr
 		// phone echoes those back in the same batch.
 		if p.shouldNotify(msg, isArmed && stillArmed, armAtMs) {
 			msgText := msg.Body
-			if len(msgText) > 120 {
+			if msgText == "" && len(msg.Attachments) > 0 {
+				msgText = "[Attachment]"
+			} else if len(msgText) > 120 {
 				msgText = msgText[:120] + "…"
 			}
 			title := fmt.Sprintf("SMS from %s", sender)
