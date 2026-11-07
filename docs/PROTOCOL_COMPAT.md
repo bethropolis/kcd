@@ -77,7 +77,7 @@ and documented intentional protocol deviations.
    - *Deviation:* If an Android contact card lacks a unique ID (`uids`), `kcd` synthesizes a deterministic identifier rather than failing the entire batch, ensuring partial contact imports succeed.
 
 5. **Device ID Format Flexibility**
-   - *Deviation:* Standard KDE Connect uses UUIDs or hex hashes. `kcd` generates RFC 4122 v4 UUIDs prefixed with `_` or alphanumeric IDs, and accepts any peer ID matching `^[a-zA-Z0-9_-]{1,64}$` to remain compatible with all versions of KDE Connect (Android, desktop, iOS, Sailfish).
+   - *Deviation:* Standard KDE Connect uses UUIDs or hex hashes. `kcd` generates RFC 4122 v4 UUIDs prefixed with `_` or alphanumeric IDs, and accepts any peer ID matching `^[A-Za-z0-9_-]{32,38}$` to maintain strict path safety while supporting both Android (32 hex characters) and desktop UUID (36–38 characters) representations.
 
 ---
 
