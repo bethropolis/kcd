@@ -11,9 +11,20 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 )
 
+// WatchOptions configures event subscription streaming.
+type WatchOptions struct {
+	Filters []string
+	Since   uint64
+}
+
 // Watch subscribes to daemon events and streams them to the given channel.
 func (c *Client) Watch(ctx context.Context, filter []string, ch chan<- events.Event) error {
 	return c.WatchSince(ctx, filter, 0, ch)
+}
+
+// WatchWithOptions subscribes to events using the provided options.
+func (c *Client) WatchWithOptions(ctx context.Context, opts WatchOptions, ch chan<- events.Event) error {
+	return c.WatchSince(ctx, opts.Filters, opts.Since, ch)
 }
 
 // WatchSince resumes a watch after the supplied event sequence when retained.

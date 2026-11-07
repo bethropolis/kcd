@@ -119,3 +119,12 @@ func (c *Client) Unlock(deviceID string) error {
 	_, err := c.Call(ipc.CmdUnlock, ipc.DevicePayload{DeviceID: deviceID})
 	return err
 }
+
+// PromptRespond resolves a pending user prompt with the selected choice.
+func (c *Client) PromptRespond(promptID, choice string) error {
+	_, err := c.Call(ipc.CmdPromptRespond, ipc.PromptRespondPayload{
+		PromptID: promptID,
+		Choice:   choice,
+	})
+	return err
+}
