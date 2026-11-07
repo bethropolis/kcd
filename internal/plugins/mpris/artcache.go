@@ -94,8 +94,12 @@ func isSafeCacheKey(key string) bool {
 	}
 	for i := 0; i < len(key); i++ {
 		char := key[i]
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '-' || char == '_') {
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9':
+		case char == '-' || char == '_':
+		default:
 			return false
 		}
 	}

@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -25,7 +26,10 @@ func (c *Client) OpenKeepAlive() (*Session, error) {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	conn, err := net.DialTimeout("unix", c.SocketPath, timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unix", c.SocketPath)
 	if err != nil {
 		return nil, fmt.Errorf("kcd daemon not running or socket error: %w", err)
 	}

@@ -20,7 +20,8 @@ func TestNew(t *testing.T) {
 
 func TestHelloUsesCurrentAPIVersion(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "kcd.sock")
-	listener, err := net.Listen("unix", socketPath)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(t.Context(), "unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}

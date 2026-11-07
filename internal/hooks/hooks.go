@@ -138,10 +138,8 @@ func expandCommand(command []string, event events.Event) []string {
 		if strings.Contains(arg, "{payload.") {
 			arg = replacePayload(arg, event.Payload)
 		}
-		if strings.HasPrefix(arg, "~/") {
-			// User expansion is deliberately omitted here: commands remain literal
-			// argv and are resolved by the user's shell/tool environment.
-		}
+		// User expansion for "~/" is deliberately omitted: commands remain literal
+		// argv and are resolved by the user's shell/tool environment.
 		result[i] = arg
 	}
 	return result

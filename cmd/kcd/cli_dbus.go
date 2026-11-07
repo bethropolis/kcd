@@ -19,6 +19,8 @@ type dbusAdapter struct {
 }
 
 // IsDaemonRunning reports whether kcd answered the local status request.
+//
+//nolint:unparam // Required signature convention for D-Bus method export.
 func (a *dbusAdapter) IsDaemonRunning() (bool, *dbus.Error) {
 	_, err := a.client.Status()
 	return err == nil, nil
