@@ -32,10 +32,11 @@ func NewTelephonyPlugin(bus *events.Bus, logger log.Logger, notifications ...con
 }
 
 type TelephonyBody struct {
-	Event       string            `json:"event"` // "ringing", "talking", "missedCall"
-	ContactName string            `json:"contactName"`
-	PhoneNumber string            `json:"phoneNumber"`
-	IsCancel    protocol.FlexBool `json:"isCancel"`
+	Event          string            `json:"event"` // "ringing", "talking", "missedCall"
+	ContactName    string            `json:"contactName"`
+	PhoneNumber    string            `json:"phoneNumber"`
+	PhoneThumbnail string            `json:"phoneThumbnail,omitempty"`
+	IsCancel       protocol.FlexBool `json:"isCancel"`
 }
 
 func (p *TelephonyPlugin) Name() string            { return "Telephony" }
@@ -56,9 +57,17 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 		if canceled {
 			p.bus.Publish(events.TypeTelephonyCanceled, dev.ID(), body)
 		} else {
-			eventType := events.EventType("telephony." + body.Event)
-			if body.Event == "missedCall" {
+			var eventType events.EventType
+			switch body.Event {
+			case "ringing":
+				eventType = events.TypeTelephonyRinging
+			case "talking":
+				eventType = events.TypeTelephonyTalking
+			case "missed", "missedCall":
 				eventType = events.TypeTelephonyMissed
+			default:
+				p.logger.Debug("telephony: ignoring unknown event type", log.String("event", body.Event))
+				return nil
 			}
 			p.bus.Publish(eventType, dev.ID(), body)
 		}
@@ -95,7 +104,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 }
 
 func (p *TelephonyPlugin) Mute(dev device.Sender) error {
-	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{"action": "mute"})
+	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{})
 	if err != nil {
 		return err
 	}

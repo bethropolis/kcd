@@ -13,7 +13,7 @@ import (
 const (
 	thresholdNone = 0
 	thresholdLow  = 1 // battery is low (typically <= 15%)
-	thresholdFull = 2 // battery reached full charge
+	thresholdFull = 2 // battery reached full charge (kcd extension)
 )
 
 // BatteryPlugin handles incoming battery state updates.
@@ -55,5 +55,5 @@ func (p *BatteryPlugin) IncomingTypes() []string {
 	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
 }
 func (p *BatteryPlugin) OutgoingTypes() []string {
-	return []string{"kdeconnect.battery", "kdeconnect.battery.request"}
+	return []string{"kdeconnect.battery"}
 }

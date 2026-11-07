@@ -3,6 +3,7 @@ package findthisdevice
 import (
 	"context"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/desktop/audio"
@@ -14,9 +15,10 @@ import (
 )
 
 type FindThisDevicePlugin struct {
-	bus    *events.Bus
-	logger log.Logger
-	audio  *audio.Backend
+	bus     *events.Bus
+	logger  log.Logger
+	audio   *audio.Backend
+	playing atomic.Bool
 }
 
 func NewFindThisDevicePlugin(bus *events.Bus, logger log.Logger, backends ...*audio.Backend) *FindThisDevicePlugin {
@@ -37,7 +39,13 @@ func (p *FindThisDevicePlugin) OutgoingTypes() []string { return []string{} }
 func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
 	p.logger.Info("ring request received", log.String("device_id", dev.ID()))
 
+	if !p.playing.CompareAndSwap(false, true) {
+		p.logger.Debug("findthisdevice: ring already in progress, ignoring duplicate")
+		return nil
+	}
+
 	go func() {
+		defer p.playing.Store(false)
 		p.playAlarm()
 		p.bus.Publish(events.TypeRingReceived, dev.ID(), nil)
 	}()

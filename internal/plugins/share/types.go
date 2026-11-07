@@ -78,16 +78,17 @@ func NewSharePlugin(downloadDir string, cfg config.ShareConfig, tlsConfig *tls.C
 	}
 }
 
-// ShareBody carries the file metadata Android omits from its own
-// kdeconnect.share packet type, which sends only filename and open flags.
+// ShareBody carries the metadata for kdeconnect.share.request packets
+// (file transfers, raw text snippets, and openable URLs).
 type ShareBody struct {
-	Filename         string `json:"filename"`
+	Filename         string `json:"filename,omitempty"`
 	NumberOfFiles    int    `json:"numberOfFiles,omitempty"`
 	TotalPayloadSize int64  `json:"totalPayloadSize,omitempty"`
 	LastModified     int64  `json:"lastModified,omitempty"`
 	CreationTime     int64  `json:"creationTime,omitempty"`
 	Text             string `json:"text,omitempty"`
 	Url              string `json:"url,omitempty"`
+	Open             bool   `json:"open,omitempty"`
 }
 
 func (p *SharePlugin) Name() string { return "Share" }
@@ -95,7 +96,7 @@ func (p *SharePlugin) Name() string { return "Share" }
 func (p *SharePlugin) Timeout() time.Duration { return 0 }
 
 func (p *SharePlugin) IncomingTypes() []string {
-	return []string{"kdeconnect.share.request"}
+	return []string{"kdeconnect.share.request", "kdeconnect.share.request.update"}
 }
 
 func (p *SharePlugin) OutgoingTypes() []string {

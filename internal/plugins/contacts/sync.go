@@ -96,8 +96,9 @@ func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
 			idx[uid] = entry
 		}
 
-		// Delete contacts the phone dropped — but never on an empty list, or
-		// one buggy response wipes the cache.
+		// Delete contacts the phone dropped — but never on an empty list to protect
+		// against a phone that has not granted contacts permission or returned a
+		// transient empty response. To explicitly purge local contacts, use contacts_clear.
 		var deleted int
 		if len(uids) > 0 {
 			for uid := range idx {

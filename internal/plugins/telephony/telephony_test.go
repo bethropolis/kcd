@@ -80,3 +80,25 @@ func TestHandleMissedCallEvent(t *testing.T) {
 		t.Errorf("event type = %q, want %q", ev.Type, events.TypeTelephonyMissed)
 	}
 }
+
+func TestHandleUnknownEventIgnored(t *testing.T) {
+	logger := log.NewTest(t)
+	bus := events.NewBus(logger)
+	p := NewTelephonyPlugin(bus, log.Nop())
+	sub := bus.Subscribe(0)
+	defer sub.Close()
+
+	pkt := &protocol.Packet{
+		Type: "kdeconnect.telephony",
+		Body: json.RawMessage(`{"event":"unsupported_event","contactName":"Eve"}`),
+	}
+	if err := p.Handle(context.Background(), stubSender{}, pkt); err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("unexpected event published for unknown telephony event: %v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

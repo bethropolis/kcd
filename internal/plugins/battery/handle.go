@@ -96,25 +96,20 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 	}
 }
 
-// OnConnect requests the phone's battery and sends our local battery state.
+// OnConnect sends our local battery state if available.
 func (p *BatteryPlugin) OnConnect(dev device.Sender) {
-	// Ask via request:true inside a regular battery packet: stock peers honor
-	// only that. The legacy request type stays for inbound compat.
-	pkt, _ := protocol.NewPacket("kdeconnect.battery", map[string]any{
-		"request": true,
-	})
-	dev.Send(pkt)
-
 	charge, charging, err := readLocalBattery()
 	if err != nil {
 		p.logger.Debug("local battery unavailable on connect", log.Error(err))
 		return
 	}
-	pkt, _ = protocol.NewPacket("kdeconnect.battery", BatteryBody{
+	pkt, err := protocol.NewPacket("kdeconnect.battery", BatteryBody{
 		CurrentCharge: charge,
 		IsCharging:    charging,
 	})
-	dev.Send(pkt)
+	if err == nil {
+		_ = dev.Send(pkt)
+	}
 }
 
 func (p *BatteryPlugin) OnDisconnect(_ device.Sender) {}

@@ -14,6 +14,8 @@ import (
 	"github.com/bethropolis/kcd/internal/cert"
 	"github.com/bethropolis/kcd/internal/config"
 	"github.com/bethropolis/kcd/internal/log"
+	"github.com/bethropolis/kcd/internal/protocol"
+	"github.com/bethropolis/kcd/internal/testutil"
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
@@ -147,5 +149,41 @@ func TestSharePlugin_SideChannelRejectsWrongFingerprint(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(15 * time.Second):
 		t.Fatal("timed out waiting for side-channel server to finish")
+	}
+}
+
+func TestSendTextAndURL(t *testing.T) {
+	p := NewSharePlugin(t.TempDir(), config.ShareConfig{}, nil, nil, log.Nop())
+	dev := testutil.NewFakeSender("dev1")
+
+	if err := p.SendText(context.Background(), dev, "hello clipboard"); err != nil {
+		t.Fatalf("SendText: %v", err)
+	}
+	if len(dev.Sent()) != 1 {
+		t.Fatalf("expected 1 packet sent, got %d", len(dev.Sent()))
+	}
+	pkt := dev.Sent()[0]
+	if pkt.Type != "kdeconnect.share.request" {
+		t.Errorf("type = %q, want kdeconnect.share.request", pkt.Type)
+	}
+
+	if err := p.SendURL(context.Background(), dev, "https://example.com"); err != nil {
+		t.Fatalf("SendURL: %v", err)
+	}
+	if len(dev.Sent()) != 2 {
+		t.Fatalf("expected 2 packets sent, got %d", len(dev.Sent()))
+	}
+}
+
+func TestHandleShareUpdate(t *testing.T) {
+	p := NewSharePlugin(t.TempDir(), config.ShareConfig{}, nil, nil, log.Nop())
+	dev := testutil.NewFakeSender("dev1")
+
+	pkt, err := protocol.NewPacket("kdeconnect.share.request.update", map[string]any{"numberOfFiles": 3})
+	if err != nil {
+		t.Fatalf("NewPacket: %v", err)
+	}
+	if err := p.Handle(context.Background(), dev, pkt); err != nil {
+		t.Fatalf("Handle update failed: %v", err)
 	}
 }

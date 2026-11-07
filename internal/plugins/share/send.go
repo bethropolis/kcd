@@ -109,5 +109,27 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 	return dev.Send(pkt)
 }
 
+// SendText sends a text snippet to the remote device.
+func (p *SharePlugin) SendText(ctx context.Context, dev device.Sender, text string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
+		Text: text,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}
+
+// SendURL sends a URL to open on the remote device.
+func (p *SharePlugin) SendURL(ctx context.Context, dev device.Sender, url string) error {
+	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
+		Url: url,
+	})
+	if err != nil {
+		return err
+	}
+	return dev.Send(pkt)
+}
+
 func (p *SharePlugin) OnConnect(dev device.Sender)    {}
 func (p *SharePlugin) OnDisconnect(dev device.Sender) {}

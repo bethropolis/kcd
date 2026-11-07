@@ -33,6 +33,14 @@ func (noopRunner) RunInput(context.Context, string, string, ...string) ([]byte, 
 func (noopRunner) Output(context.Context, string, ...string) ([]byte, error) { return nil, nil }
 func (noopRunner) LookPath(string) (string, error)                           { return "", nil }
 
+func TestBatteryPlugin_OutgoingTypes(t *testing.T) {
+	p, _ := newPlugin(t)
+	types := p.OutgoingTypes()
+	if len(types) != 1 || types[0] != "kdeconnect.battery" {
+		t.Errorf("OutgoingTypes = %v, want [kdeconnect.battery]", types)
+	}
+}
+
 func TestBatteryPlugin_Handle_UpdatesDevice(t *testing.T) {
 	logger := log.NewTest(t)
 	p, _ := newPlugin(t)

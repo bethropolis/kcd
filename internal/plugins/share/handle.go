@@ -19,6 +19,10 @@ import (
 )
 
 func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+	if pkt.Type == "kdeconnect.share.request.update" {
+		// Multi-file progress update from peer; per-file progress is tracked via sidechannel.
+		return nil
+	}
 	if p.cfg.Accept == "never" {
 		p.Logger.Debug("share: inbound share disabled")
 		return nil
@@ -27,6 +31,9 @@ func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoc
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return fmt.Errorf("share: parse body: %w", err)
 	}
+
+	// The peer's 'open' flag is intentionally ignored in favor of the local
+	// auto_open policy to protect against remote code execution.
 
 	if body.Text != "" && pkt.PayloadTransferInfo == nil {
 		p.Logger.Info("share: received text", log.String("text", body.Text))
