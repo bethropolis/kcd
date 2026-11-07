@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var batteryCmd = &cli.Command{
@@ -18,17 +19,17 @@ var batteryCmd = &cli.Command{
 			Usage: "Output raw JSON",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
-		return runBattery(c, cl)
+		return runBattery(cmd, cl)
 	},
 }
 
-func runBattery(c *cli.Context, cl *client.Client) error {
-	deviceID, err := resolveDeviceID(c, cl)
+func runBattery(cmd *cli.Command, cl *client.Client) error {
+	deviceID, err := resolveDeviceID(cmd, cl)
 	if err != nil {
 		return err
 	}
@@ -36,7 +37,7 @@ func runBattery(c *cli.Context, cl *client.Client) error {
 	if err != nil {
 		return err
 	}
-	if c.Bool("json") {
+	if cmd.Bool("json") {
 		// The resolved ID, not the raw positional, which is empty when
 		// the device was auto-selected.
 		out, _ := json.Marshal(map[string]interface{}{

@@ -7,5 +7,5 @@ hk = "2.4.0"
 # Bump both together; a local version ahead of CI means local checks can pass
 # while CI fails.
 golangci-lint = "2.11"
-# go.mod declares go 1.25.0 and CI uses go-version-file, so track that.
-go = "1.25"
+# go.mod declares go 1.26.0 and CI uses go-version-file, so track that.
+go = "1.26.10"

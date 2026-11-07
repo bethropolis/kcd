@@ -1,20 +1,21 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // readOnlyOverride maps --ro/--no-ro onto the client pointer; both absent
 // stays nil (daemon default), never a quiet flip back to writable.
-func readOnlyOverride(c *cli.Context) *bool {
+func readOnlyOverride(cmd *cli.Command) *bool {
 	switch {
-	case c.Bool("ro"):
+	case cmd.Bool("ro"):
 		v := true
 		return &v
-	case c.Bool("no-ro"):
+	case cmd.Bool("no-ro"):
 		v := false
 		return &v
 	default:
@@ -39,22 +40,22 @@ func readOnlyFlags() []cli.Flag {
 var sftpCmd = &cli.Command{
 	Name:  "sftp",
 	Usage: "Manage SFTP connections to a device",
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:      "request",
 			Usage:     "Request SFTP connection details from the device",
 			ArgsUsage: "<device-id>",
 			Description: `Send a kdeconnect.sftp.request to the device, asking it to start its embedded SFTP server.
 The device responds with connection credentials on 'kcd watch'.`,
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				if err := cl.SftpMount(c.Args().First(), nil); err != nil {
+				if err := cl.SftpMount(cmd.Args().First(), nil); err != nil {
 					return err
 				}
 				fmt.Println("SFTP mount requested. Run 'kcd sftp info' or 'kcd watch' to see details.")
@@ -77,20 +78,20 @@ Use 'kcd sftp request' first to populate the cache.`,
 					Usage: "Include the SFTP password (masked by default)",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				showPassword := c.Bool("show-password")
-				info, err := cl.SftpInfo(c.Args().First(), showPassword)
+				showPassword := cmd.Bool("show-password")
+				info, err := cl.SftpInfo(cmd.Args().First(), showPassword)
 				if err != nil {
 					return err
 				}
-				if c.Bool("json") {
+				if cmd.Bool("json") {
 					out, _ := json.Marshal(info)
 					fmt.Println(string(out))
 					return nil
@@ -130,19 +131,19 @@ Uses the multiPaths/pathNames fields from the cached SFTP credentials.`,
 					Usage: "Output raw JSON",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				volumes, err := cl.SftpVolumes(c.Args().First())
+				volumes, err := cl.SftpVolumes(cmd.Args().First())
 				if err != nil {
 					return err
 				}
-				if c.Bool("json") {
+				if cmd.Bool("json") {
 					out, _ := json.Marshal(volumes)
 					fmt.Println(string(out))
 					return nil
@@ -166,16 +167,16 @@ Uses the multiPaths/pathNames fields from the cached SFTP credentials.`,
 mount the filesystem via sshfs, and open it in the default file manager.
 Requires sshfs to be installed.`,
 			Flags: readOnlyFlags(),
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
 				fmt.Println("Requesting SFTP credentials from phone (waiting up to 20s)…")
-				path, err := cl.SftpMountLocal(c.Args().First(), readOnlyOverride(c))
+				path, err := cl.SftpMountLocal(cmd.Args().First(), readOnlyOverride(cmd))
 				if err != nil {
 					return err
 				}
@@ -189,15 +190,15 @@ Requires sshfs to be installed.`,
 			ArgsUsage: "<device-id>",
 			Description: `Unmount the sshfs mount for a device.
 Safe to call even if already unmounted (returns error in that case).`,
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				if err := cl.SftpUnmount(c.Args().First()); err != nil {
+				if err := cl.SftpUnmount(cmd.Args().First()); err != nil {
 					return err
 				}
 				fmt.Println("Unmounted successfully.")
@@ -221,22 +222,22 @@ Examples:
   kcd sftp browse myphone 0
   kcd sftp browse myphone "SD card"
   kcd sftp browse myphone /storage/ABCD-1234`,
-			Action: func(c *cli.Context) error {
-				if c.NArg() < 1 {
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				if cmd.NArg() < 1 {
 					return fmt.Errorf("missing device ID")
 				}
-				cl, err := getClient(c)
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
 
 				volume := ""
-				if c.NArg() > 1 {
-					volume = c.Args().Get(1)
+				if cmd.NArg() > 1 {
+					volume = cmd.Args().Get(1)
 				}
 
 				fmt.Println("Requesting SFTP credentials from phone (waiting up to 20s)…")
-				path, volumes, err := cl.SftpBrowse(c.Args().First(), volume, readOnlyOverride(c))
+				path, volumes, err := cl.SftpBrowse(cmd.Args().First(), volume, readOnlyOverride(cmd))
 				if err != nil {
 					return err
 				}

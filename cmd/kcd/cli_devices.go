@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/bethropolis/kcd/internal/device"
 	"github.com/bethropolis/kcd/internal/protocol"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var devicesCmd = &cli.Command{
@@ -29,20 +30,20 @@ var devicesCmd = &cli.Command{
 			Usage: "Only show paired devices (including offline ones)",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
-		if c.Bool("watch") {
-			return watchDevices(c, cl)
+		if cmd.Bool("watch") {
+			return watchDevices(ctx, cl)
 		}
 		devices, err := cl.Devices()
 		if err != nil {
 			return err
 		}
-		devices = filterDevices(devices, c.Bool("paired"), c.Bool("connected"))
-		if c.Bool("json") {
+		devices = filterDevices(devices, cmd.Bool("paired"), cmd.Bool("connected"))
+		if cmd.Bool("json") {
 			return printJSON(os.Stdout, devices)
 		}
 		printDeviceTable(devices)

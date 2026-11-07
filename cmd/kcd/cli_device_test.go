@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ import (
 	"github.com/bethropolis/kcd/internal/log"
 	"github.com/bethropolis/kcd/internal/plugin"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // startDeviceStub runs an IPC server whose devices route returns a fixed
@@ -69,21 +68,27 @@ func TestResolveDeviceID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cl := startDeviceStub(t, tc.devices)
-			set := flag.NewFlagSet("test", flag.ContinueOnError)
-			c := cli.NewContext(cli.NewApp(), set, nil)
+			var got string
+			var resolveErr error
+			cmd := &cli.Command{
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					got, resolveErr = resolveDeviceID(cmd, cl)
+					return nil
+				},
+			}
+			_ = cmd.Run(context.Background(), []string{"test"})
 
-			got, err := resolveDeviceID(c, cl)
 			if tc.wantErr != "" {
-				if err == nil {
+				if resolveErr == nil {
 					t.Fatalf("expected error containing %q, got nil (resolved %q)", tc.wantErr, got)
 				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Errorf("error %q does not contain %q", err, tc.wantErr)
+				if !strings.Contains(resolveErr.Error(), tc.wantErr) {
+					t.Errorf("error %q does not contain %q", resolveErr, tc.wantErr)
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if resolveErr != nil {
+				t.Fatalf("unexpected error: %v", resolveErr)
 			}
 			if got != tc.want {
 				t.Errorf("resolved %q, want %q", got, tc.want)
@@ -100,15 +105,19 @@ func TestResolveDeviceIDExplicitArgumentWins(t *testing.T) {
 		{ID: "phone2", State: device.StatePaired, Connected: true},
 	})
 
-	set := flag.NewFlagSet("test", flag.ContinueOnError)
-	if err := set.Parse([]string{"phone2"}); err != nil {
+	var got string
+	var resolveErr error
+	cmd := &cli.Command{
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			got, resolveErr = resolveDeviceID(cmd, cl)
+			return nil
+		},
+	}
+	if err := cmd.Run(context.Background(), []string{"test", "phone2"}); err != nil {
 		t.Fatal(err)
 	}
-	c := cli.NewContext(cli.NewApp(), set, nil)
-
-	got, err := resolveDeviceID(c, cl)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if resolveErr != nil {
+		t.Fatalf("unexpected error: %v", resolveErr)
 	}
 	if got != "phone2" {
 		t.Errorf("resolved %q, want the explicit phone2", got)

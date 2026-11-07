@@ -11,7 +11,7 @@ import (
 
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var watchCmd = &cli.Command{
@@ -29,22 +29,25 @@ var watchCmd = &cli.Command{
 			Usage: "Output raw NDJSON instead of human-readable text",
 		},
 	},
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		cl, err := getClient(cmd)
 		if err != nil {
 			return err
 		}
 
-		isJSON := c.Bool("json")
+		isJSON := cmd.Bool("json")
 
-		ctx, cancel := context.WithCancel(context.Background())
+		watchCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 		go func() {
-			<-stop
-			cancel()
+			select {
+			case <-stop:
+				cancel()
+			case <-watchCtx.Done():
+			}
 		}()
 
 		ch := make(chan events.Event, 64)
@@ -65,12 +68,12 @@ var watchCmd = &cli.Command{
 		maxBackoff := 30 * time.Second
 
 		for {
-			if ctx.Err() != nil {
+			if watchCtx.Err() != nil {
 				return nil
 			}
 
 			start := time.Now()
-			err := cl.Watch(ctx, c.StringSlice("events"), ch)
+			err := cl.Watch(watchCtx, cmd.StringSlice("events"), ch)
 
 			// If err != nil, the connection failed or disconnected
 			if err != nil {
@@ -91,27 +94,30 @@ var watchCmd = &cli.Command{
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
-			case <-ctx.Done():
+			case <-watchCtx.Done():
 				return nil
 			}
 		}
 	},
 }
 
-func watchDevices(c *cli.Context, cl *client.Client) error {
+func watchDevices(ctx context.Context, cl *client.Client) error {
 	devs, err := cl.Devices()
 	if err != nil {
 		return err
 	}
 	printDeviceTable(devs)
 
-	ctx, cancel := context.WithCancel(c.Context)
+	watchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-stop
-		cancel()
+		select {
+		case <-stop:
+			cancel()
+		case <-watchCtx.Done():
+		}
 	}()
 
 	filters := []string{"device.connected", "device.disconnected", "device.added", "device.removed"}
@@ -127,5 +133,5 @@ func watchDevices(c *cli.Context, cl *client.Client) error {
 		}
 	}()
 
-	return cl.Watch(ctx, filters, ch)
+	return cl.Watch(watchCtx, filters, ch)
 }

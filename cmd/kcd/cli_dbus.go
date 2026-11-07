@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/pkg/client"
 	"github.com/godbus/dbus/v5"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 type dbusAdapter struct {
@@ -51,8 +52,8 @@ var dbusCmd = &cli.Command{
 	Action: runDBusAdapter,
 }
 
-func runDBusAdapter(c *cli.Context) error {
-	cfg, err := config.Load(configPathFor(c))
+func runDBusAdapter(ctx context.Context, cmd *cli.Command) error {
+	cfg, err := config.Load(configPathFor(cmd))
 	if err != nil {
 		return err
 	}
@@ -75,6 +76,9 @@ func runDBusAdapter(c *cli.Context) error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stop)
-	<-stop
+	select {
+	case <-stop:
+	case <-ctx.Done():
+	}
 	return nil
 }

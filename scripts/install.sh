@@ -71,7 +71,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 step "Checking prerequisites"
 
 command -v go >/dev/null 2>&1 \
-  || die "Go is not installed. Install Go 1.25+ from https://go.dev/dl/"
+  || die "Go is not installed. Install Go 1.26+ from https://go.dev/dl/"
 
 GO_VERSION="$(go version | awk '{print $3}' | tr -d 'go')"
 REQUIRED_MAJOR=1

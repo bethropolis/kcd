@@ -1,27 +1,28 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var contactsCmd = &cli.Command{
 	Name:  "contacts",
 	Usage: "Sync and browse the phone address book",
-	Subcommands: []*cli.Command{
+	Commands: []*cli.Command{
 		{
 			Name:      "sync",
 			Usage:     "Request a contacts sync from a device",
 			ArgsUsage: "[device-id]",
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				deviceID, err := resolveDeviceID(c, cl)
+				deviceID, err := resolveDeviceID(cmd, cl)
 				if err != nil {
 					return err
 				}
@@ -42,12 +43,12 @@ var contactsCmd = &cli.Command{
 					Usage: "Output raw JSON",
 				},
 			},
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				deviceID, err := resolveDeviceID(c, cl)
+				deviceID, err := resolveDeviceID(cmd, cl)
 				if err != nil {
 					return err
 				}
@@ -59,7 +60,7 @@ var contactsCmd = &cli.Command{
 					fmt.Println("No cached contacts. Run `kcd contacts sync <device-id>` first.")
 					return nil
 				}
-				if c.Bool("json") {
+				if cmd.Bool("json") {
 					out, _ := json.MarshalIndent(list, "", "  ")
 					fmt.Println(string(out))
 					return nil
@@ -75,12 +76,12 @@ var contactsCmd = &cli.Command{
 			Name:      "clear",
 			Usage:     "Delete cached contacts for a device (re-sync restores them)",
 			ArgsUsage: "[device-id]",
-			Action: func(c *cli.Context) error {
-				cl, err := getClient(c)
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				cl, err := getClient(cmd)
 				if err != nil {
 					return err
 				}
-				id, err := resolveDeviceID(c, cl)
+				id, err := resolveDeviceID(cmd, cl)
 				if err != nil {
 					return err
 				}

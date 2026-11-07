@@ -14,7 +14,7 @@ import (
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/ipc"
 	"github.com/bethropolis/kcd/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var (
@@ -23,8 +23,8 @@ var (
 	date    = "unknown"
 )
 
-func getClient(c *cli.Context) (*client.Client, error) {
-	cfgPath := configPathFor(c)
+func getClient(cmd *cli.Command) (*client.Client, error) {
+	cfgPath := configPathFor(cmd)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -38,9 +38,9 @@ func getClient(c *cli.Context) (*client.Client, error) {
 	}, nil
 }
 
-func configPathFor(c *cli.Context) string {
-	if c.IsSet("config") {
-		return c.String("config")
+func configPathFor(cmd *cli.Command) string {
+	if cmd.IsSet("config") {
+		return cmd.String("config")
 	}
 	return config.DefaultConfigPath()
 }
@@ -81,35 +81,34 @@ func main() {
 
 	daemon.Version = version
 
-	var app *cli.App
-	app = &cli.App{
-		Name:                 "kcd",
-		Usage:                "KDE Connect daemon and client",
-		Version:              fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
-		EnableBashCompletion: true,
+	app := &cli.Command{
+		Name:                  "kcd",
+		Usage:                 "KDE Connect daemon and client",
+		Version:               fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
+		EnableShellCompletion: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "instance",
 				Usage:   "Named isolated daemon instance",
-				EnvVars: []string{"KCD_INSTANCE"},
+				Sources: cli.EnvVars("KCD_INSTANCE"),
 			},
 			&cli.StringFlag{
 				Name:    "config",
 				Value:   config.DefaultConfigPath(),
 				Usage:   "Path to config file",
-				EnvVars: []string{"KCD_CONFIG"},
+				Sources: cli.EnvVars("KCD_CONFIG"),
 			},
 			&cli.StringFlag{
 				Name:    "log-level",
 				Usage:   "Log level (debug, info, warn, error, quiet)",
-				EnvVars: []string{"KCD_LOG_LEVEL"},
+				Sources: cli.EnvVars("KCD_LOG_LEVEL"),
 			},
 		},
-		Before: func(c *cli.Context) error {
-			if instance := c.String("instance"); instance != "" {
-				return os.Setenv("KCD_INSTANCE", instance)
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			if instance := cmd.String("instance"); instance != "" {
+				return ctx, os.Setenv("KCD_INSTANCE", instance)
 			}
-			return nil
+			return ctx, nil
 		},
 		Commands: []*cli.Command{
 			configCmd,
@@ -118,12 +117,12 @@ func main() {
 				Name:  "version",
 				Usage: "Show daemon and IPC capability information",
 				Flags: []cli.Flag{&cli.BoolFlag{Name: "json", Usage: "Output capability JSON"}},
-				Action: func(c *cli.Context) error {
-					if !c.Bool("json") {
-						fmt.Println(app.Version)
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if !cmd.Bool("json") {
+						fmt.Println(cmd.Root().Version)
 						return nil
 					}
-					cfg, err := config.Load(configPathFor(c))
+					cfg, err := config.Load(configPathFor(cmd))
 					if err != nil {
 						return err
 					}
@@ -131,8 +130,9 @@ func main() {
 					for _, name := range []string{"Pair", "Battery", "Clipboard", "Notification", "Share", "RunCommand", "MPRIS", "Ping", "Telephony", "Connectivity", "Mousepad", "SFTP", "FindMyPhone", "LockDevice", "SystemVolume", "SMS", "Contacts", "Presenter", "FindThisDevice", "RemoteSystemVolume", "Digitizer"} {
 						pluginState[name] = cfg.PluginEnabledForDevice("", name)
 					}
-					commands := make([]string, 0, len(app.Commands))
-					for _, command := range app.Commands {
+					rootCmd := cmd.Root()
+					commands := make([]string, 0, len(rootCmd.Commands))
+					for _, command := range rootCmd.Commands {
 						commands = append(commands, command.Name)
 					}
 					data, err := json.MarshalIndent(ipc.HelloResponse{
@@ -155,15 +155,15 @@ func main() {
 
 				Name:  "daemon",
 				Usage: "Run the kcd daemon",
-				Action: func(c *cli.Context) error {
-					configPath := configPathFor(c)
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					configPath := configPathFor(cmd)
 					cfg, err := config.Load(configPath)
 					if err != nil {
 						return fmt.Errorf("failed to load config: %w", err)
 					}
 					reportConfigWarnings(cfg)
 
-					if logLevel := c.String("log-level"); logLevel != "" {
+					if logLevel := cmd.String("log-level"); logLevel != "" {
 						cfg.LogLevel = logLevel
 					}
 
@@ -171,17 +171,20 @@ func main() {
 						return fmt.Errorf("failed to ensure device ID: %w", err)
 					}
 
-					ctx, cancel := context.WithCancel(context.Background())
+					daemonCtx, cancel := context.WithCancel(ctx)
 					defer cancel()
 
 					stop := make(chan os.Signal, 1)
 					signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 					go func() {
-						<-stop
-						cancel()
+						select {
+						case <-stop:
+							cancel()
+						case <-daemonCtx.Done():
+						}
 					}()
 
-					return daemon.Run(ctx, cfg)
+					return daemon.Run(daemonCtx, cfg)
 				},
 			},
 			devicesCmd,
@@ -190,15 +193,15 @@ func main() {
 				Name:      "connect",
 				Usage:     "Manually connect to a device by IP address (bypasses UDP discovery)",
 				ArgsUsage: "<ip-address>",
-				Action: func(c *cli.Context) error {
-					if c.NArg() < 1 {
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if cmd.NArg() < 1 {
 						return fmt.Errorf("missing IP address")
 					}
-					cl, err := getClient(c)
+					cl, err := getClient(cmd)
 					if err != nil {
 						return err
 					}
-					if err := cl.Connect(c.Args().First()); err != nil {
+					if err := cl.Connect(cmd.Args().First()); err != nil {
 						return err
 					}
 					fmt.Println("Connection request sent to daemon.")
@@ -231,7 +234,7 @@ func main() {
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

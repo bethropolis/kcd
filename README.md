@@ -1,6 +1,6 @@
 # kcd - Headless KDE Connect Daemon
 
-[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
 [![Protocol](https://img.shields.io/badge/KDE%20Connect-v8-4CAF50?style=for-the-badge&logoColor=white)](https://valent.andyholmes.ca/documentation/protocol.html)
 [![License](https://img.shields.io/badge/License-MIT-F7DF1E?style=for-the-badge&logoColor=black)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/bethropolis/kcd?style=for-the-badge&logo=github&color=181717&logoColor=white)](https://github.com/bethropolis/kcd/releases/latest)
