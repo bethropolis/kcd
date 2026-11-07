@@ -26,15 +26,15 @@ type Plugin interface {
 	Timeout() time.Duration
 
 	// OnConnect is called when the device connects.
-	OnConnect(dev device.Sender)
+	OnConnect(dev device.Peer)
 
 	// OnDisconnect is called when the device disconnects.
-	OnDisconnect(dev device.Sender)
+	OnDisconnect(dev device.Peer)
 
 	// Handle processes a packet in the device read loop. Its context is cancelled
 	// when Handle returns, so work that outlives the call needs its own context.
 	// Blocking work must run asynchronously and return immediately.
-	Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error
+	Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error
 }
 
 // Replayer produces initial events for a device to send upon connection or watch streaming.

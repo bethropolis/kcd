@@ -12,7 +12,7 @@ import (
 
 // RequestMount sends a kdeconnect.sftp.request packet asking the device to
 // start its SFTP server and return credentials.
-func (p *SftpPlugin) RequestMount(dev device.Sender) error {
+func (p *SftpPlugin) RequestMount(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.sftp.request", map[string]any{
 		"startBrowsing": true,
 	})
@@ -24,7 +24,7 @@ func (p *SftpPlugin) RequestMount(dev device.Sender) error {
 
 // RequestAndMount requests credentials, mounts via sshfs, and returns the
 // local path to open.
-func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender, readOnly bool) (string, error) {
+func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Peer, readOnly bool) (string, error) {
 	body, err := p.requestCredentials(ctx, dev)
 	if err != nil {
 		return "", err
@@ -36,7 +36,7 @@ func (p *SftpPlugin) RequestAndMount(ctx context.Context, dev device.Sender, rea
 
 // RequestAndMountVolume requests credentials and mounts the volume (empty
 // volumePath lists instead). The caller closes the returned closer when done.
-func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Sender, volumePath string, readOnly bool) (mountPath string, volumes []StorageVolume, err error) {
+func (p *SftpPlugin) RequestAndMountVolume(ctx context.Context, dev device.Peer, volumePath string, readOnly bool) (mountPath string, volumes []StorageVolume, err error) {
 	body, err := p.requestCredentials(ctx, dev)
 	if err != nil {
 		return "", nil, err
@@ -59,7 +59,7 @@ func (p *SftpPlugin) MountLocally(ctx context.Context, deviceID string, readOnly
 	return "", fmt.Errorf("sftp: cached credentials are not reused for mounts; request fresh credentials instead")
 }
 
-func (p *SftpPlugin) requestCredentials(ctx context.Context, dev device.Sender) (SftpBody, error) {
+func (p *SftpPlugin) requestCredentials(ctx context.Context, dev device.Peer) (SftpBody, error) {
 	id := dev.ID()
 	ch := make(chan sftpResult, 1)
 	p.mu.Lock()

@@ -15,7 +15,7 @@ import (
 
 // --- Handle ----------------------------------------------------------------
 
-func (p *SMSPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SMSPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case PacketTypeSMSMessages:
 		return p.handleMessages(ctx, dev, pkt)
@@ -27,7 +27,7 @@ func (p *SMSPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol
 
 // handleMessages parses a batch of SMS messages from the phone and publishes
 // one event per message.
-func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SMSPlugin) handleMessages(_ context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Body == nil {
 		return nil
 	}

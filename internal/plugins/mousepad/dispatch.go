@@ -9,7 +9,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *MousepadPlugin) Handle(_ context.Context, _ device.Sender, pkt *protocol.Packet) error {
+func (p *MousepadPlugin) Handle(_ context.Context, _ device.Peer, pkt *protocol.Packet) error {
 	var body MousepadBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return fmt.Errorf("mousepad: decode body: %w", err)

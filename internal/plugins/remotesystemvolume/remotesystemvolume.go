@@ -54,7 +54,7 @@ func (p *RemoteSystemVolumePlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.systemvolume.request"}
 }
 
-func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *RemoteSystemVolumePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body VolumeBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -119,7 +119,7 @@ func (p *RemoteSystemVolumePlugin) ListSinks(deviceID string) []SinkInfo {
 	return nil
 }
 
-func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Sender, sinkName string, volume int) error {
+func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Peer, sinkName string, volume int) error {
 	volumeValue := volume
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		Name:   sinkName,
@@ -131,7 +131,7 @@ func (p *RemoteSystemVolumePlugin) SetVolume(dev device.Sender, sinkName string,
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Sender, sinkName string, muted bool) error {
+func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Peer, sinkName string, muted bool) error {
 	mutedValue := muted
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		Name:  sinkName,
@@ -143,7 +143,7 @@ func (p *RemoteSystemVolumePlugin) SetMuted(dev device.Sender, sinkName string, 
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Sender) error {
+func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume.request", VolumeBody{
 		RequestSinks: true,
 	})
@@ -153,7 +153,7 @@ func (p *RemoteSystemVolumePlugin) RequestSinkList(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Sender) {
+func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Peer) {
 	go func() {
 		if err := p.RequestSinkList(dev); err != nil {
 			p.logger.Warn("failed to request sink list",
@@ -163,6 +163,6 @@ func (p *RemoteSystemVolumePlugin) OnConnect(dev device.Sender) {
 		}
 	}()
 }
-func (p *RemoteSystemVolumePlugin) OnDisconnect(dev device.Sender) {
+func (p *RemoteSystemVolumePlugin) OnDisconnect(dev device.Peer) {
 	p.sinks.Delete(dev.ID())
 }

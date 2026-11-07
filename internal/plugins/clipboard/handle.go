@@ -18,7 +18,7 @@ import (
 )
 
 // Handle processes incoming clipboard packets.
-func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ClipboardPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	p.mu.Lock()
 	receive := p.receive
 	p.mu.Unlock()
@@ -96,7 +96,7 @@ type ClipboardFileBody struct {
 
 const maxClipboardFileSize = 50 * 1024 * 1024 // 50 MB safety limit (matches KDE Connect C++)
 
-func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *ClipboardPlugin) handleClipboardFile(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.PayloadSize <= 0 || pkt.PayloadTransferInfo == nil {
 		return nil
 	}

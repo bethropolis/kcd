@@ -13,7 +13,7 @@ import (
 )
 
 // Push copies the local clipboard to the remote device using wl-paste or xclip -o.
-func Push(ctx context.Context, dev device.Sender, p *ClipboardPlugin) error {
+func Push(ctx context.Context, dev device.Peer, p *ClipboardPlugin) error {
 	p.mu.Lock()
 	send := p.send
 	p.mu.Unlock()
@@ -91,7 +91,7 @@ func (p *ClipboardPlugin) readClipboard() string {
 	return string(out)
 }
 
-func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
+func (p *ClipboardPlugin) OnConnect(dev device.Peer) {
 	p.mu.Lock()
 	send := p.send
 	p.mu.Unlock()
@@ -121,5 +121,5 @@ func (p *ClipboardPlugin) OnConnect(dev device.Sender) {
 	_ = dev.Send(pkt)
 }
 
-func (p *ClipboardPlugin) OnDisconnect(dev device.Sender) {
+func (p *ClipboardPlugin) OnDisconnect(dev device.Peer) {
 }

@@ -21,18 +21,14 @@ type testSender struct {
 	id string
 }
 
-func (s testSender) ID() string                              { return s.id }
-func (s testSender) Name() string                            { return "" }
-func (s testSender) SetName(string)                          {}
-func (s testSender) State() device.PairingState              { return device.StateUnpaired }
-func (s testSender) SetState(device.PairingState)            {}
-func (s testSender) Send(*protocol.Packet) error             { return nil }
-func (s testSender) IsConnected() bool                       { return true }
-func (s testSender) RemoteIP() net.IP                        { return nil }
-func (s testSender) PeerCert() *x509.Certificate             { return nil }
-func (s testSender) HasCapability(string) bool               { return false }
-func (s testSender) UpdateBattery(charge int, charging bool) {}
-func (s testSender) GetBattery() (int, bool)                 { return 0, false }
+func (s testSender) ID() string                  { return s.id }
+func (s testSender) Name() string                { return "" }
+func (s testSender) State() device.PairingState  { return device.StateUnpaired }
+func (s testSender) Send(*protocol.Packet) error { return nil }
+func (s testSender) IsConnected() bool           { return true }
+func (s testSender) RemoteIP() net.IP            { return nil }
+func (s testSender) PeerCert() *x509.Certificate { return nil }
+func (s testSender) HasCapability(string) bool   { return false }
 
 func TestHandleDeduplicatesRemoteMPRISUpdates(t *testing.T) {
 	bus := events.NewBus(log.Nop())
@@ -113,23 +109,19 @@ type recordingSender struct {
 	packets []*protocol.Packet
 }
 
-func (s *recordingSender) ID() string                   { return s.id }
-func (s *recordingSender) Name() string                 { return "" }
-func (s *recordingSender) SetName(string)               {}
-func (s *recordingSender) State() device.PairingState   { return device.StateUnpaired }
-func (s *recordingSender) SetState(device.PairingState) {}
+func (s *recordingSender) ID() string                 { return s.id }
+func (s *recordingSender) Name() string               { return "" }
+func (s *recordingSender) State() device.PairingState { return device.StateUnpaired }
 func (s *recordingSender) Send(p *protocol.Packet) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.packets = append(s.packets, p)
 	return nil
 }
-func (s *recordingSender) IsConnected() bool                       { return true }
-func (s *recordingSender) RemoteIP() net.IP                        { return nil }
-func (s *recordingSender) PeerCert() *x509.Certificate             { return nil }
-func (s *recordingSender) HasCapability(string) bool               { return false }
-func (s *recordingSender) UpdateBattery(charge int, charging bool) {}
-func (s *recordingSender) GetBattery() (int, bool)                 { return 0, false }
+func (s *recordingSender) IsConnected() bool           { return true }
+func (s *recordingSender) RemoteIP() net.IP            { return nil }
+func (s *recordingSender) PeerCert() *x509.Certificate { return nil }
+func (s *recordingSender) HasCapability(string) bool   { return false }
 
 func (s *recordingSender) sent() []*protocol.Packet {
 	s.mu.Lock()

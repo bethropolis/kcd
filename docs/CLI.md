@@ -27,6 +27,8 @@ These flags apply to every command:
 
 Flags must come before positional arguments (`kcd battery --json <device-id>`, not `kcd battery <device-id> --json`). Anything after the first positional is treated as an argument, so a trailing flag is silently ignored rather than rejected.
 
+Commands supporting `--json` emit two-space indented JSON for readability and easy piping into tools like `jq`. Streaming commands (`kcd watch --json` and `kcd pair --advertise-only --json`) emit newline-delimited JSON (NDJSON) where each event is a single line.
+
 ---
 
 ## Configuration

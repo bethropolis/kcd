@@ -65,7 +65,7 @@ func (p *LockDevicePlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.lock", "kdeconnect.lock.request"}
 }
 
-func (p *LockDevicePlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *LockDevicePlugin) Handle(_ context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case "kdeconnect.lock":
 		var state inboundLockState
@@ -107,7 +107,7 @@ func (p *LockDevicePlugin) Handle(_ context.Context, dev device.Sender, pkt *pro
 	return nil
 }
 
-func (p *LockDevicePlugin) applyRequest(dev device.Sender, action string) {
+func (p *LockDevicePlugin) applyRequest(dev device.Peer, action string) {
 	ctx, cancel := context.WithTimeout(context.Background(), sessionActionTimeout)
 	defer cancel()
 	if _, err := p.exec.Run(ctx, "loginctl", action); err != nil {
@@ -116,7 +116,7 @@ func (p *LockDevicePlugin) applyRequest(dev device.Sender, action string) {
 	p.sendState(dev)
 }
 
-func (p *LockDevicePlugin) sendState(dev device.Sender) {
+func (p *LockDevicePlugin) sendState(dev device.Peer) {
 	pkt, err := protocol.NewPacket("kdeconnect.lock", outboundLockState{IsLocked: p.getLocked()})
 	if err != nil {
 		p.logger.Error("lockdevice: failed to create state packet", log.Error(err))
@@ -145,7 +145,7 @@ func (p *LockDevicePlugin) getLocked() bool {
 
 // Lock asks the remote device to lock its own screen; the local session
 // is never touched here (that happens only in Handle, on phone request).
-func (p *LockDevicePlugin) Lock(dev device.Sender) error {
+func (p *LockDevicePlugin) Lock(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.lock.request", struct {
 		SetLocked bool `json:"setLocked"`
 	}{SetLocked: true})
@@ -156,7 +156,7 @@ func (p *LockDevicePlugin) Lock(dev device.Sender) error {
 }
 
 // Unlock asks the remote device to unlock its own screen.
-func (p *LockDevicePlugin) Unlock(dev device.Sender) error {
+func (p *LockDevicePlugin) Unlock(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.lock.request", struct {
 		SetLocked bool `json:"setLocked"`
 	}{SetLocked: false})
@@ -166,5 +166,5 @@ func (p *LockDevicePlugin) Unlock(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *LockDevicePlugin) OnConnect(dev device.Sender)    {}
-func (p *LockDevicePlugin) OnDisconnect(dev device.Sender) {}
+func (p *LockDevicePlugin) OnConnect(dev device.Peer)    {}
+func (p *LockDevicePlugin) OnDisconnect(dev device.Peer) {}

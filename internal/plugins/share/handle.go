@@ -18,7 +18,7 @@ import (
 	"github.com/bethropolis/kcd/internal/sysexec"
 )
 
-func (p *SharePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SharePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Type == "kdeconnect.share.request.update" {
 		// Multi-file progress update from peer; per-file progress is tracked via sidechannel.
 		return nil

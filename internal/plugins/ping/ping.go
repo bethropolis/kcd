@@ -46,7 +46,7 @@ func (p *PingPlugin) Timeout() time.Duration  { return 5 * time.Second }
 func (p *PingPlugin) IncomingTypes() []string { return []string{"kdeconnect.ping"} }
 func (p *PingPlugin) OutgoingTypes() []string { return []string{"kdeconnect.ping"} }
 
-func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *PingPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body PingBody
 	_ = json.Unmarshal(pkt.Body, &body)
 
@@ -74,11 +74,11 @@ func (p *PingPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protoco
 	return nil
 }
 
-func (p *PingPlugin) OnConnect(dev device.Sender)    {}
-func (p *PingPlugin) OnDisconnect(dev device.Sender) {}
+func (p *PingPlugin) OnConnect(dev device.Peer)    {}
+func (p *PingPlugin) OnDisconnect(dev device.Peer) {}
 
 // Ping sends a ping packet to the device.
-func (p *PingPlugin) Ping(dev device.Sender, message ...string) error {
+func (p *PingPlugin) Ping(dev device.Peer, message ...string) error {
 	msg := "Ping!"
 	if len(message) > 0 && message[0] != "" {
 		msg = message[0]

@@ -16,18 +16,14 @@ import (
 
 type stubSender struct{}
 
-func (stubSender) ID() string                   { return "dev1" }
-func (stubSender) Name() string                 { return "test" }
-func (stubSender) SetName(string)               {}
-func (stubSender) State() device.PairingState   { return device.StatePaired }
-func (stubSender) SetState(device.PairingState) {}
-func (stubSender) Send(*protocol.Packet) error  { return nil }
-func (stubSender) IsConnected() bool            { return true }
-func (stubSender) RemoteIP() net.IP             { return nil }
-func (stubSender) PeerCert() *x509.Certificate  { return nil }
-func (stubSender) HasCapability(string) bool    { return true }
-func (stubSender) UpdateBattery(int, bool)      {}
-func (stubSender) GetBattery() (int, bool)      { return 0, false }
+func (stubSender) ID() string                  { return "dev1" }
+func (stubSender) Name() string                { return "test" }
+func (stubSender) State() device.PairingState  { return device.StatePaired }
+func (stubSender) Send(*protocol.Packet) error { return nil }
+func (stubSender) IsConnected() bool           { return true }
+func (stubSender) RemoteIP() net.IP            { return nil }
+func (stubSender) PeerCert() *x509.Certificate { return nil }
+func (stubSender) HasCapability(string) bool   { return true }
 
 func nextEvent(t *testing.T, ch <-chan events.Event) events.Event {
 	t.Helper()

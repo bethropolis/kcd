@@ -24,7 +24,7 @@ func TestPairedPairRequestRequiresConfirmation(t *testing.T) {
 	pl := NewPairPlugin(devices, nil, config.Defaults().Pairing, nil, bus, logger)
 	defer pl.cancelPendingTimer(dev.ID())
 	var disconnected int
-	pl.SetLifecycleCallbacks(nil, func(device.Sender) { disconnected++ })
+	pl.SetLifecycleCallbacks(nil, func(device.Peer) { disconnected++ })
 	pkt, err := protocol.NewPairPacket(protocol.PairAccept, time.Now().Unix())
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestPairingCompletionFiresConnectedCallback(t *testing.T) {
 	devices.Add(dev)
 	pl := NewPairPlugin(devices, nil, config.Defaults().Pairing, nil, nil, logger)
 	var connected int
-	pl.SetLifecycleCallbacks(func(device.Sender) { connected++ }, nil)
+	pl.SetLifecycleCallbacks(func(device.Peer) { connected++ }, nil)
 	pl.pairingDone(dev)
 	if connected != 1 {
 		t.Fatalf("paired lifecycle callbacks = %d, want 1", connected)

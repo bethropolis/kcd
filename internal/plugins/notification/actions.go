@@ -6,7 +6,7 @@ import (
 )
 
 // RequestReply sends a reply back to an Android notification.
-func (p *NotificationPlugin) RequestReply(dev device.Sender, replyID, message string) error {
+func (p *NotificationPlugin) RequestReply(dev device.Peer, replyID, message string) error {
 	pkt, err := protocol.NewPacket("kdeconnect.notification.reply", map[string]string{
 		"requestReplyId": replyID,
 		"message":        message,
@@ -18,7 +18,7 @@ func (p *NotificationPlugin) RequestReply(dev device.Sender, replyID, message st
 }
 
 // TriggerAction activates a notification action on the remote device.
-func (p *NotificationPlugin) TriggerAction(dev device.Sender, key, action string) error {
+func (p *NotificationPlugin) TriggerAction(dev device.Peer, key, action string) error {
 	pkt, err := protocol.NewPacket("kdeconnect.notification.action", map[string]string{
 		"key":    key,
 		"action": action,
@@ -31,7 +31,7 @@ func (p *NotificationPlugin) TriggerAction(dev device.Sender, key, action string
 
 // Dismiss asks the phone to clear the notification with the given ID and
 // closes the matching desktop popup, if one is tracked.
-func (p *NotificationPlugin) Dismiss(dev device.Sender, id string) error {
+func (p *NotificationPlugin) Dismiss(dev device.Peer, id string) error {
 	pkt, err := protocol.NewPacket("kdeconnect.notification.request", map[string]string{
 		"cancel": id,
 	})
@@ -51,5 +51,5 @@ func (p *NotificationPlugin) Dismiss(dev device.Sender, id string) error {
 	return nil
 }
 
-func (p *NotificationPlugin) OnConnect(_ device.Sender)    {}
-func (p *NotificationPlugin) OnDisconnect(_ device.Sender) {}
+func (p *NotificationPlugin) OnConnect(_ device.Peer)    {}
+func (p *NotificationPlugin) OnDisconnect(_ device.Peer) {}

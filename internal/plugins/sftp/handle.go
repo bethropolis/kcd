@@ -12,7 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *SftpPlugin) Handle(_ context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SftpPlugin) Handle(_ context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body SftpBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -90,9 +90,9 @@ func credentialsComplete(body SftpBody) bool {
 	return err == nil && body.IP != "" && port > 0 && port <= 65535 && body.User != "" && body.Password != ""
 }
 
-func (p *SftpPlugin) OnConnect(_ device.Sender) {}
+func (p *SftpPlugin) OnConnect(_ device.Peer) {}
 
-func (p *SftpPlugin) OnDisconnect(dev device.Sender) {
+func (p *SftpPlugin) OnDisconnect(dev device.Peer) {
 	deviceID := dev.ID()
 	// Via MountedPath, so a mount adopted from the kernel is cleaned up too
 	// rather than surviving every disconnect untouched.

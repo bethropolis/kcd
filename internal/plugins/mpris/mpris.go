@@ -30,7 +30,7 @@ type MPRISPlugin struct {
 	logger      log.Logger
 	bus         *events.Bus
 	mu          sync.RWMutex
-	devices     map[string]device.Sender
+	devices     map[string]device.Peer
 	dbus        *dbus.Conn
 
 	watchCancel     context.CancelFunc
@@ -96,7 +96,7 @@ func NewMPRISPluginWithOptions(tlsConfig *tls.Config, bus *events.Bus, pauseMusi
 		bus:               bus,
 		dbus:              dbusConn,
 		pauseMusic:        pauseMusic,
-		devices:           make(map[string]device.Sender),
+		devices:           make(map[string]device.Peer),
 		players:           make(map[string]*trackedPlayer),
 		lastTracks:        make(map[string]trackIdentity),
 		lastStates:        make(map[string]*NowPlaying),

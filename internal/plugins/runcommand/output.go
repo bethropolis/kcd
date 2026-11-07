@@ -48,7 +48,7 @@ const (
 // the phone's handler iterates them without a null check.
 type outputStream struct {
 	mu      sync.Mutex
-	dev     device.Sender
+	dev     device.Peer
 	logger  log.Logger
 	bus     *events.Bus
 	id      int32
@@ -202,7 +202,7 @@ type line struct {
 // keys rows off the started id), deferring finish so panics still release it.
 func (p *RunCommandPlugin) streamOutput(
 	ctx context.Context,
-	dev device.Sender,
+	dev device.Peer,
 	id int32,
 	key string,
 	cmd *exec.Cmd,
@@ -345,7 +345,7 @@ func scanInto(out chan<- line, r io.Reader, isStderr bool, logger log.Logger) {
 
 // finishOutput emits commandFinished and clears the registration; the phone
 // colors the line off it, so exactly once per started execution.
-func (p *RunCommandPlugin) finishOutput(dev device.Sender, id int32, success bool, exitCode int) {
+func (p *RunCommandPlugin) finishOutput(dev device.Peer, id int32, success bool, exitCode int) {
 	p.mu.Lock()
 	if byID, ok := p.running[dev.ID()]; ok {
 		delete(byID, id)

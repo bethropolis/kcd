@@ -10,7 +10,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if !p.audio.Available() {
 		return nil // No audio backend, silently ignore.
 	}
@@ -60,11 +60,11 @@ func (p *SystemVolumePlugin) Handle(ctx context.Context, dev device.Sender, pkt 
 	return nil
 }
 
-func (p *SystemVolumePlugin) sendSinkList(dev device.Sender) {
+func (p *SystemVolumePlugin) sendSinkList(dev device.Peer) {
 	p.sendSinks(dev, p.getSinks())
 }
 
-func (p *SystemVolumePlugin) sendSinks(dev device.Sender, sinks []SinkInfo) {
+func (p *SystemVolumePlugin) sendSinks(dev device.Peer, sinks []SinkInfo) {
 	pkt, err := protocol.NewPacket("kdeconnect.systemvolume", sinkListBody{SinkList: sinks})
 	if err != nil {
 		p.logger.Error("systemvolume: failed to create sink list packet", log.Error(err))
@@ -75,7 +75,7 @@ func (p *SystemVolumePlugin) sendSinks(dev device.Sender, sinks []SinkInfo) {
 	}
 }
 
-func (p *SystemVolumePlugin) OnConnect(dev device.Sender) {
+func (p *SystemVolumePlugin) OnConnect(dev device.Peer) {
 	if !p.audio.Available() {
 		return
 	}
@@ -88,4 +88,4 @@ func (p *SystemVolumePlugin) OnConnect(dev device.Sender) {
 		_ = dev.Send(pkt)
 	}()
 }
-func (p *SystemVolumePlugin) OnDisconnect(dev device.Sender) {}
+func (p *SystemVolumePlugin) OnDisconnect(dev device.Peer) {}

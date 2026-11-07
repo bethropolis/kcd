@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -37,4 +39,45 @@ func resolveDeviceID(c *cli.Context, cl *client.Client) (string, error) {
 		sort.Strings(paired)
 		return "", fmt.Errorf("multiple devices connected (%s) — pass a device ID", strings.Join(paired, ", "))
 	}
+}
+
+// deviceActionCmd generates a standardized command for actions targeting a single device.
+func deviceActionCmd(name, usage, okMsg string, fn func(*client.Client, string) error) *cli.Command {
+	return &cli.Command{
+		Name:      name,
+		Usage:     usage,
+		ArgsUsage: "[device-id]",
+		Action: func(c *cli.Context) error {
+			cl, err := getClient(c)
+			if err != nil {
+				return err
+			}
+			deviceID, err := resolveDeviceID(c, cl)
+			if err != nil {
+				return err
+			}
+			if err := fn(cl, deviceID); err != nil {
+				return err
+			}
+			if okMsg != "" {
+				fmt.Println(okMsg)
+			}
+			return nil
+		},
+	}
+}
+
+var jsonFlag = &cli.BoolFlag{
+	Name:  "json",
+	Usage: "Output as JSON",
+}
+
+// printJSON prints the given value as indented JSON.
+func printJSON(w io.Writer, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(data))
+	return err
 }

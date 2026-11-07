@@ -11,7 +11,7 @@ import (
 func TestNotifyPluginsConnectedOnlyForPairedDevice(t *testing.T) {
 	plugins := plugin.NewRegistry(log.Nop())
 	called := 0
-	plugins.Register(&stubRoutePlugin{name: "test", onConnect: func(device.Sender) { called++ }})
+	plugins.Register(&stubRoutePlugin{name: "test", onConnect: func(device.Peer) { called++ }})
 	dev := device.NewDevice("phone", "Phone", "phone", log.Nop())
 
 	notifyPluginsConnected(plugins, dev)
@@ -29,7 +29,7 @@ func TestNotifyPluginsDisconnectedOnlyForPairedDevice(t *testing.T) {
 	plugins := plugin.NewRegistry(log.Nop())
 	called := 0
 	stub := &stubRoutePlugin{name: "test"}
-	stub.onDisconnect = func(device.Sender) { called++ }
+	stub.onDisconnect = func(device.Peer) { called++ }
 	plugins.Register(stub)
 	dev := device.NewDevice("phone", "Phone", "phone", log.Nop())
 

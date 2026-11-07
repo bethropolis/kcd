@@ -2,12 +2,37 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/bethropolis/kcd/internal/ipc"
+	"github.com/urfave/cli/v2"
 )
+
+var statusCmd = &cli.Command{
+	Name:  "status",
+	Usage: "Show daemon status and runtime information",
+	Flags: []cli.Flag{
+		jsonFlag,
+	},
+	Action: func(c *cli.Context) error {
+		cl, err := getClient(c)
+		if err != nil {
+			return err
+		}
+		st, err := cl.Status()
+		if err != nil {
+			return err
+		}
+		if c.Bool("json") {
+			return printJSON(os.Stdout, st)
+		}
+		fmt.Print(formatStatus(st))
+		return nil
+	},
+}
 
 // formatStatus renders the human-readable `kcd status` output.
 func formatStatus(st *ipc.StatusResponse) string {

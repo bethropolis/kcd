@@ -530,7 +530,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-func postAndCancel(t *testing.T, p *NotificationPlugin, dev device.Sender, id string) {
+func postAndCancel(t *testing.T, p *NotificationPlugin, dev device.Peer, id string) {
 	t.Helper()
 	p.sendDesktopNotification(dev.ID(), "Pano Scrobbler", id, "Song", "Artist", "")
 	body := NotificationBody{ID: id, IsCancel: true}
@@ -624,16 +624,12 @@ type captureSender struct {
 
 func (s *captureSender) ID() string                    { return s.id }
 func (s *captureSender) Name() string                  { return "test" }
-func (s *captureSender) SetName(string)                {}
 func (s *captureSender) State() device.PairingState    { return device.StatePaired }
-func (s *captureSender) SetState(device.PairingState)  {}
 func (s *captureSender) Send(p *protocol.Packet) error { s.sent = append(s.sent, p); return nil }
 func (s *captureSender) IsConnected() bool             { return true }
 func (s *captureSender) RemoteIP() net.IP              { return nil }
 func (s *captureSender) PeerCert() *x509.Certificate   { return nil }
 func (s *captureSender) HasCapability(string) bool     { return true }
-func (s *captureSender) UpdateBattery(int, bool)       {}
-func (s *captureSender) GetBattery() (int, bool)       { return 0, false }
 
 func TestNotificationPlugin_Dismiss(t *testing.T) {
 	p := newPlugin(t)

@@ -103,7 +103,7 @@ func (p *ContactsPlugin) OutgoingTypes() []string {
 
 // OnConnect starts a sync for freshly connected paired devices, mirroring
 // upstream's connected() -> synchronizeRemoteWithLocal().
-func (p *ContactsPlugin) OnConnect(dev device.Sender) {
+func (p *ContactsPlugin) OnConnect(dev device.Peer) {
 	if dev.State() != device.StatePaired {
 		return
 	}
@@ -112,4 +112,4 @@ func (p *ContactsPlugin) OnConnect(dev device.Sender) {
 	}
 }
 
-func (p *ContactsPlugin) OnDisconnect(dev device.Sender) {}
+func (p *ContactsPlugin) OnDisconnect(dev device.Peer) {}

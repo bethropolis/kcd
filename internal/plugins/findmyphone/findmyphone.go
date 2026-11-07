@@ -28,12 +28,12 @@ func (p *FindMyPhonePlugin) OutgoingTypes() []string {
 }
 
 // Handle is a no-op — this plugin only sends packets, never receives them.
-func (p *FindMyPhonePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *FindMyPhonePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	return nil
 }
 
 // Ring sends a findmyphone request to the device, making it ring loudly.
-func (p *FindMyPhonePlugin) Ring(dev device.Sender) error {
+func (p *FindMyPhonePlugin) Ring(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.findmyphone.request", map[string]interface{}{})
 	if err != nil {
 		return err
@@ -41,5 +41,5 @@ func (p *FindMyPhonePlugin) Ring(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *FindMyPhonePlugin) OnConnect(dev device.Sender)    {}
-func (p *FindMyPhonePlugin) OnDisconnect(dev device.Sender) {}
+func (p *FindMyPhonePlugin) OnConnect(dev device.Peer)    {}
+func (p *FindMyPhonePlugin) OnDisconnect(dev device.Peer) {}

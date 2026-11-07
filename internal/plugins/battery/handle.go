@@ -12,7 +12,7 @@ import (
 )
 
 // Handle processes incoming battery packets.
-func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	switch pkt.Type {
 	case "kdeconnect.battery":
 		var body BatteryBody
@@ -26,7 +26,9 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 			return p.sendLocalState(dev)
 		}
 
-		dev.UpdateBattery(body.CurrentCharge, body.IsCharging)
+		if updater, ok := dev.(interface{ UpdateBattery(int, bool) }); ok {
+			updater.UpdateBattery(body.CurrentCharge, body.IsCharging)
+		}
 
 		if body.ThresholdEvent != thresholdNone {
 			p.handleThreshold(dev, body)
@@ -41,7 +43,7 @@ func (p *BatteryPlugin) Handle(ctx context.Context, dev device.Sender, pkt *prot
 }
 
 // sendLocalState reports the local battery to the peer.
-func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
+func (p *BatteryPlugin) sendLocalState(dev device.Peer) error {
 	charge, charging, err := readLocalBattery()
 	if err != nil {
 		p.logger.Debug("local battery unavailable, skipping response", log.Error(err))
@@ -57,7 +59,7 @@ func (p *BatteryPlugin) sendLocalState(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
+func (p *BatteryPlugin) handleThreshold(dev device.Peer, body BatteryBody) {
 	var message, urgency string
 
 	switch body.ThresholdEvent {
@@ -97,7 +99,7 @@ func (p *BatteryPlugin) handleThreshold(dev device.Sender, body BatteryBody) {
 }
 
 // OnConnect sends our local battery state if available.
-func (p *BatteryPlugin) OnConnect(dev device.Sender) {
+func (p *BatteryPlugin) OnConnect(dev device.Peer) {
 	charge, charging, err := readLocalBattery()
 	if err != nil {
 		p.logger.Debug("local battery unavailable on connect", log.Error(err))
@@ -112,4 +114,4 @@ func (p *BatteryPlugin) OnConnect(dev device.Sender) {
 	}
 }
 
-func (p *BatteryPlugin) OnDisconnect(_ device.Sender) {}
+func (p *BatteryPlugin) OnDisconnect(_ device.Peer) {}

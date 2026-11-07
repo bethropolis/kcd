@@ -32,7 +32,7 @@ func CanonicalAction(action string) string {
 
 // SendAction sends a single control request; relative seeks resolve to
 // SetPosition or error out.
-func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek, setPosition *int64, volume *int) error {
+func (p *MPRISPlugin) SendAction(dev device.Peer, player, action string, seek, setPosition *int64, volume *int) error {
 	if setPosition == nil && seek != nil {
 		state := p.RemoteState(dev.ID())
 		if state == nil {
@@ -69,7 +69,7 @@ func (p *MPRISPlugin) SendAction(dev device.Sender, player, action string, seek,
 }
 
 // requestPlayerList sends a request for the remote device's active player list.
-func (p *MPRISPlugin) requestPlayerList(dev device.Sender) error {
+func (p *MPRISPlugin) requestPlayerList(dev device.Peer) error {
 	body := MPRISRequest{RequestPlayerList: true}
 	pkt, err := protocol.NewPacket("kdeconnect.mpris.request", body)
 	if err != nil {
@@ -79,7 +79,7 @@ func (p *MPRISPlugin) requestPlayerList(dev device.Sender) error {
 }
 
 // requestPlayerStatus sends a requestNowPlaying + requestVolume for a specific player.
-func (p *MPRISPlugin) requestPlayerStatus(dev device.Sender, player string) error {
+func (p *MPRISPlugin) requestPlayerStatus(dev device.Peer, player string) error {
 	body := MPRISRequest{
 		Player:            player,
 		RequestNowPlaying: true,
@@ -93,7 +93,7 @@ func (p *MPRISPlugin) requestPlayerStatus(dev device.Sender, player string) erro
 }
 
 // RequestState sends a requestNowPlaying to refresh remote state.
-func (p *MPRISPlugin) RequestState(dev device.Sender, player string) error {
+func (p *MPRISPlugin) RequestState(dev device.Peer, player string) error {
 	if player == "" {
 		return p.requestPlayerList(dev)
 	}
@@ -191,13 +191,13 @@ func (p *MPRISPlugin) ActivePlayers() []string {
 	return players
 }
 
-func (p *MPRISPlugin) OnConnect(dev device.Sender) {
+func (p *MPRISPlugin) OnConnect(dev device.Peer) {
 	p.logger.Info("mpris: device connected, requesting player list", log.String("device_id", dev.ID()))
 	p.requestReconcile()
 	go p.requestPlayerListPeriodic(dev)
 }
 
-func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Sender) {
+func (p *MPRISPlugin) requestPlayerListPeriodic(dev device.Peer) {
 	if !dev.IsConnected() {
 		return
 	}
@@ -258,7 +258,7 @@ func (p *MPRISPlugin) pollRemoteStates() {
 	}
 	p.mu.RLock()
 	type target struct {
-		dev    device.Sender
+		dev    device.Peer
 		player string
 	}
 	var targets []target
@@ -281,7 +281,7 @@ func (p *MPRISPlugin) pollRemoteStates() {
 	}
 }
 
-func (p *MPRISPlugin) OnDisconnect(dev device.Sender) {
+func (p *MPRISPlugin) OnDisconnect(dev device.Peer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.devices, dev.ID())

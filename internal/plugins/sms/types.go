@@ -48,7 +48,7 @@ type SMSPlugin struct {
 	mu sync.RWMutex
 	// devices holds the currently connected devices, keyed by ID, so the
 	// bus hook can arm them without reaching for a registry.
-	devices map[string]device.Sender
+	devices map[string]device.Peer
 	// armedAt records per-device arm times, doubling as the armed set: arming
 	// twice would re-trigger a full history burst for no benefit.
 	armedAt map[string]time.Time
@@ -83,7 +83,7 @@ func NewSMSPlugin(cfg config.SMSConfig, bus *events.Bus, tlsConfig *tls.Config, 
 		tlsConfig:     tlsConfig,
 		logger:        logger.With(log.String("plugin", "sms")),
 		cacheDir:      cacheDir,
-		devices:       make(map[string]device.Sender),
+		devices:       make(map[string]device.Peer),
 		armedAt:       make(map[string]time.Time),
 	}
 

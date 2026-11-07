@@ -1,28 +1,9 @@
 package main
 
 import (
-	"fmt"
-
-	"github.com/urfave/cli/v2"
+	"github.com/bethropolis/kcd/pkg/client"
 )
 
-var unlockCmd = &cli.Command{
-	Name:      "unlock",
-	Usage:     "Unlock the screen of a remote device",
-	ArgsUsage: "[device-id]",
-	Action: func(c *cli.Context) error {
-		cl, err := getClient(c)
-		if err != nil {
-			return err
-		}
-		deviceID, err := resolveDeviceID(c, cl)
-		if err != nil {
-			return err
-		}
-		if err := cl.Unlock(deviceID); err != nil {
-			return err
-		}
-		fmt.Println("Unlock requested")
-		return nil
-	},
-}
+var unlockCmd = deviceActionCmd("unlock", "Unlock the screen of a remote device", "Unlock requested", func(cl *client.Client, id string) error {
+	return cl.Unlock(id)
+})

@@ -18,7 +18,7 @@ import (
 )
 
 // handleAttachmentFile downloads an MMS attachment file sent by the phone.
-func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *SMSPlugin) handleAttachmentFile(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Body == nil {
 		return nil
 	}

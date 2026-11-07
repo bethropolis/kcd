@@ -249,9 +249,9 @@ const inputCommandTimeout = 2 * time.Second
 
 // OnConnect explicitly tells the Android app that this device supports Keyboard input.
 // Without this, the Android app will not show the keyboard icon in the Remote Input UI.
-func (p *MousepadPlugin) OnConnect(dev device.Sender) {
+func (p *MousepadPlugin) OnConnect(dev device.Peer) {
 	pkt, _ := protocol.NewPacket("kdeconnect.mousepad.keyboardstate", map[string]bool{"state": true})
 	dev.Send(pkt)
 }
 
-func (p *MousepadPlugin) OnDisconnect(_ device.Sender) {}
+func (p *MousepadPlugin) OnDisconnect(_ device.Peer) {}

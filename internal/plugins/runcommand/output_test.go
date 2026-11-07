@@ -25,17 +25,13 @@ type outputSender struct {
 	sent []*protocol.Packet
 }
 
-func (s *outputSender) ID() string                   { return s.id }
-func (s *outputSender) Name() string                 { return "Test" }
-func (s *outputSender) SetName(string)               {}
-func (s *outputSender) State() device.PairingState   { return device.StatePaired }
-func (s *outputSender) SetState(device.PairingState) {}
-func (s *outputSender) IsConnected() bool            { return true }
-func (s *outputSender) RemoteIP() net.IP             { return nil }
-func (s *outputSender) PeerCert() *x509.Certificate  { return nil }
-func (s *outputSender) HasCapability(string) bool    { return true }
-func (s *outputSender) UpdateBattery(int, bool)      {}
-func (s *outputSender) GetBattery() (int, bool)      { return 0, false }
+func (s *outputSender) ID() string                  { return s.id }
+func (s *outputSender) Name() string                { return "Test" }
+func (s *outputSender) State() device.PairingState  { return device.StatePaired }
+func (s *outputSender) IsConnected() bool           { return true }
+func (s *outputSender) RemoteIP() net.IP            { return nil }
+func (s *outputSender) PeerCert() *x509.Certificate { return nil }
+func (s *outputSender) HasCapability(string) bool   { return true }
 
 func (s *outputSender) Send(p *protocol.Packet) error {
 	s.mu.Lock()

@@ -12,7 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *PairPlugin) Handle(ctx context.Context, sender device.Sender, pkt *protocol.Packet) error {
+func (p *PairPlugin) Handle(ctx context.Context, sender device.Peer, pkt *protocol.Packet) error {
 	var body protocol.PairBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err

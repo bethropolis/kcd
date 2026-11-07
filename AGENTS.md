@@ -125,9 +125,9 @@ type Plugin interface {
     IncomingTypes() []string   // packet types handled inbound
     OutgoingTypes() []string   // packet types sent
     Timeout() time.Duration    // dispatch budget for Handle
-    Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error
-    OnConnect(dev device.Sender)
-    OnDisconnect(dev device.Sender)
+    Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error
+    OnConnect(dev device.Peer)
+    OnDisconnect(dev device.Peer)
 }
 ```
 

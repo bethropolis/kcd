@@ -25,7 +25,7 @@ type Registry struct {
 }
 
 type policySender struct {
-	device.Sender
+	device.Peer
 	allowed    func(string, string) bool
 	pluginName string
 	logger     log.Logger
@@ -41,7 +41,20 @@ func (s *policySender) Send(pkt *protocol.Packet) error {
 		protocol.ReleasePacket(pkt)
 		return nil
 	}
-	return s.Sender.Send(pkt)
+	return s.Peer.Send(pkt)
+}
+
+func (s *policySender) UpdateBattery(charge int, charging bool) {
+	if updater, ok := s.Peer.(interface{ UpdateBattery(int, bool) }); ok {
+		updater.UpdateBattery(charge, charging)
+	}
+}
+
+func (s *policySender) GetBattery() (int, bool) {
+	if getter, ok := s.Peer.(interface{ GetBattery() (int, bool) }); ok {
+		return getter.GetBattery()
+	}
+	return 0, false
 }
 
 // SetDevicePluginPolicy installs per-device inbound plugin gating.
@@ -85,7 +98,7 @@ func (r *Registry) Register(p Plugin) {
 // Dispatch routes an incoming packet to the appropriate plugin. True means
 // processed in time and safe to recycle; false means a timed-out handler
 // may still hold it — the caller must NOT recycle.
-func (r *Registry) Dispatch(ctx context.Context, dev device.Sender, pkt *protocol.Packet) bool {
+func (r *Registry) Dispatch(ctx context.Context, dev device.Peer, pkt *protocol.Packet) bool {
 	r.mu.RLock()
 	p, ok := r.plugins[pkt.Type]
 	r.mu.RUnlock()
@@ -174,25 +187,25 @@ func (r *Registry) All() []Plugin {
 }
 
 // OnConnect is called when a device connects. It calls OnConnect on all registered plugins.
-func (r *Registry) OnConnect(dev device.Sender) {
+func (r *Registry) OnConnect(dev device.Peer) {
 	for _, p := range r.All() {
 		p.OnConnect(r.senderFor(p, dev))
 	}
 }
 
 // OnDisconnect is called when a device disconnects. It calls OnDisconnect on all registered plugins.
-func (r *Registry) OnDisconnect(dev device.Sender) {
+func (r *Registry) OnDisconnect(dev device.Peer) {
 	for _, p := range r.All() {
 		p.OnDisconnect(r.senderFor(p, dev))
 	}
 }
 
-func (r *Registry) senderFor(p Plugin, dev device.Sender) device.Sender {
+func (r *Registry) senderFor(p Plugin, dev device.Peer) device.Peer {
 	r.mu.RLock()
 	policy := r.devicePluginEnabled
 	r.mu.RUnlock()
 	return &policySender{
-		Sender:     dev,
+		Peer:       dev,
 		allowed:    policy,
 		pluginName: p.Name(),
 		logger:     r.logger,

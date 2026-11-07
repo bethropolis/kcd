@@ -13,6 +13,9 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
+var _ Sender = (*Device)(nil)
+var _ Peer = (*Device)(nil)
+
 // Device represents an active KDE Connect remote device.
 type Device struct {
 	id   string

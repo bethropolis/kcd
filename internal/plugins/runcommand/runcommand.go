@@ -102,7 +102,7 @@ func (p *RunCommandPlugin) OutgoingTypes() []string {
 }
 
 // Handle processes incoming command requests.
-func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	if pkt.Type == "kdeconnect.runcommand" {
 		p.handleListReply(dev, pkt)
 		return nil
@@ -207,7 +207,7 @@ func (p *RunCommandPlugin) Handle(ctx context.Context, dev device.Sender, pkt *p
 
 // sendStarted announces a beginning execution. The phone registers the id
 // against a display row here, so it must precede any output for that id.
-func (p *RunCommandPlugin) sendStarted(dev device.Sender, id int32, command string) error {
+func (p *RunCommandPlugin) sendStarted(dev device.Peer, id int32, command string) error {
 	pkt, err := protocol.NewPacket(PacketTypeOutput, map[string]any{
 		"commandStarted": true,
 		"id":             id,
@@ -220,7 +220,7 @@ func (p *RunCommandPlugin) sendStarted(dev device.Sender, id int32, command stri
 }
 
 // SendCommandList pushes the command list to the peer.
-func (p *RunCommandPlugin) SendCommandList(dev device.Sender) error {
+func (p *RunCommandPlugin) SendCommandList(dev device.Peer) error {
 	p.mu.RLock()
 	cmds := p.commands
 	perDev := p.commandsPerDevice[dev.ID()]
@@ -253,7 +253,7 @@ func (p *RunCommandPlugin) SendCommandList(dev device.Sender) error {
 }
 
 // OnConnect pushes the command list when a paired device connects.
-func (p *RunCommandPlugin) OnConnect(dev device.Sender) {
+func (p *RunCommandPlugin) OnConnect(dev device.Peer) {
 	if err := p.SendCommandList(dev); err != nil {
 		p.logger.Warn("failed to send command list on connect",
 			log.String("device_id", dev.ID()),
@@ -264,6 +264,6 @@ func (p *RunCommandPlugin) OnConnect(dev device.Sender) {
 
 // OnDisconnect cancels anything still running for the device, so a command
 // does not outlive the connection that asked for it.
-func (p *RunCommandPlugin) OnDisconnect(dev device.Sender) {
+func (p *RunCommandPlugin) OnDisconnect(dev device.Peer) {
 	p.stopAll(dev.ID())
 }

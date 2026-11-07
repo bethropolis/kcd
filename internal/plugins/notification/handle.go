@@ -14,7 +14,7 @@ import (
 )
 
 // Handle processes an incoming notification.
-func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *NotificationPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body NotificationBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err

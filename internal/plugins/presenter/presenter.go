@@ -73,12 +73,12 @@ func (p *PresenterPlugin) Timeout() time.Duration  { return 2 * time.Second }
 func (p *PresenterPlugin) IncomingTypes() []string { return []string{"kdeconnect.presenter"} }
 func (p *PresenterPlugin) OutgoingTypes() []string { return nil }
 
-func (p *PresenterPlugin) OnConnect(_ device.Sender)    {}
-func (p *PresenterPlugin) OnDisconnect(_ device.Sender) {}
+func (p *PresenterPlugin) OnConnect(_ device.Peer)    {}
+func (p *PresenterPlugin) OnDisconnect(_ device.Peer) {}
 
 // Handle dispatches a presenter packet to the worker goroutine.
 // It returns immediately as required by the plugin contract.
-func (p *PresenterPlugin) Handle(_ context.Context, _ device.Sender, pkt *protocol.Packet) error {
+func (p *PresenterPlugin) Handle(_ context.Context, _ device.Peer, pkt *protocol.Packet) error {
 	var body PresenterBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err

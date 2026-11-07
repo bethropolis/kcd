@@ -36,7 +36,7 @@ func coerceTimestamp(raw json.RawMessage) int64 {
 
 // handleUIDsResponse diffs the phone's list against cache: delete stale,
 // request new/changed vCards. dev.Send is channel-safe across goroutines.
-func (p *ContactsPlugin) handleUIDsResponse(dev device.Sender, body []byte) {
+func (p *ContactsPlugin) handleUIDsResponse(dev device.Peer, body []byte) {
 	deviceID := dev.ID()
 
 	// Cache diff under lock; the vCard request round below does network

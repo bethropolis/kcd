@@ -49,7 +49,7 @@ func (p *TelephonyPlugin) OutgoingTypes() []string {
 	return []string{"kdeconnect.telephony.request_mute"}
 }
 
-func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	var body TelephonyBody
 	if err := json.Unmarshal(pkt.Body, &body); err != nil {
 		return err
@@ -106,7 +106,7 @@ func (p *TelephonyPlugin) Handle(ctx context.Context, dev device.Sender, pkt *pr
 	return nil
 }
 
-func (p *TelephonyPlugin) Mute(dev device.Sender) error {
+func (p *TelephonyPlugin) Mute(dev device.Peer) error {
 	pkt, err := protocol.NewPacket("kdeconnect.telephony.request_mute", map[string]string{})
 	if err != nil {
 		return err
@@ -114,5 +114,5 @@ func (p *TelephonyPlugin) Mute(dev device.Sender) error {
 	return dev.Send(pkt)
 }
 
-func (p *TelephonyPlugin) OnConnect(dev device.Sender)    {}
-func (p *TelephonyPlugin) OnDisconnect(dev device.Sender) {}
+func (p *TelephonyPlugin) OnConnect(dev device.Peer)    {}
+func (p *TelephonyPlugin) OnDisconnect(dev device.Peer) {}

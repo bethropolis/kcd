@@ -29,6 +29,7 @@ type FakeSender struct {
 }
 
 var _ device.Sender = (*FakeSender)(nil)
+var _ device.Peer = (*FakeSender)(nil)
 
 // NewFakeSender creates a connected sender with initialized notification state.
 func NewFakeSender(id string) *FakeSender {

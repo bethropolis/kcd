@@ -19,18 +19,14 @@ type testSender struct {
 	id string
 }
 
-func (s testSender) ID() string                              { return s.id }
-func (s testSender) Name() string                            { return "" }
-func (s testSender) SetName(string)                          {}
-func (s testSender) State() device.PairingState              { return device.StateUnpaired }
-func (s testSender) SetState(device.PairingState)            {}
-func (s testSender) Send(*protocol.Packet) error             { return nil }
-func (s testSender) IsConnected() bool                       { return true }
-func (s testSender) RemoteIP() net.IP                        { return nil }
-func (s testSender) PeerCert() *x509.Certificate             { return nil }
-func (s testSender) HasCapability(string) bool               { return false }
-func (s testSender) UpdateBattery(charge int, charging bool) {}
-func (s testSender) GetBattery() (int, bool)                 { return 0, false }
+func (s testSender) ID() string                  { return s.id }
+func (s testSender) Name() string                { return "" }
+func (s testSender) State() device.PairingState  { return device.StateUnpaired }
+func (s testSender) Send(*protocol.Packet) error { return nil }
+func (s testSender) IsConnected() bool           { return true }
+func (s testSender) RemoteIP() net.IP            { return nil }
+func (s testSender) PeerCert() *x509.Certificate { return nil }
+func (s testSender) HasCapability(string) bool   { return false }
 
 // countingSender records outbound packets so a no-op can be asserted rather
 // than inferred from the absence of output.

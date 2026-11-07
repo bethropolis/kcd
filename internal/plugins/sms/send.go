@@ -11,7 +11,7 @@ import (
 
 // --- SMS sending -----------------------------------------------------------
 
-func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string, subID ...int64) error {
+func (p *SMSPlugin) SendSMS(dev device.Peer, phoneNumber, message string, subID ...int64) error {
 	// v2 schema: the phone reads only messageBody with addresses as recipients
 	// (phoneNumber is legacy fallback); without them it sends a blank SMS.
 	body := map[string]any{
@@ -34,7 +34,7 @@ func (p *SMSPlugin) SendSMS(dev device.Sender, phoneNumber, message string, subI
 
 // RequestConversations asks the phone for a summary of all conversations;
 // bodyless means {} (never null — see contacts.RequestSync for why).
-func (p *SMSPlugin) RequestConversations(dev device.Sender) error {
+func (p *SMSPlugin) RequestConversations(dev device.Peer) error {
 	pkt, err := protocol.NewPacket(PacketTypeSMSRequestConvs, map[string]any{})
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ const defaultNumberToRequest = 500
 
 // RequestConversation asks the phone for messages in a specific thread.
 // Pass -1 for rangeStartTimestamp; if numberToRequest < 0 it defaults to 500.
-func (p *SMSPlugin) RequestConversation(dev device.Sender, threadID int64, rangeStartTimestamp int64, numberToRequest int64) error {
+func (p *SMSPlugin) RequestConversation(dev device.Peer, threadID int64, rangeStartTimestamp int64, numberToRequest int64) error {
 	body := map[string]any{
 		"threadID": threadID,
 	}
@@ -66,7 +66,7 @@ func (p *SMSPlugin) RequestConversation(dev device.Sender, threadID int64, range
 
 // RequestAttachment asks the phone to send an MMS attachment file.
 // Optional threadID is tracked to enrich the subsequent sms.attachment event.
-func (p *SMSPlugin) RequestAttachment(dev device.Sender, partID int64, uniqueIdentifier string, threadID ...int64) error {
+func (p *SMSPlugin) RequestAttachment(dev device.Peer, partID int64, uniqueIdentifier string, threadID ...int64) error {
 	if len(threadID) > 0 && threadID[0] > 0 {
 		p.attachmentThreads.Store(uniqueIdentifier, threadID[0])
 	}
@@ -100,7 +100,7 @@ func (p *SMSPlugin) syncArming() {
 	}
 
 	p.mu.Lock()
-	targets := make([]device.Sender, 0, len(p.devices))
+	targets := make([]device.Peer, 0, len(p.devices))
 	now := time.Now()
 	for id, dev := range p.devices {
 		if _, ok := p.armedAt[id]; ok {
@@ -137,7 +137,7 @@ func (p *SMSPlugin) syncArming() {
 
 // OnConnect tracks the device and re-arms it: the phone's arm flag survives
 // reconnects but not app restarts, so per-connection arming is the only recovery.
-func (p *SMSPlugin) OnConnect(dev device.Sender) {
+func (p *SMSPlugin) OnConnect(dev device.Peer) {
 	p.mu.Lock()
 	p.devices[dev.ID()] = dev
 	delete(p.armedAt, dev.ID())
@@ -147,7 +147,7 @@ func (p *SMSPlugin) OnConnect(dev device.Sender) {
 }
 
 // OnDisconnect forgets the device so the next connect re-arms it.
-func (p *SMSPlugin) OnDisconnect(dev device.Sender) {
+func (p *SMSPlugin) OnDisconnect(dev device.Peer) {
 	p.mu.Lock()
 	delete(p.devices, dev.ID())
 	delete(p.armedAt, dev.ID())

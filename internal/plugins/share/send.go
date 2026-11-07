@@ -16,7 +16,7 @@ import (
 	"github.com/bethropolis/kcd/internal/transport"
 )
 
-func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath string) error {
+func (p *SharePlugin) SendFile(ctx context.Context, dev device.Peer, filePath string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("share: open file: %w", err)
@@ -110,7 +110,7 @@ func (p *SharePlugin) SendFile(ctx context.Context, dev device.Sender, filePath 
 }
 
 // SendText sends a text snippet to the remote device.
-func (p *SharePlugin) SendText(ctx context.Context, dev device.Sender, text string) error {
+func (p *SharePlugin) SendText(ctx context.Context, dev device.Peer, text string) error {
 	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
 		Text: text,
 	})
@@ -121,7 +121,7 @@ func (p *SharePlugin) SendText(ctx context.Context, dev device.Sender, text stri
 }
 
 // SendURL sends a URL to open on the remote device.
-func (p *SharePlugin) SendURL(ctx context.Context, dev device.Sender, url string) error {
+func (p *SharePlugin) SendURL(ctx context.Context, dev device.Peer, url string) error {
 	pkt, err := protocol.NewPacket("kdeconnect.share.request", ShareBody{
 		Url: url,
 	})
@@ -131,5 +131,5 @@ func (p *SharePlugin) SendURL(ctx context.Context, dev device.Sender, url string
 	return dev.Send(pkt)
 }
 
-func (p *SharePlugin) OnConnect(dev device.Sender)    {}
-func (p *SharePlugin) OnDisconnect(dev device.Sender) {}
+func (p *SharePlugin) OnConnect(dev device.Peer)    {}
+func (p *SharePlugin) OnDisconnect(dev device.Peer) {}

@@ -12,7 +12,7 @@ import (
 	"github.com/bethropolis/kcd/internal/protocol"
 )
 
-func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	p.mu.Lock()
 	if _, exists := p.devices[dev.ID()]; !exists {
 		p.devices[dev.ID()] = dev

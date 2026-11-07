@@ -26,8 +26,8 @@ type PairPlugin struct {
 	devices        *device.Registry
 	localCert      *x509.Certificate
 	onStateChanged func() // callback to persist state
-	onPaired       func(device.Sender)
-	onUnpaired     func(device.Sender)
+	onPaired       func(device.Peer)
+	onUnpaired     func(device.Peer)
 	logger         log.Logger
 	bus            *events.Bus
 	cfg            config.PairingConfig
@@ -55,7 +55,7 @@ func NewPairPlugin(devices *device.Registry, localCert *x509.Certificate, cfg co
 }
 
 // SetLifecycleCallbacks sets plugin callbacks for pairing and unpairing transitions.
-func (p *PairPlugin) SetLifecycleCallbacks(onPaired, onUnpaired func(device.Sender)) {
+func (p *PairPlugin) SetLifecycleCallbacks(onPaired, onUnpaired func(device.Peer)) {
 	p.onPaired = onPaired
 	p.onUnpaired = onUnpaired
 }
@@ -109,6 +109,6 @@ func (p *PairPlugin) OutgoingTypes() []string {
 	return []string{protocol.TypePair}
 }
 
-func (p *PairPlugin) OnConnect(dev device.Sender) {}
+func (p *PairPlugin) OnConnect(dev device.Peer) {}
 
-func (p *PairPlugin) OnDisconnect(dev device.Sender) {}
+func (p *PairPlugin) OnDisconnect(dev device.Peer) {}

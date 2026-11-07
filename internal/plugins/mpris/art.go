@@ -91,7 +91,7 @@ func (p *MPRISPlugin) authorizeOutboundArt(player, rawRequestedURL string) (stri
 	return "", fmt.Errorf("requested path %q is not advertised by an active player", reqPath)
 }
 
-func (p *MPRISPlugin) sendAlbumArt(dev device.Sender, player, artUrl string) {
+func (p *MPRISPlugin) sendAlbumArt(dev device.Peer, player, artUrl string) {
 	filePath, err := p.authorizeOutboundArt(player, artUrl)
 	if err != nil {
 		p.logger.Warn("mpris: reject unauthorized album art request",
@@ -151,7 +151,7 @@ func (p *MPRISPlugin) sendAlbumArt(dev device.Sender, player, artUrl string) {
 
 // requestAlbumArt asks the remote device to stream the album art bytes
 // referenced by a kdeconnect:/artUri URI over a side channel.
-func (p *MPRISPlugin) requestAlbumArt(dev device.Sender, player, artUrl string) {
+func (p *MPRISPlugin) requestAlbumArt(dev device.Peer, player, artUrl string) {
 	if player == "" || artUrl == "" {
 		return
 	}
@@ -179,7 +179,7 @@ func (p *MPRISPlugin) requestAlbumArt(dev device.Sender, player, artUrl string) 
 
 // receiveAlbumArt streams an inbound art payload into the cache and
 // re-publishes state with the resolved file:// URL for watchers.
-func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Sender, player, artUrl string, size int64, port int) {
+func (p *MPRISPlugin) receiveAlbumArt(_ context.Context, dev device.Peer, player, artUrl string, size int64, port int) {
 	remoteIP := dev.RemoteIP()
 	if remoteIP == nil {
 		return

@@ -31,7 +31,7 @@ type commandEntry struct {
 // RequestList asks the device for its command list, registering the waiter
 // first so a fast phone cannot answer into a void. Fails on disconnect,
 // send error, or listTimeout.
-func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) ([]Command, error) {
+func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Peer) ([]Command, error) {
 	waiter := make(chan []Command, 1)
 
 	p.mu.Lock()
@@ -120,7 +120,7 @@ func parseCommandList(raw string) ([]Command, error) {
 
 // handleListReply processes a kdeconnect.runcommand packet carrying the
 // peer's command list.
-func (p *RunCommandPlugin) handleListReply(dev device.Sender, pkt *protocol.Packet) {
+func (p *RunCommandPlugin) handleListReply(dev device.Peer, pkt *protocol.Packet) {
 	var body struct {
 		CommandList string `json:"commandList"`
 	}

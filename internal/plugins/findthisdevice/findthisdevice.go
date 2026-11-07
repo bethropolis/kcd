@@ -39,7 +39,7 @@ func (p *FindThisDevicePlugin) IncomingTypes() []string {
 }
 func (p *FindThisDevicePlugin) OutgoingTypes() []string { return []string{} }
 
-func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Sender, pkt *protocol.Packet) error {
+func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol.Packet) error {
 	p.logger.Info("ring request received", log.String("device_id", dev.ID()))
 
 	if !p.playing.CompareAndSwap(false, true) {
@@ -56,8 +56,8 @@ func (p *FindThisDevicePlugin) Handle(ctx context.Context, dev device.Sender, pk
 	return nil
 }
 
-func (p *FindThisDevicePlugin) OnConnect(dev device.Sender)    {}
-func (p *FindThisDevicePlugin) OnDisconnect(dev device.Sender) {}
+func (p *FindThisDevicePlugin) OnConnect(dev device.Peer)    {}
+func (p *FindThisDevicePlugin) OnDisconnect(dev device.Peer) {}
 
 func (p *FindThisDevicePlugin) playAlarm() {
 	soundFile := p.findSoundFile()
