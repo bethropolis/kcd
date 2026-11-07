@@ -3,6 +3,8 @@ package sysexec
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -20,8 +22,33 @@ type Runner interface {
 	LookPath(string) (string, error)
 }
 
+// StreamRunner is an optional interface for runners that support streaming commands.
+type StreamRunner interface {
+	StartStream(context.Context, string, ...string) (io.WriteCloser, error)
+}
+
 // OSRunner executes commands using the host process APIs.
 type OSRunner struct{}
+
+func (OSRunner) StartStream(ctx context.Context, name string, args ...string) (io.WriteCloser, error) {
+	cmd := newCommand(ctx, name, args...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		_ = stdin.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+	return stdin, nil
+}
 
 func (OSRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return newCommand(ctx, name, args...).CombinedOutput()
@@ -84,6 +111,14 @@ func (e *Exec) Output(ctx context.Context, name string, args ...string) ([]byte,
 
 func (e *Exec) RunInput(ctx context.Context, input, name string, args ...string) ([]byte, error) {
 	return e.runner.RunInput(ctx, input, name, args...)
+}
+
+// StartStream begins a streaming command using the configured runner if supported.
+func (e *Exec) StartStream(ctx context.Context, name string, args ...string) (io.WriteCloser, error) {
+	if sr, ok := e.runner.(StreamRunner); ok {
+		return sr.StartStream(ctx, name, args...)
+	}
+	return nil, errors.New("streaming not supported by runner")
 }
 
 // RunInputEnv runs a command with additional environment entries when the

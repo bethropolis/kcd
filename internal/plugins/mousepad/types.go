@@ -3,6 +3,8 @@ package mousepad
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"sync"
 
 	"github.com/bendahl/uinput"
@@ -18,6 +20,12 @@ type MousepadPlugin struct {
 	useYdotool bool
 	useUinput  bool
 	isWayland  bool
+
+	xdotoolMu sync.Mutex
+	xdotoolIn io.WriteCloser
+
+	ydotoolMu   sync.Mutex
+	ydotoolConn net.Conn
 
 	// uinput devices
 	mouse    uinput.Mouse
