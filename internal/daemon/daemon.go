@@ -322,10 +322,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 				// Reload RunCommand plugin commands.
 				if pl, ok := plugins.GetByName("RunCommand"); ok {
 					rc := pl.(*runcommand.RunCommandPlugin)
-					rc.Mu.Lock()
-					rc.Commands = newCfg.Commands
-					rc.CommandsPerDevice = newCfg.CommandsPerDevice
-					rc.Mu.Unlock()
+					rc.SetCommands(newCfg.Commands, newCfg.CommandsPerDevice)
+					for _, dev := range devices.Connected() {
+						if err := rc.SendCommandList(dev); err != nil {
+							logger.Warn("failed to push commands on reload",
+								log.String("device_id", dev.ID()),
+								log.Error(err),
+							)
+						}
+					}
 					logger.Info("reloaded commands",
 						log.Int("global", len(newCfg.Commands)),
 						log.Int("per_device", len(newCfg.CommandsPerDevice)),

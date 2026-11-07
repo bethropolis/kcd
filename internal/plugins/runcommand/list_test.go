@@ -100,9 +100,9 @@ func TestRequestListReleasesWaiterAfterReply(t *testing.T) {
 		}
 	}
 
-	p.Mu.RLock()
+	p.mu.RLock()
 	pending := len(p.pendingLists)
-	p.Mu.RUnlock()
+	p.mu.RUnlock()
 	if pending != 0 {
 		t.Errorf("%d waiters left registered after completion, want 0", pending)
 	}
@@ -191,9 +191,9 @@ func TestRequestListRejectsConcurrentRequest(t *testing.T) {
 	// Give the first request time to register its waiter.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Mu.RLock()
+		p.mu.RLock()
 		_, busy := p.pendingLists["dev1"]
-		p.Mu.RUnlock()
+		p.mu.RUnlock()
 		if busy {
 			break
 		}

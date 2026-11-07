@@ -133,6 +133,9 @@ func TestOutputPacketOrdering(t *testing.T) {
 	if last["success"] != true {
 		t.Errorf("success = %v, want true for a command that worked", last["success"])
 	}
+	if exitCode, ok := last["exitCode"].(float64); !ok || int(exitCode) != 0 {
+		t.Errorf("exitCode = %v, want 0", last["exitCode"])
+	}
 }
 
 // getStringList returns null for a missing key and the phone iterates both
@@ -306,11 +309,11 @@ func TestStopRequestCancelsExecution(t *testing.T) {
 	var id int32
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Mu.RLock()
+		p.mu.RLock()
 		for candidate := range p.running["dev1"] {
 			id = candidate
 		}
-		p.Mu.RUnlock()
+		p.mu.RUnlock()
 		if id != 0 {
 			break
 		}
@@ -338,9 +341,62 @@ func TestStopRequestCancelsExecution(t *testing.T) {
 		t.Fatal("stop did not cancel the execution")
 	}
 
-	p.Mu.RLock()
+	p.mu.RLock()
 	remaining := len(p.running["dev1"])
-	p.Mu.RUnlock()
+	p.mu.RUnlock()
+	if remaining != 0 {
+		t.Errorf("%d executions still registered after stop", remaining)
+	}
+}
+
+// Android sends {"stop": true} without any execution id.
+func TestStopRequestWithoutIDCancelsAll(t *testing.T) {
+	p := newTestPlugin(map[string]string{"long1": "sleep 30", "long2": "sleep 30"})
+	dev := &outputSender{id: "dev1"}
+
+	if err := p.Handle(context.Background(), dev, &protocol.Packet{
+		Type: "kdeconnect.runcommand.request",
+		Body: json.RawMessage(`{"key":"long1"}`),
+	}); err != nil {
+		t.Fatalf("Handle long1: %v", err)
+	}
+	if err := p.Handle(context.Background(), dev, &protocol.Packet{
+		Type: "kdeconnect.runcommand.request",
+		Body: json.RawMessage(`{"key":"long2"}`),
+	}); err != nil {
+		t.Fatalf("Handle long2: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		p.mu.RLock()
+		n := len(p.running["dev1"])
+		p.mu.RUnlock()
+		if n == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	stop := &protocol.Packet{
+		Type: "kdeconnect.runcommand.request",
+		Body: json.RawMessage(`{"stop": true}`),
+	}
+	if err := p.Handle(context.Background(), dev, stop); err != nil {
+		t.Fatalf("stop Handle: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() { p.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop without id did not cancel executions")
+	}
+
+	p.mu.RLock()
+	remaining := len(p.running["dev1"])
+	p.mu.RUnlock()
 	if remaining != 0 {
 		t.Errorf("%d executions still registered after stop", remaining)
 	}
@@ -360,9 +416,9 @@ func TestOnDisconnectCancelsRunning(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Mu.RLock()
+		p.mu.RLock()
 		n := len(p.running["dev1"])
-		p.Mu.RUnlock()
+		p.mu.RUnlock()
 		if n > 0 {
 			break
 		}
@@ -447,11 +503,11 @@ func TestStopCancelsCommandThatForksChildren(t *testing.T) {
 	var id int32
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Mu.RLock()
+		p.mu.RLock()
 		for candidate := range p.running["dev1"] {
 			id = candidate
 		}
-		p.Mu.RUnlock()
+		p.mu.RUnlock()
 		if id != 0 {
 			break
 		}

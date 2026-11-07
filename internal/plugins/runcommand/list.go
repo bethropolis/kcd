@@ -34,18 +34,18 @@ type commandEntry struct {
 func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) ([]Command, error) {
 	waiter := make(chan []Command, 1)
 
-	p.Mu.Lock()
+	p.mu.Lock()
 	if p.pendingLists == nil {
 		p.pendingLists = make(map[string]chan []Command)
 	}
 	// A second concurrent request for the same device would race for the
 	// single reply; fail loudly rather than silently dropping one.
 	if _, busy := p.pendingLists[dev.ID()]; busy {
-		p.Mu.Unlock()
+		p.mu.Unlock()
 		return nil, fmt.Errorf("runcommand: a command list request for %s is already in flight", dev.ID())
 	}
 	p.pendingLists[dev.ID()] = waiter
-	p.Mu.Unlock()
+	p.mu.Unlock()
 
 	defer p.clearListWaiter(dev.ID())
 
@@ -71,17 +71,17 @@ func (p *RunCommandPlugin) RequestList(ctx context.Context, dev device.Sender) (
 // clearListWaiter drops a registered waiter so a later request is not
 // blocked by an abandoned one.
 func (p *RunCommandPlugin) clearListWaiter(deviceID string) {
-	p.Mu.Lock()
-	defer p.Mu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	delete(p.pendingLists, deviceID)
 }
 
 // deliverCommandList hands a decoded reply to the waiter, non-blocking: a
 // waiterless reply must not stall the device's read loop.
 func (p *RunCommandPlugin) deliverCommandList(deviceID string, commands []Command) {
-	p.Mu.RLock()
+	p.mu.RLock()
 	waiter := p.pendingLists[deviceID]
-	p.Mu.RUnlock()
+	p.mu.RUnlock()
 
 	if waiter == nil {
 		p.logger.Debug("runcommand: command list with no waiter, dropping",
