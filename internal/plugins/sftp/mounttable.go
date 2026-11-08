@@ -4,11 +4,21 @@ import (
 	"bufio"
 	"os"
 	"strings"
+	"sync"
 )
 
 // mountTablePath reads /proc directly instead of shelling out, so there is
-// no external dependency to fail. It is a var so tests can fixture it.
-var mountTablePath = "/proc/mounts"
+// no external dependency to fail. It is fixtureable by tests.
+var (
+	mountTableMu   sync.RWMutex
+	mountTablePath = "/proc/mounts"
+)
+
+func currentMountTablePath() string {
+	mountTableMu.RLock()
+	defer mountTableMu.RUnlock()
+	return mountTablePath
+}
 
 // liveMountPoint asks the kernel, not the map: in-memory state forgets
 // live FUSE mounts across restarts, and persisting would go stale on crash.
@@ -23,7 +33,7 @@ func mountExists(path string) bool {
 // eachMount returns the first matching FUSE mount. FUSE-only on purpose:
 // adopting an unrelated same-named mount risks fusermount against it.
 func eachMount(match func(mountPoint string) bool) (string, bool) {
-	f, err := os.Open(mountTablePath)
+	f, err := os.Open(currentMountTablePath())
 	if err != nil {
 		return "", false
 	}

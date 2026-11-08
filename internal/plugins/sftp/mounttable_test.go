@@ -41,9 +41,15 @@ func useFakeMountTable(t *testing.T, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	mountTableMu.Lock()
 	orig := mountTablePath
 	mountTablePath = path
-	t.Cleanup(func() { mountTablePath = orig })
+	mountTableMu.Unlock()
+	t.Cleanup(func() {
+		mountTableMu.Lock()
+		mountTablePath = orig
+		mountTableMu.Unlock()
+	})
 }
 
 // A mount the daemon has forgotten but the kernel still has is the

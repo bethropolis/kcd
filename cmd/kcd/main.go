@@ -51,10 +51,11 @@ func reportConfigWarnings(cfg *config.Config) {
 	}
 }
 
-// sftpCredentialDeadline outlasts the daemon's wait so failures report the
-// phone not answering (usually denied file access), not a socket timeout.
+// sftpCredentialDeadline outlasts the daemon's wait for credentials and
+// kernel mount verification so failures report the phone or sshfs error, not a
+// client socket timeout.
 func sftpCredentialDeadline(seconds int) time.Duration {
-	const overhead = 10 * time.Second
+	const overhead = 15 * time.Second
 	const maxDuration = time.Duration(1<<63 - 1)
 	if seconds <= 0 {
 		seconds = 20

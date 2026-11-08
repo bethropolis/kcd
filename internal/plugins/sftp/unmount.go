@@ -17,10 +17,18 @@ import (
 )
 
 func (p *SftpPlugin) Unmount(deviceID string) error {
+	p.mu.RLock()
+	_, hadCached := p.mountPoints[deviceID]
+	p.mu.RUnlock()
+
 	// Resolved, not read from the map: a pre-restart mount is absent from
 	// cache but live, and "not mounted" would strand its sshfs process.
 	mountPoint := p.MountedPath(deviceID)
 	if mountPoint == "" {
+		if hadCached {
+			// A stale cached mount was detected and cleared by MountedPath.
+			return nil
+		}
 		// Nothing mounted, but a released mount may leave its directory: clear
 		// it and report the asked-for state, not an error.
 		if leftover := p.mountPointFor(deviceID); p.removeLeftoverDir(deviceID, leftover) {

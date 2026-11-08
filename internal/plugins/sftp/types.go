@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ type SftpPlugin struct {
 	// already fired for, so it is logged once per location per run.
 	warnedDirs map[string]bool
 	mountPIDs  map[string]int // deviceID -> sshfs PID for graceful shutdown
+	runSSHFS   func(ctx context.Context, args []string, password, mountPoint, deviceID string) error
 }
 
 // SftpBody matches the body of a kdeconnect.sftp packet sent by the Android app.

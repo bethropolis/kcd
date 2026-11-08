@@ -13,7 +13,7 @@ import (
 var _ plugin.Plugin = (*SftpPlugin)(nil)
 
 func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *SftpPlugin {
-	return &SftpPlugin{
+	p := &SftpPlugin{
 		cfg:           cfg,
 		bus:           bus,
 		logger:        logger.With(log.String("plugin", "sftp")),
@@ -23,6 +23,8 @@ func NewSftpPlugin(cfg config.SFTPConfig, bus *events.Bus, logger log.Logger) *S
 		mountReadOnly: make(map[string]bool),
 		mountPIDs:     make(map[string]int),
 	}
+	p.runSSHFS = p.defaultRunSSHFS
+	return p
 }
 
 func (p *SftpPlugin) Name() string            { return "SFTP" }
