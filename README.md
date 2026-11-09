@@ -399,6 +399,7 @@ authors, not by kcd.
 | [kdeconnect-mcp](https://github.com/DaBlitzStein/kdeconnect-mcp) | MCP server for kcd written in python | @DaBlitzStein |
 | [omaconnect](https://github.com/ekollof/omaconnect) | Omarchy bar widget: pairing, SMS, file share, phone storage mounting | @ekollof |
 | [omarchy-kcd-plugin](https://github.com/bethropolis/omarchy-kcd-plugin) | Omarchy bar widget: battery, media controls, quick actions | @bethropolis |
+| [kcd-indicator](https://github.com/Rishabh672003/kcd-indicator) | Tray indicator and GTK window: battery, file browsing, SMS, notifications with replies | @Rishabh672003 |
 
 
 **Built something?** Open a PR adding a row. It should work with a current
