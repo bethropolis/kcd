@@ -106,12 +106,16 @@ func (p *MPRISPlugin) Handle(ctx context.Context, dev device.Peer, pkt *protocol
 
 	// Incoming NowPlaying state update from a remote device
 	if body.Title != "" || body.Artist != "" || body.Album != "" || body.IsPlaying || body.PlaybackStatus != "" {
+		artURL := body.AlbumArtUrl
+		if !strings.HasPrefix(artURL, "kdeconnect:/") {
+			artURL = ""
+		}
 		state := &NowPlaying{
 			Player:         body.Player,
 			Title:          body.Title,
 			Artist:         body.Artist,
 			Album:          body.Album,
-			AlbumArtUrl:    body.AlbumArtUrl,
+			AlbumArtUrl:    artURL,
 			Url:            body.Url,
 			Length:         body.Length,
 			Pos:            body.Pos,
