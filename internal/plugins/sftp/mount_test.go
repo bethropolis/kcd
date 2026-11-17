@@ -447,6 +447,10 @@ func TestMountWithBody_RunSSHFSFailureCleansUpAndReturnsError(t *testing.T) {
 
 // Running defaultRunSSHFS with a missing binary returns a clear error with install hint.
 func TestDefaultRunSSHFS_MissingBinaryReturnsHint(t *testing.T) {
+	// Hermetic: resolve sshfs from an empty dir so a host install cannot
+	// turn the missing-binary case into a real mount attempt.
+	t.Setenv("PATH", t.TempDir())
+
 	p := newTestPlugin(t, t.TempDir())
 	mountPoint := filepath.Join(t.TempDir(), "kcd-sftp-dev1")
 
