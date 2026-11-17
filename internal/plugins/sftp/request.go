@@ -165,14 +165,23 @@ func (p *SftpPlugin) Volumes(deviceID string) []StorageVolume {
 	return p.buildVolumes(body)
 }
 
-// MountedPath returns the local mount point, or "" if not mounted. Misses
-// reconcile against the kernel table, so pre-restart mounts still report.
+// MountedPath returns the local mount point, or "" if not mounted. It
+// reconciles against the kernel table, clearing stale cached entries and
+// adopting mounts from previous daemon sessions.
 func (p *SftpPlugin) MountedPath(deviceID string) string {
 	p.mu.RLock()
 	mountPoint, cached := p.mountPoints[deviceID]
 	p.mu.RUnlock()
 	if cached {
-		return mountPoint
+		if mountExists(mountPoint) {
+			return mountPoint
+		}
+		p.logger.Info("SFTP mount gone from kernel, clearing stale state",
+			log.String("device_id", deviceID),
+			log.String("mount_point", mountPoint),
+		)
+		p.finishUnmount(deviceID, mountPoint)
+		return ""
 	}
 
 	// The kernel is the source of truth: configured location first, then the

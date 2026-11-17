@@ -2,6 +2,7 @@ package sftp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,7 @@ func TestMountWithBody_IsIdempotent(t *testing.T) {
 	if err := os.MkdirAll(existing, 0700); err != nil {
 		t.Fatal(err)
 	}
+	useFakeMountTable(t, "phone:/storage/emulated/0 "+existing+" fuse.sshfs rw 0 0\n")
 	p.mountPoints["dev1"] = existing
 
 	body := SftpBody{IP: "192.168.1.42", Port: "1776", User: "u0_a123", Password: "x", Path: "/storage/emulated/0"}
@@ -128,7 +130,9 @@ func TestMountStateEventsPublished(t *testing.T) {
 
 	// The idempotent path reuses the mount point without a state change, so it
 	// must not announce a transition that did not happen.
-	p.mountPoints["dev1"] = "/mnt/kcd-sftp-dev1"
+	mountPoint := "/mnt/kcd-sftp-dev1"
+	useFakeMountTable(t, "phone:/storage/emulated/0 "+mountPoint+" fuse.sshfs rw 0 0\n")
+	p.mountPoints["dev1"] = mountPoint
 	if _, err := p.mountWithBody(context.Background(), "dev1", SftpBody{}, "", false); err != nil {
 		t.Fatalf("idempotent mount: %v", err)
 	}
@@ -158,6 +162,8 @@ func TestMountStateEventsPublished(t *testing.T) {
 }
 
 func TestInfoReportsMountState(t *testing.T) {
+	mountPoint := "/mnt/kcd-sftp-dev1"
+	useFakeMountTable(t, "phone:/storage/emulated/0 "+mountPoint+" fuse.sshfs rw 0 0\n")
 	p := newTestPlugin(t, t.TempDir())
 	p.lastBody["dev1"] = SftpBody{IP: "192.168.1.42", User: "u0_a123", Path: "/storage/emulated/0"}
 
@@ -165,13 +171,13 @@ func TestInfoReportsMountState(t *testing.T) {
 		t.Error("reported mounted with no mount tracked")
 	}
 
-	p.mountPoints["dev1"] = "/mnt/kcd-sftp-dev1"
+	p.mountPoints["dev1"] = mountPoint
 	info := p.Info("dev1", false)
 	if !info.Mounted {
 		t.Error("reported not mounted while a mount is tracked")
 	}
-	if info.MountPoint != "/mnt/kcd-sftp-dev1" {
-		t.Errorf("MountPoint = %q, want /mnt/kcd-sftp-dev1", info.MountPoint)
+	if info.MountPoint != mountPoint {
+		t.Errorf("MountPoint = %q, want %s", info.MountPoint, mountPoint)
 	}
 }
 
@@ -330,5 +336,132 @@ func TestUnmountAll_RespectsContextBudget(t *testing.T) {
 			t.Fatal("the in-flight unmount never finished after UnmountAll returned")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A cached mount dropped by the kernel must be evicted by MountedPath,
+// clearing memory, publishing sftp.unmounted, and deleting the leftover directory.
+func TestMountedPath_ClearsStaleCacheWhenKernelHasNoMount(t *testing.T) {
+	dir := t.TempDir()
+	useFakeMountTable(t, "proc /proc proc rw 0 0\n")
+
+	bus := events.NewBus(log.NewTest(t))
+	sub := bus.Subscribe(0, events.TypeSftpUnmounted)
+	defer sub.Close()
+
+	p := newTestPlugin(t, dir)
+	p.bus = bus
+	mountPoint := filepath.Join(dir, "kcd-sftp-dev1")
+	if err := os.MkdirAll(mountPoint, 0700); err != nil {
+		t.Fatal(err)
+	}
+	p.mountPoints["dev1"] = mountPoint
+
+	if got := p.MountedPath("dev1"); got != "" {
+		t.Fatalf("MountedPath should return empty for dropped mount, got %q", got)
+	}
+
+	if _, cached := p.mountPoints["dev1"]; cached {
+		t.Error("stale cache entry was not evicted")
+	}
+
+	if _, err := os.Stat(mountPoint); !os.IsNotExist(err) {
+		t.Error("leftover mount directory was not removed")
+	}
+
+	select {
+	case ev := <-sub.C:
+		if ev.Type != events.TypeSftpUnmounted {
+			t.Errorf("got event %s, want %s", ev.Type, events.TypeSftpUnmounted)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sftp.unmounted event")
+	}
+}
+
+// When a cached mount has dropped from the kernel, mountWithBody must not
+// short-circuit with "reusing mount point"; it must clear the dead entry and
+// attempt a fresh mount.
+func TestMountWithBody_DoesNotReuseStaleMount(t *testing.T) {
+	dir := t.TempDir()
+	useFakeMountTable(t, "proc /proc proc rw 0 0\n")
+
+	p := newTestPlugin(t, dir)
+	mountPoint := filepath.Join(dir, "kcd-sftp-dev1")
+	if err := os.MkdirAll(mountPoint, 0700); err != nil {
+		t.Fatal(err)
+	}
+	p.mountPoints["dev1"] = mountPoint
+
+	called := false
+	p.runSSHFS = func(ctx context.Context, args []string, password, mp, devID string) error {
+		called = true
+		if mp != mountPoint {
+			t.Errorf("mountPoint = %q, want %q", mp, mountPoint)
+		}
+		// Simulate successful mount by populating fake mount table.
+		useFakeMountTable(t, "phone:/storage/emulated/0 "+mp+" fuse.sshfs rw 0 0\n")
+		return nil
+	}
+
+	body := SftpBody{IP: "192.168.1.42", Port: "1776", User: "u0_a123", Password: "x", Path: "/storage/emulated/0"}
+	got, err := p.mountWithBody(context.Background(), "dev1", body, "", false)
+	if err != nil {
+		t.Fatalf("mountWithBody failed: %v", err)
+	}
+	if !called {
+		t.Error("mountWithBody incorrectly reused stale mount point without invoking runner")
+	}
+	if got != mountPoint {
+		t.Errorf("got %q, want %q", got, mountPoint)
+	}
+}
+
+// A failing sshfs run must clean up the mount directory and not retain the cache.
+func TestMountWithBody_RunSSHFSFailureCleansUpAndReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	useFakeMountTable(t, "proc /proc proc rw 0 0\n")
+
+	p := newTestPlugin(t, dir)
+	p.runSSHFS = func(ctx context.Context, args []string, password, mp, devID string) error {
+		return fmt.Errorf("sshfs failed: connection refused\nread: Connection reset by peer")
+	}
+
+	body := SftpBody{IP: "192.168.1.42", Port: "1776", User: "u0_a123", Password: "x", Path: "/storage/emulated/0"}
+	_, err := p.mountWithBody(context.Background(), "dev1", body, "", false)
+	if err == nil {
+		t.Fatal("expected mountWithBody to fail")
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	mountPoint := p.mountPointFor("dev1")
+	if _, err := os.Stat(mountPoint); !os.IsNotExist(err) {
+		t.Error("mount point directory was not cleaned up on failure")
+	}
+	if _, cached := p.mountPoints["dev1"]; cached {
+		t.Error("failed mount was retained in cache")
+	}
+}
+
+// Running defaultRunSSHFS with a missing binary returns a clear error with install hint.
+func TestDefaultRunSSHFS_MissingBinaryReturnsHint(t *testing.T) {
+	// Hermetic: resolve sshfs from an empty dir so a host install cannot
+	// turn the missing-binary case into a real mount attempt.
+	t.Setenv("PATH", t.TempDir())
+
+	p := newTestPlugin(t, t.TempDir())
+	mountPoint := filepath.Join(t.TempDir(), "kcd-sftp-dev1")
+
+	err := p.defaultRunSSHFS(context.Background(), []string{"arg"}, "secret", mountPoint, "dev1")
+	if err == nil {
+		t.Fatal("expected error from defaultRunSSHFS")
+	}
+	if !strings.Contains(err.Error(), "sshfs failed:") {
+		t.Errorf("expected 'sshfs failed:' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Hint: sshfs is not installed") {
+		t.Errorf("expected install hint in error, got: %v", err)
 	}
 }

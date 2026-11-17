@@ -169,6 +169,7 @@ func TestWarnFiresOnReusedMount(t *testing.T) {
 	}
 	p := newTestPlugin(t, filepath.Join(home, "Pictures", "kcd", "mnt"))
 	hazardous := p.mountPointFor("dev1")
+	useFakeMountTable(t, "phone:/storage/emulated/0 "+hazardous+" fuse.sshfs rw 0 0\n")
 	p.mountPoints["dev1"] = hazardous
 
 	// Already mounted, so mountWithBody takes the reuse path.

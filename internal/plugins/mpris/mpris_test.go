@@ -80,6 +80,58 @@ func TestHandleDeduplicatesRemoteMPRISUpdates(t *testing.T) {
 	expectEvent(t, sub)
 }
 
+func TestHandleDropsPeerFileAlbumArtURL(t *testing.T) {
+	cases := []struct {
+		name   string
+		artURL string
+	}{
+		{name: "file scheme", artURL: "file:///home/user/Downloads/kcd/evil.jpg"},
+		{name: "http scheme", artURL: "http://example.com/evil.jpg"},
+		{name: "data scheme", artURL: "data:image/png;base64,AAAA"},
+		{name: "relative path", artURL: "/tmp/evil.jpg"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := events.NewBus(log.Nop())
+			sub := bus.Subscribe(4, events.TypeMprisUpdate)
+			defer sub.Close()
+
+			plugin := NewMPRISPlugin(nil, bus, false, config.MPRISConfig{}, log.Nop())
+			if plugin.watchCancel != nil {
+				defer plugin.watchCancel()
+			}
+			dev := testSender{id: "device-" + tc.name}
+			state := MPRISRequest{
+				Player:      "Metrolist",
+				Title:       "Some Track",
+				AlbumArtUrl: tc.artURL,
+			}
+
+			if err := plugin.Handle(context.Background(), dev, newMPRISPacket(t, state)); err != nil {
+				t.Fatal(err)
+			}
+
+			select {
+			case ev := <-sub.C:
+				np, ok := ev.Payload.(*NowPlaying)
+				if !ok {
+					t.Fatalf("expected *NowPlaying payload, got %T", ev.Payload)
+				}
+				if np.AlbumArtUrl != "" {
+					t.Fatalf("peer %s art leaked: %q", tc.name, np.AlbumArtUrl)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("expected mpris update event")
+			}
+
+			if got := plugin.RemoteState(dev.ID()); got == nil || got.AlbumArtUrl != "" {
+				t.Fatalf("remote state leaked peer art: %#v", got)
+			}
+		})
+	}
+}
+
 func newMPRISPacket(t *testing.T, body MPRISRequest) *protocol.Packet {
 	t.Helper()
 	pkt, err := protocol.NewPacket("kdeconnect.mpris", body)

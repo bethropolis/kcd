@@ -163,7 +163,9 @@ func (p *MPRISPlugin) RemoteStates() map[string]*NowPlaying {
 }
 
 // resolveArtURL maps a cached kdeconnect:// album art URI to a loadable
-// file:// URL. Non-kdeconnect URIs and not-yet-cached art pass through.
+// file:// URL. Peer-supplied non-kdeconnect: URIs are dropped at intake,
+// so the only non-kdeconnect: URL this encounters is the daemon's stamped
+// cache path, which passes through.
 func (p *MPRISPlugin) resolveArtURL(raw string) string {
 	if raw == "" || p.artCache == nil {
 		return raw

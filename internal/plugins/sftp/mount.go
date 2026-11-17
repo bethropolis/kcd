@@ -3,6 +3,7 @@ package sftp
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bethropolis/kcd/internal/events"
 	"github.com/bethropolis/kcd/internal/log"
@@ -146,17 +148,13 @@ func (p *SftpPlugin) mountWithBody(ctx context.Context, deviceID string, body Sf
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "sshfs", args...)
-	cmd.Stdin = strings.NewReader(body.Password + "\n")
-
-	if out, err := cmd.CombinedOutput(); err != nil {
+	runner := p.runSSHFS
+	if runner == nil {
+		runner = p.defaultRunSSHFS
+	}
+	if err := runner(ctx, args, body.Password, mountPoint, deviceID); err != nil {
 		_ = os.Remove(mountPoint)
-		msg := strings.TrimSpace(string(out))
-		errMsg := fmt.Sprintf("sshfs failed: %v\n%s", err, msg)
-		if hint := sshfsHint(msg); hint != "" {
-			errMsg += "\n\n" + hint
-		}
-		return "", fmt.Errorf("%s", errMsg)
+		return "", err
 	}
 
 	// The mount point now IS the storage volume root, so the user browses
@@ -233,5 +231,93 @@ func (p *SftpPlugin) mountIsReadOnly(deviceID string) bool {
 	return p.mountReadOnly[deviceID]
 }
 
-// Unmount releases a mounted filesystem. Tracked state drops only on actual
-// release (failures stay retryable); errors separate never-mounted from stuck.
+// defaultRunSSHFS invokes sshfs using a file for stderr to avoid pipe hangs
+// on daemonization, and polls the kernel mount table until the mount appears.
+func (p *SftpPlugin) defaultRunSSHFS(ctx context.Context, args []string, password, mountPoint, deviceID string) error {
+	// A temporary file avoids os/exec pipe readers hanging indefinitely for
+	// EOF on inherited descriptors when sshfs forks a background daemon.
+	stderrFile, err := os.CreateTemp("", "kcd-sshfs-stderr-*")
+	if err != nil {
+		return fmt.Errorf("create stderr temp file: %w", err)
+	}
+	defer func() {
+		_ = stderrFile.Close()
+		_ = os.Remove(stderrFile.Name())
+	}()
+
+	cmd := exec.CommandContext(ctx, "sshfs", args...)
+	cmd.Stdin = strings.NewReader(password + "\n")
+	cmd.Stdout = nil        // Discard into /dev/null so no stdout pipe is inherited.
+	cmd.Stderr = stderrFile // Direct OS file descriptor bypasses io.Copy pipe goroutines.
+
+	if err := cmd.Start(); err != nil {
+		msg := readStderrFile(stderrFile)
+		return formatSSHFSError(err, msg)
+	}
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- cmd.Wait()
+	}()
+
+	// sshfs mounts and forks within hundreds of milliseconds; bound kernel
+	// polling to 5s so a wedged connection fails cleanly before client timeouts.
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	mountTimeout := time.After(5 * time.Second)
+
+	for {
+		if mountExists(mountPoint) {
+			return nil
+		}
+		select {
+		case err := <-waitDone:
+			if err != nil {
+				msg := readStderrFile(stderrFile)
+				p.logger.Warn("sshfs failed",
+					log.String("device_id", deviceID),
+					log.String("mount_point", mountPoint),
+					log.Error(err),
+					log.String("stderr", msg),
+				)
+				return formatSSHFSError(err, msg)
+			}
+			// Exit code 0 means parent daemonized cleanly; keep polling mountExists.
+		case <-mountTimeout:
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			msg := readStderrFile(stderrFile)
+			p.logger.Warn("sshfs mount timed out",
+				log.String("device_id", deviceID),
+				log.String("mount_point", mountPoint),
+				log.String("stderr", msg),
+			)
+			return formatSSHFSError(fmt.Errorf("timed out waiting for mount to appear in kernel"), msg)
+		case <-ctx.Done():
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			msg := readStderrFile(stderrFile)
+			return formatSSHFSError(ctx.Err(), msg)
+		case <-ticker.C:
+		}
+	}
+}
+
+func readStderrFile(f *os.File) string {
+	_, _ = f.Seek(0, 0)
+	data, _ := io.ReadAll(f)
+	return strings.TrimSpace(string(data))
+}
+
+func formatSSHFSError(err error, msg string) error {
+	errMsg := fmt.Sprintf("sshfs failed: %v", err)
+	if msg != "" {
+		errMsg += "\n" + msg
+	}
+	if hint := sshfsHint(errMsg); hint != "" {
+		errMsg += "\n\n" + hint
+	}
+	return fmt.Errorf("%s", errMsg)
+}
